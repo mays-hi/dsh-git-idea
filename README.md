@@ -29,7 +29,7 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（399 条断言）
+node test/run-all.mjs     # 全部套件（408 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
 node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）
@@ -95,6 +95,12 @@ Client（`src/client/`）：
   （`@keyframes dsh-git-spin`，只转不改尺寸，所以没有布局位移），tooltip 说「正在切到
   X…」。慢盘上一次切换好几秒，卡片早就收起了，能看见的就剩这个图标；成功或失败都会
   停下来 —— 一直转的图标比不转更糟。
+- **一套记号**：同一个含义在两个列表里长得一样 —— 分组的折叠是文本 `▼`/`▶`
+  （面板的 `twisty`，10px 槽位），当前分支是 `★`（面板 HEAD 行那个，不是自己发明的
+  铅笔），每一行画的分支标记都相同，动作 chip 用面板头部那几个字符 `⇣ ↓ ↑ +`
+  （角标也只是数字，不再重复一个箭头）。同一个动作只留一种画法：`fetch`、`push`、
+  `pencil` 三个没人用的图标已经从图集里删掉。
+
 
 面板本身仍是挂在输入框上方的浮层（DSH 的面板就是这么承载的），
 不是 IDEA 那种可停靠的工具窗。

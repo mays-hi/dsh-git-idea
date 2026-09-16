@@ -9,10 +9,7 @@
       star: ['M8 2.2 L9.85 6.15 L14.2 6.65 L11 9.6 L11.85 13.9 L8 11.85 L4.15 13.9 L5 9.6 L1.8 6.65 L6.15 6.15 Z'],
       right: ['M6.4 3.8 L10.6 8 L6.4 12.2'],
       down: ['M3.8 6.4 L8 10.6 L12.2 6.4'],
-      pencil: ['M3 13.2 L3.45 10.5 L10.6 3.35 L12.65 5.4 L5.5 12.55 Z', 'M9.5 4.45 L11.55 6.5'],
       plus: ['M8 3.4 V12.6', 'M3.4 8 H12.6'],
-      fetch: ['M8 3 V10.6', 'M4.6 7.2 L8 10.6 L11.4 7.2', 'M3.4 13.2 H12.6'],
-      push: ['M8 12.8 V5.2', 'M4.6 8.6 L8 5.2 L11.4 8.6', 'M3.4 13.2 H12.6'],
       pull: ['M8 3.2 V9.8', 'M5.2 7 L8 9.8 L10.8 7', 'M3.6 11.8 V12.6 H12.4 V11.8'],
       /* cherry-pick copies a commit onto the current branch, so it borrows the
          copy glyph rather than an arrow: fetch and pull already own the arrows. */

@@ -1037,6 +1037,7 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-chip .dsh-git-bs-name{flex:0 1 auto;max-width:120px}
 .dsh-git-bs-chip .dsh-git-bs-ab{font-size:10px}
 .dsh-git-bs-chip-new{border-style:dashed}
+.dsh-git-bs-chip-n{display:inline-grid;place-items:center;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:9px;line-height:1}
 .dsh-git-bs-sort{margin-left:auto}
 .dsh-git-bs-list{position:relative;max-height:330px;overflow:auto;padding:4px 4px 6px}
 .dsh-git-bs-row{display:flex;align-items:center;gap:7px;min-height:30px;padding:3px 8px 3px 4px;border-radius:6px;cursor:pointer;border:0;background:transparent;font:inherit;font-size:12px;color:inherit;text-align:left;width:100%;box-sizing:border-box}
@@ -1054,8 +1055,11 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-star-on,.dsh-git-bs-row:hover .dsh-git-bs-star-on{color:var(--dsw-alias-state-warn-primary)}
 .dsh-git-bs-more{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
 .dsh-git-bs-row:hover .dsh-git-bs-more{color:var(--dsw-alias-label-secondary)}
-.dsh-git-bs-group{display:flex;align-items:center;gap:5px;padding:8px 8px 3px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer;user-select:none}
-.dsh-git-bs-caret{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px}
+.dsh-git-bs-group{display:flex;align-items:center;gap:5px;padding:6px 8px 3px 6px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer;user-select:none}
+/* 动作 chip 的记号：和面板头部的同步组一样是字符（⇣ ↓ ↑ +），11px */
+.dsh-git-bs-glyph{display:inline-flex;align-items:center;justify-content:center;flex:none;width:11px;font-size:11px;line-height:1}
+/* 行首那一列：当前分支的 ★，和面板左栏的 twisty 槽同宽（10px） */
+.dsh-git-bs-cur{flex:none;width:10px;font-size:9px;line-height:1;text-align:center;color:var(--dsw-alias-label-secondary)}
 .dsh-git-bs-count{flex:none;color:var(--dsw-alias-border-l2)}
 /* IDEA's branch submenu: hovering a row opens its actions to the right of the
    tree. The card is only 420px wide, so the flyout hangs past its edge, the way
@@ -1806,10 +1810,7 @@ textarea.dsh-git-input{resize:vertical}
       star: ['M8 2.2 L9.85 6.15 L14.2 6.65 L11 9.6 L11.85 13.9 L8 11.85 L4.15 13.9 L5 9.6 L1.8 6.65 L6.15 6.15 Z'],
       right: ['M6.4 3.8 L10.6 8 L6.4 12.2'],
       down: ['M3.8 6.4 L8 10.6 L12.2 6.4'],
-      pencil: ['M3 13.2 L3.45 10.5 L10.6 3.35 L12.65 5.4 L5.5 12.55 Z', 'M9.5 4.45 L11.55 6.5'],
       plus: ['M8 3.4 V12.6', 'M3.4 8 H12.6'],
-      fetch: ['M8 3 V10.6', 'M4.6 7.2 L8 10.6 L11.4 7.2', 'M3.4 13.2 H12.6'],
-      push: ['M8 12.8 V5.2', 'M4.6 8.6 L8 5.2 L11.4 8.6', 'M3.4 13.2 H12.6'],
       pull: ['M8 3.2 V9.8', 'M5.2 7 L8 9.8 L10.8 7', 'M3.6 11.8 V12.6 H12.4 V11.8'],
       /* cherry-pick copies a commit onto the current branch, so it borrows the
          copy glyph rather than an arrow: fetch and pull already own the arrows. */
@@ -1947,19 +1948,24 @@ textarea.dsh-git-input{resize:vertical}
         onMouseLeave: function () { props.onLeave() },
         onClick: function (event) { props.onPick(name, isCurrent, props.rowKey, event) },
       },
+        /* 行首那一列和面板左栏表达同一件事、用的是同一个记号：当前分支是 ★
+           （文本，面板的 HEAD 行就是这个），其余留空。每一行的分支图标都一
+           个样，不再有「只有当前分支换个铅笔」那种例外。 */
+        h('span', { key: 'c', className: 'dsh-git-bs-cur', title: isCurrent ? '当前分支' : '' }, isCurrent ? '★' : ''),
+        h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(BranchIcon, { size: 13 })),
+        h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
+        upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
+          : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
+        /* 收藏挪到行尾，和 › 并排：行首那一列留给「当前分支」，两处都用同一套
+           小图标按钮，不再让两个星号在同一个位置表示两件事。 */
         h('button', {
           key: 's', type: 'button',
           className: 'dsh-git-bs-star' + (starred ? ' dsh-git-bs-star-on' : ''),
           title: starred ? '取消收藏' : '收藏这个分支',
           onClick: function (event) { props.onStar(name, event) },
         }, h(Icon, { name: 'star', size: 12, filled: starred })),
-        h('span', { key: 'i', className: 'dsh-git-bs-ico' },
-          isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
-        h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
-        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
-        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
-        upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
-          : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         h('button', {
           key: 'm', type: 'button', className: 'dsh-git-bs-more',
           title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
@@ -2230,12 +2236,14 @@ textarea.dsh-git-input{resize:vertical}
 
       /* short is the chip text, label is the full sentence kept for the tooltip
          and for what typing in the filter box can match. */
+      /* 记号跟面板一致：面板头部的同步组就是 ⇣ / ↓ / ↑ 这几个字符，这里不再
+         另画一套 SVG。一个动作一种画法，两个地方看起来才是同一套。 */
       const actionDefs = [
-        { id: 'fetch', icon: 'fetch', short: '获取', label: '获取远端最新（fetch）', run: function () { act('git/fetch', {}, 'fetch') } },
-        { id: 'pull', icon: 'pull', short: '拉取', badge: behindNow > 0 ? '↓' + (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
-        { id: 'push', icon: 'push', short: '推送', badge: aheadNow > 0 ? '↑' + (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
+        { id: 'fetch', glyph: '⇣', short: '获取', label: '获取远端最新（fetch）', run: function () { act('git/fetch', {}, 'fetch') } },
+        { id: 'pull', glyph: '↓', short: '拉取', badge: behindNow > 0 ? (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
+        { id: 'push', glyph: '↑', short: '推送', badge: aheadNow > 0 ? (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
       ]
-      actionDefs.push({ id: 'new', icon: 'plus', short: '新建分支', label: '新建分支…', run: function () { setCreating({ at: '', value: '' }) } })
+      actionDefs.push({ id: 'new', glyph: '+', short: '新建分支', label: '新建分支…', run: function () { setCreating({ at: '', value: '' }) } })
       const actions = []
       for (let i = 0; i < actionDefs.length; i += 1) if (hit(actionDefs[i].label) || hit(actionDefs[i].short)) actions.push(actionDefs[i])
 
@@ -2361,10 +2369,12 @@ textarea.dsh-git-input{resize:vertical}
         const def = actions[i]
         const on = nav[index] !== undefined && nav[index].kind === 'action' && nav[index].def === def
         const parts = [
-          h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(Icon, { name: def.icon, size: 12 })),
+          h('span', { key: 'i', className: 'dsh-git-bs-glyph' }, def.glyph),
           h('span', { key: 'n', className: 'dsh-git-bs-name' }, def.short),
         ]
-        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'dsh-git-bs-ab' }, def.badge))
+        /* 面板那几个 tool 的角标就是一个数字药丸，这里也照那个样子：记号已经
+           是 ⇣/↓/↑ 了，角标再带一个箭头就成了「↓拉取↓1」。 */
+        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'dsh-git-bs-chip-n' }, def.badge))
         chips.push(h('button', {
           key: 'a:' + def.id, type: 'button',
           className: 'dsh-git-bs-chip'
@@ -2378,14 +2388,24 @@ textarea.dsh-git-input{resize:vertical}
       }
       const items = []
 
+      /* 分组头那一行的折叠：箭头和整行点哪都算。箭头本身是面板左栏那个 twisty，
+         它自己会 stopPropagation，所以点箭头只折一次。 */
+      const toggleGroup = function (id) {
+        setCollapsed(function (prev) {
+          const next = Object.assign({}, prev)
+          next[id] = prev[id] !== true
+          return next
+        })
+      }
+
       for (let g = 0; g < groups.length; g += 1) {
         const group = groups[g]
         const shut = collapsed[group.id] === true
         items.push(h('div', {
           key: 'g:' + group.id, className: 'dsh-git-bs-group',
-          onClick: function () { setCollapsed(function (prev) { const next = Object.assign({}, prev); next[group.id] = prev[group.id] !== true; return next }) },
+          onClick: function () { toggleGroup(group.id) },
         },
-          h('span', { key: 'c', className: 'dsh-git-bs-caret' }, h(Icon, { name: shut ? 'right' : 'down', size: 12 })),
+          twisty({ collapsed: shut, onToggle: function () { toggleGroup(group.id) } }),
           h('span', { key: 'l' }, group.label),
           h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(group.rows.length))))
         if (shut) continue
@@ -2508,7 +2528,7 @@ textarea.dsh-git-input{resize:vertical}
 
       return h('div', { className: 'dsh-git-bs' },
         h('div', { key: 'h', className: 'dsh-git-bs-head' },
-          h('span', { key: 'i', className: 'dsh-git-bs-mag' }, h(Icon, { name: 'search', size: 14 })),
+          h('span', { key: 'i', className: 'dsh-git-bs-mag' }, h(Icon, { name: 'search', size: 12 })),
           h('input', {
             key: 'q', className: 'dsh-git-bs-search',
             placeholder: '搜索分支',
@@ -2526,7 +2546,7 @@ textarea.dsh-git-input{resize:vertical}
               ? '当前按名称排序（A→Z），点击改为按最近提交'
               : '当前按最近提交排序，点击改为按名称（A→Z）',
             onClick: function () { setBranchSort(branchSort === 'name' ? 'recent' : 'name') },
-          }, h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 14 }))),
+          }, h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 13 }))),
         h('div', {
           key: 'l', className: 'dsh-git-bs-list',
           ref: function (node) { pickerList = node },

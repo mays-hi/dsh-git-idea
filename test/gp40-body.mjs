@@ -173,6 +173,42 @@ await wait(20)
 const starred = await settle()
 ok('收藏后只有该行亮起星标', byClass(starred, 'dsh-git-bs-star-on').length === 1 && byClass(rowWith(starred, 'zeta'), 'dsh-git-bs-star-on').length === 1)
 
+/* ── 弹层里的记号要和面板左栏同一套 ──
+
+   同一个含义在两个列表里必须长得一样：分组的折叠是文本 ▼/▶（面板的 twisty），
+   当前分支是 ★（面板 HEAD 行那个），每一行的分支标记都一样（不再只有当前行换成
+   铅笔），动作 chip 用面板头部那几个字符（⇣ ↓ ↑ +）而不是另画一套 SVG。 */
+
+console.log('')
+console.log('== 弹层与面板：同一套记号 ==')
+ok('弹层里也有一列专门放「当前分支」的记号', byClass(starred, 'dsh-git-bs-cur').length === branchRows(starred).length)
+const curRow = branchRows(starred).find((r) => String(r.props.className).indexOf('dsh-git-bs-row-cur') >= 0)
+console.log('  当前分支行:', textOf(byClass(curRow, 'dsh-git-bs-name')[0]), JSON.stringify(textOf(byClass(curRow, 'dsh-git-bs-cur')[0])))
+ok('当前分支用面板那个 ★，不是铅笔', textOf(byClass(curRow, 'dsh-git-bs-cur')[0]) === '★')
+ok('别的行那一列是空的（只是占位，和面板的 twisty 槽一样宽）',
+  branchRows(starred).filter((r) => textOf(byClass(r, 'dsh-git-bs-cur')[0]) === '').length === branchRows(starred).length - 1)
+ok('每一行画的分支标记都一样（同一套，没有例外）',
+  branchRows(starred).every((r) => byClass(r, 'dsh-git-bs-ico').length === 1))
+
+const group = byClass(starred, 'dsh-git-bs-group')[0]
+ok('分组折叠用的是面板的 twisty（文本 ▼/▶）',
+  group !== undefined && byClass(group, 'dsh-git-tw').length === 1 && ['▼', '▶'].indexOf(textOf(byClass(group, 'dsh-git-tw')[0])) >= 0)
+ok('分组头里不再有自画的 SVG 箭头', group !== undefined && collect(group).filter((n) => n.type === 'svg').length === 0)
+
+const chipsRow = byClass(starred, 'dsh-git-bs-head-acts')[0]
+const chipTexts = (chipsRow === undefined ? [] : buttons(chipsRow)).map((b) => textOf(b))
+console.log('  动作 chip:', JSON.stringify(chipTexts))
+ok('动作 chip 用的是面板那几个字符，不是另画一套 SVG',
+  chipTexts.length === 4 && chipTexts.join('|').indexOf('⇣获取') === 0 && chipTexts.join('|').indexOf('+新建分支') > 0)
+ok('动作 chip 里没有 SVG', chipsRow !== undefined && collect(chipsRow).filter((n) => n.type === 'svg').length === 0)
+
+const starBtn = buttons(rowWith(starred, 'zeta')).find((b) => String(b.props.className).indexOf('dsh-git-bs-star') >= 0)
+const zetaRow = rowWith(starred, 'zeta')
+const kids = zetaRow.props.children
+const nameAt = kids.findIndex((c) => String(c.props.className || '').indexOf('dsh-git-bs-name') >= 0)
+const starAt = kids.findIndex((c) => String(c.props.className || '').indexOf('dsh-git-bs-star') >= 0)
+ok('收藏星挪到行尾（行首那一列留给「当前分支」）', starBtn !== undefined && starAt > nameAt)
+
 /* 记忆的行也要跟着筛选走：列表变了，内容必须跟着变 */
 const filter = inputs(starred).find((n) => n.props.className !== undefined && String(n.props.className).indexOf('dsh-git-bs-search') >= 0)
 filter.props.onChange({ target: { value: 'feature' } })

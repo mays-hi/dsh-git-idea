@@ -23,19 +23,24 @@
         onMouseLeave: function () { props.onLeave() },
         onClick: function (event) { props.onPick(name, isCurrent, props.rowKey, event) },
       },
+        /* 行首那一列和面板左栏表达同一件事、用的是同一个记号：当前分支是 ★
+           （文本，面板的 HEAD 行就是这个），其余留空。每一行的分支图标都一
+           个样，不再有「只有当前分支换个铅笔」那种例外。 */
+        h('span', { key: 'c', className: 'dsh-git-bs-cur', title: isCurrent ? '当前分支' : '' }, isCurrent ? '★' : ''),
+        h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(BranchIcon, { size: 13 })),
+        h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
+        upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
+          : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
+        /* 收藏挪到行尾，和 › 并排：行首那一列留给「当前分支」，两处都用同一套
+           小图标按钮，不再让两个星号在同一个位置表示两件事。 */
         h('button', {
           key: 's', type: 'button',
           className: 'dsh-git-bs-star' + (starred ? ' dsh-git-bs-star-on' : ''),
           title: starred ? '取消收藏' : '收藏这个分支',
           onClick: function (event) { props.onStar(name, event) },
         }, h(Icon, { name: 'star', size: 12, filled: starred })),
-        h('span', { key: 'i', className: 'dsh-git-bs-ico' },
-          isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
-        h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
-        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
-        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
-        upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
-          : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         h('button', {
           key: 'm', type: 'button', className: 'dsh-git-bs-more',
           title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
@@ -306,12 +311,14 @@
 
       /* short is the chip text, label is the full sentence kept for the tooltip
          and for what typing in the filter box can match. */
+      /* 记号跟面板一致：面板头部的同步组就是 ⇣ / ↓ / ↑ 这几个字符，这里不再
+         另画一套 SVG。一个动作一种画法，两个地方看起来才是同一套。 */
       const actionDefs = [
-        { id: 'fetch', icon: 'fetch', short: '获取', label: '获取远端最新（fetch）', run: function () { act('git/fetch', {}, 'fetch') } },
-        { id: 'pull', icon: 'pull', short: '拉取', badge: behindNow > 0 ? '↓' + (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
-        { id: 'push', icon: 'push', short: '推送', badge: aheadNow > 0 ? '↑' + (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
+        { id: 'fetch', glyph: '⇣', short: '获取', label: '获取远端最新（fetch）', run: function () { act('git/fetch', {}, 'fetch') } },
+        { id: 'pull', glyph: '↓', short: '拉取', badge: behindNow > 0 ? (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
+        { id: 'push', glyph: '↑', short: '推送', badge: aheadNow > 0 ? (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
       ]
-      actionDefs.push({ id: 'new', icon: 'plus', short: '新建分支', label: '新建分支…', run: function () { setCreating({ at: '', value: '' }) } })
+      actionDefs.push({ id: 'new', glyph: '+', short: '新建分支', label: '新建分支…', run: function () { setCreating({ at: '', value: '' }) } })
       const actions = []
       for (let i = 0; i < actionDefs.length; i += 1) if (hit(actionDefs[i].label) || hit(actionDefs[i].short)) actions.push(actionDefs[i])
 
@@ -437,10 +444,12 @@
         const def = actions[i]
         const on = nav[index] !== undefined && nav[index].kind === 'action' && nav[index].def === def
         const parts = [
-          h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(Icon, { name: def.icon, size: 12 })),
+          h('span', { key: 'i', className: 'dsh-git-bs-glyph' }, def.glyph),
           h('span', { key: 'n', className: 'dsh-git-bs-name' }, def.short),
         ]
-        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'dsh-git-bs-ab' }, def.badge))
+        /* 面板那几个 tool 的角标就是一个数字药丸，这里也照那个样子：记号已经
+           是 ⇣/↓/↑ 了，角标再带一个箭头就成了「↓拉取↓1」。 */
+        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'dsh-git-bs-chip-n' }, def.badge))
         chips.push(h('button', {
           key: 'a:' + def.id, type: 'button',
           className: 'dsh-git-bs-chip'
@@ -454,14 +463,24 @@
       }
       const items = []
 
+      /* 分组头那一行的折叠：箭头和整行点哪都算。箭头本身是面板左栏那个 twisty，
+         它自己会 stopPropagation，所以点箭头只折一次。 */
+      const toggleGroup = function (id) {
+        setCollapsed(function (prev) {
+          const next = Object.assign({}, prev)
+          next[id] = prev[id] !== true
+          return next
+        })
+      }
+
       for (let g = 0; g < groups.length; g += 1) {
         const group = groups[g]
         const shut = collapsed[group.id] === true
         items.push(h('div', {
           key: 'g:' + group.id, className: 'dsh-git-bs-group',
-          onClick: function () { setCollapsed(function (prev) { const next = Object.assign({}, prev); next[group.id] = prev[group.id] !== true; return next }) },
+          onClick: function () { toggleGroup(group.id) },
         },
-          h('span', { key: 'c', className: 'dsh-git-bs-caret' }, h(Icon, { name: shut ? 'right' : 'down', size: 12 })),
+          twisty({ collapsed: shut, onToggle: function () { toggleGroup(group.id) } }),
           h('span', { key: 'l' }, group.label),
           h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(group.rows.length))))
         if (shut) continue
@@ -584,7 +603,7 @@
 
       return h('div', { className: 'dsh-git-bs' },
         h('div', { key: 'h', className: 'dsh-git-bs-head' },
-          h('span', { key: 'i', className: 'dsh-git-bs-mag' }, h(Icon, { name: 'search', size: 14 })),
+          h('span', { key: 'i', className: 'dsh-git-bs-mag' }, h(Icon, { name: 'search', size: 12 })),
           h('input', {
             key: 'q', className: 'dsh-git-bs-search',
             placeholder: '搜索分支',
@@ -602,7 +621,7 @@
               ? '当前按名称排序（A→Z），点击改为按最近提交'
               : '当前按最近提交排序，点击改为按名称（A→Z）',
             onClick: function () { setBranchSort(branchSort === 'name' ? 'recent' : 'name') },
-          }, h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 14 }))),
+          }, h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 13 }))),
         h('div', {
           key: 'l', className: 'dsh-git-bs-list',
           ref: function (node) { pickerList = node },

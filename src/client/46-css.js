@@ -224,6 +224,7 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-chip .dsh-git-bs-name{flex:0 1 auto;max-width:120px}
 .dsh-git-bs-chip .dsh-git-bs-ab{font-size:10px}
 .dsh-git-bs-chip-new{border-style:dashed}
+.dsh-git-bs-chip-n{display:inline-grid;place-items:center;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:9px;line-height:1}
 .dsh-git-bs-sort{margin-left:auto}
 .dsh-git-bs-list{position:relative;max-height:330px;overflow:auto;padding:4px 4px 6px}
 .dsh-git-bs-row{display:flex;align-items:center;gap:7px;min-height:30px;padding:3px 8px 3px 4px;border-radius:6px;cursor:pointer;border:0;background:transparent;font:inherit;font-size:12px;color:inherit;text-align:left;width:100%;box-sizing:border-box}
@@ -241,8 +242,11 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-star-on,.dsh-git-bs-row:hover .dsh-git-bs-star-on{color:var(--dsw-alias-state-warn-primary)}
 .dsh-git-bs-more{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
 .dsh-git-bs-row:hover .dsh-git-bs-more{color:var(--dsw-alias-label-secondary)}
-.dsh-git-bs-group{display:flex;align-items:center;gap:5px;padding:8px 8px 3px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer;user-select:none}
-.dsh-git-bs-caret{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px}
+.dsh-git-bs-group{display:flex;align-items:center;gap:5px;padding:6px 8px 3px 6px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer;user-select:none}
+/* 动作 chip 的记号：和面板头部的同步组一样是字符（⇣ ↓ ↑ +），11px */
+.dsh-git-bs-glyph{display:inline-flex;align-items:center;justify-content:center;flex:none;width:11px;font-size:11px;line-height:1}
+/* 行首那一列：当前分支的 ★，和面板左栏的 twisty 槽同宽（10px） */
+.dsh-git-bs-cur{flex:none;width:10px;font-size:9px;line-height:1;text-align:center;color:var(--dsw-alias-label-secondary)}
 .dsh-git-bs-count{flex:none;color:var(--dsw-alias-border-l2)}
 /* IDEA's branch submenu: hovering a row opens its actions to the right of the
    tree. The card is only 420px wide, so the flyout hangs past its edge, the way
