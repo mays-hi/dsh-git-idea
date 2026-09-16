@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /* Every suite, in one command, against whatever is on disk right now.
-   `node test/run-all.mjs` — and it refuses to trust a green run when the built
-   host.js/client.js no longer match src/, because that is the failure mode this
-   layout can produce and no assertion inside a suite can see it. */
+   `node test/run-all.mjs` — and it refuses to trust a green run when either
+   generated artifact has fallen behind its sources: the built host.js/client.js
+   against src/, and each suite file against the harness plus the body it is
+   glued from. Both are failures this layout can produce and no assertion inside
+   a suite can see. */
 
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
@@ -41,12 +43,17 @@ function run(file) {
   }
 }
 
-const check = spawnSync(process.execPath, [path.join(ROOT, 'build.mjs'), '--check'], { encoding: 'utf8' })
-if (check.status !== 0) {
+/* Both artifacts are checked before anything runs, and each refusal names the
+   command that fixes it: one is the plugin half, the other the suites. */
+function stale(script, hint) {
+  const check = spawnSync(process.execPath, [path.join(ROOT, script), '--check'], { encoding: 'utf8' })
+  if (check.status === 0) return false
   console.error((check.stdout || '') + (check.stderr || ''))
-  console.error('run `node build.mjs` first: the suites would otherwise test a stale artifact')
-  process.exit(1)
+  console.error(hint)
+  return true
 }
+if (stale('build.mjs', 'run `node build.mjs` first: the suites would otherwise test a stale artifact')) process.exit(1)
+if (stale(path.join('test', 'build-suites.mjs'), 'run `node test/build-suites.mjs` first: the suite on disk would otherwise assert what its body said last time')) process.exit(1)
 
 let passed = 0
 let failed = 0
