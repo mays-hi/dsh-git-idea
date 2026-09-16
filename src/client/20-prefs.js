@@ -15,6 +15,11 @@
       watchFastSec: 3,
       watchSlowSec: 15,
       hoverSwitch: true,
+      /* Which of the two changes views the panel opens in: the directory tree
+         (IDEA's default) or the flat list of paths. A preference of this browser
+         rather than of the plugin — it is about how someone reads a diff, not
+         about what git should do. */
+      changesView: 'tree',
     }
     let gitSettings = Object.assign({}, SETTINGS_DEFAULTS)
     let settingsLoaded = false
@@ -37,6 +42,7 @@
       out.watchFastSec = clampInt(raw.watchFastSec, 1, 120, SETTINGS_DEFAULTS.watchFastSec)
       out.watchSlowSec = clampInt(raw.watchSlowSec, 2, 600, SETTINGS_DEFAULTS.watchSlowSec)
       out.hoverSwitch = raw.hoverSwitch !== false
+      out.changesView = raw.changesView === 'flat' ? 'flat' : 'tree'
       if (out.watchSlowSec < out.watchFastSec) out.watchSlowSec = out.watchFastSec
       return out
     }

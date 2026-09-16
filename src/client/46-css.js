@@ -86,7 +86,19 @@
 .dsh-git-cbox-on{color:var(--dsw-alias-brand-primary)}
 .dsh-git-cbox-part{color:var(--dsw-alias-state-warn-primary)}
 .dsh-git-changes{flex:1;display:flex;min-height:0}
-.dsh-git-changes-tree{flex:1;min-width:0;overflow:auto;padding:4px 0}
+.dsh-git-changes-tree{flex:1;min-width:0;display:flex;flex-direction:column}
+/* 变更页自己的工具条：左边是 IDEA 的那个「树 / 扁平」开关，右边是索引里有多少个。
+   它贴着树，因为这两个数字和这一列框是同一件事，而它不随列表滚动。 */
+.dsh-git-cbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:3px 8px;border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
+.dsh-git-cviews{display:inline-flex;gap:2px;flex:none}
+.dsh-git-cview{border:none;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:11px;padding:2px 8px;border-radius:5px;cursor:pointer;line-height:16px}
+.dsh-git-cview:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-cview-on{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-weight:600}
+.dsh-git-clist{flex:1;overflow:auto;padding:4px 0}
+/* 分组标题（默认变更列表 / 未跟踪的文件）读起来得像标题，但它仍然是树里的一行：
+   同样的手势、同样的悬停与选中。 */
+.dsh-git-cgroup{margin-top:4px}
+.dsh-git-cgroup .dsh-git-tname{font-weight:600}
 .dsh-git-commitpane{width:304px;flex:none;border-left:1px solid var(--dsw-alias-border-l1);padding:8px;display:flex;flex-direction:column;gap:8px}
 .dsh-git-crow{display:flex;align-items:center;gap:8px;height:26px;box-sizing:border-box;padding:0 8px;cursor:pointer;white-space:nowrap;-webkit-user-select:none;user-select:none}
 .dsh-git-crow:hover{background:var(--dsw-alias-bg-layer-2)}
