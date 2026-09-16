@@ -287,7 +287,9 @@ const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + 
    7. 点一下勾选框：立刻画出来，不会被迟到的读抹掉
    8. 树行的手势：单击只选中，双击或点三角才展开
    9. 展开未跟踪目录的那一瞬间：读还没回来时列表是 undefined，不能崩
-   10. 两个分组（默认变更列表 / 未跟踪的文件）和两个视图（树 / 扁平） */
+   10. 两个分组（默认变更列表 / 新增的文件）和两个视图（树 / 扁平）
+   11. 一组一个框；勾上新文件之后它留在那一组里（不跳进变更列表）
+   12. 未跟踪条目的两种形状（字符串 / 对象） */
 
 const L = function () {
   let out = ''
@@ -462,7 +464,7 @@ ok('不当作文本渲染', byClass(tree, 'dsh-git-dline').length === 0)
 ok('说清楚了是二进制', textOf(tree).indexOf('二进制') >= 0)
 /* 一个 git 还没见过的文件，正是最想从这儿放进索引的那种。 */
 const addBtn = buttons(tree).find(function (b) { return textOf(b) === '暂存' })
-ok('未跟踪的文件在差异页上能直接暂存', addBtn !== undefined)
+ok('新增的文件在差异页上能直接暂存', addBtn !== undefined)
 if (addBtn !== undefined) {
   addBtn.props.onClick()
   await wait(10)
@@ -537,7 +539,7 @@ buttons(tree).find(function (b) { return textOf(b).indexOf('变更') >= 0 }).pro
 await wait(10)
 tree = await settle()
 
-/* 分组标题（默认变更列表 / 未跟踪的文件）是树里的一行，也是这一组的**框**所在：
+/* 分组标题（默认变更列表 / 新增的文件）是树里的一行，也是这一组的**框**所在：
    框在最左边那一列，和文件行的框列对齐（IDEA 的变更列表节点也带框），点它是整组
    进/出索引；框之外的单击仍然只选中，双击或点三角才折叠。 */
 const groupRows = byClass(tree, 'dsh-git-cgroup')
@@ -912,7 +914,7 @@ ok('读回来之后文件行照常出现（那一帧只是中间态，不是终�
    页出现 —— 它以前在列表上方单独占一行，两个词花掉列表一整行的高度。 */
 
 console.log('')
-console.log('== 两组：默认变更列表 / 未跟踪的文件 ==')
+console.log('== 两组：默认变更列表 / 新增的文件 ==')
 
 const groupTitleRow = function (t, label) {
   return byClass(t, 'dsh-git-cgroup').filter(function (r) { return textOf(r).indexOf(label) >= 0 })[0]
@@ -938,13 +940,13 @@ const groupTitles = byClass(tree, 'dsh-git-cgroup').map(function (r) { return te
 ok('两个分组都在，各带自己的条数（变更列表 2 个文件 / 未跟踪 1 个文件 + 1 个目录）',
   groupTitles.length === 2
   && groupTitles[0].indexOf('默认变更列表') >= 0 && groupTitles[0].indexOf('2 个文件') >= 0
-  && groupTitles[1].indexOf('未跟踪的文件') >= 0 && groupTitles[1].indexOf('1 个文件 + 1 个目录') >= 0)
-ok('变更列表排在未跟踪的文件前面（IDEA 的顺序）', groupTitles.length === 2
-  && groupTitles[0].indexOf('默认变更列表') >= 0 && groupTitles[1].indexOf('未跟踪的文件') >= 0)
+  && groupTitles[1].indexOf('新增的文件') >= 0 && groupTitles[1].indexOf('1 个文件 + 1 个目录') >= 0)
+ok('变更列表排在新增的文件前面（IDEA 的顺序）', groupTitles.length === 2
+  && groupTitles[0].indexOf('默认变更列表') >= 0 && groupTitles[1].indexOf('新增的文件') >= 0)
 
 const inTracked = membersOf(tree, '默认变更列表')
-const inUnversioned = membersOf(tree, '未跟踪的文件')
-ok('未跟踪的目录和未跟踪的文件都落在未跟踪这一组',
+const inUnversioned = membersOf(tree, '新增的文件')
+ok('未跟踪的目录和新增的文件都落在未跟踪这一组',
   inUnversioned.some(function (x) { return x.indexOf('newdir/') >= 0 })
   && inUnversioned.some(function (x) { return x.indexOf('tmp.bin') >= 0 }))
 ok('被跟踪的文件一个都不在未跟踪组里（以前它们混在一棵树里）',
@@ -1046,20 +1048,20 @@ ok('偏好跟着改回 tree', JSON.parse(store['dsh.git-idea.settings']).changes
 
 console.log('')
 console.log('== 分组标题守同一条手势 ==')
-const unvTitle = groupTitleRow(tree, '未跟踪的文件')
+const unvTitle = groupTitleRow(tree, '新增的文件')
 ok('分组标题给了「双击」提示', unvTitle !== undefined && String(unvTitle.props.title).indexOf('双击') > 0)
 press(unvTitle, 'onClick')
 await wait(10)
 tree = await settle()
 ok('单击分组标题：只选中，组里的行都还在',
   changeRow(tree, 'tmp.bin') !== undefined
-  && groupTitleRow(tree, '未跟踪的文件') !== undefined
-  && String(groupTitleRow(tree, '未跟踪的文件').props.className).indexOf('dsh-git-trow-sel') >= 0)
-press(groupTitleRow(tree, '未跟踪的文件'), 'onDoubleClick')
+  && groupTitleRow(tree, '新增的文件') !== undefined
+  && String(groupTitleRow(tree, '新增的文件').props.className).indexOf('dsh-git-trow-sel') >= 0)
+press(groupTitleRow(tree, '新增的文件'), 'onDoubleClick')
 await wait(10)
 tree = await settle()
 ok('双击分组标题：这一组折起来（行不见了，标题还在）',
-  changeRow(tree, 'tmp.bin') === undefined && groupTitleRow(tree, '未跟踪的文件') !== undefined)
+  changeRow(tree, 'tmp.bin') === undefined && groupTitleRow(tree, '新增的文件') !== undefined)
 ok('另一组不受影响（变更列表还在）', changeRow(tree, 'app.js') !== undefined)
 
 /* 开关只出现在它管得着的那一页：历史页上它什么也切不了，就不该在那里。 */
@@ -1114,11 +1116,11 @@ const stageLineOf = function (t) {
 ok('变更列表那一组的框是半选（组里有已暂存的、也有没暂存的）',
   groupBox(tree, '默认变更列表') !== undefined && textOf(groupBox(tree, '默认变更列表')) === '▣')
 ok('未跟踪那一组的框是空的（它们按定义都还没进索引）',
-  groupBox(tree, '未跟踪的文件') !== undefined && textOf(groupBox(tree, '未跟踪的文件')) === '☐')
+  groupBox(tree, '新增的文件') !== undefined && textOf(groupBox(tree, '新增的文件')) === '☐')
 ok('条数把文件和目录分开数（不再把折叠的目录算成 1 个文件）',
-  textOf(groupRow(tree, '未跟踪的文件')).indexOf('1 个文件 + 1 个目录') >= 0
+  textOf(groupRow(tree, '新增的文件')).indexOf('1 个文件 + 1 个目录') >= 0
   && textOf(groupRow(tree, '默认变更列表')).indexOf('2 个文件') >= 0
-  && textOf(groupRow(tree, '未跟踪的文件')).indexOf('个目录') >= 0)
+  && textOf(groupRow(tree, '新增的文件')).indexOf('个目录') >= 0)
 ok('右边那句数的是框（项），不再是「个文件」',
   stageLineOf(tree).indexOf('已暂存 1 / 共 4 项') >= 0)
 
@@ -1160,13 +1162,15 @@ ok('全选的组再点一次：整组撤出索引（发的是 unstage，路径�
 ok('这一帧里那一组的框回到空 ☐',
   groupBox(tree, '默认变更列表') !== undefined && textOf(groupBox(tree, '默认变更列表')) === '☐')
 
-/* 未跟踪那一组：它是空的框，点一下整组进索引 —— 而这一组的行会**跳进变更列表**
-   （进了索引就不再是未跟踪的），所以空组跟着消失。 */
+/* 新增的文件那一组：它是空的框，点一下整组进索引 —— 而这一组的行**留在原地**。
+   （以前它们会跳进变更列表：`untracked` 一个判据说了算，勾上 = 进了索引 = 不再是
+   未跟踪的，于是整组跟着消失，读者刚勾上的东西一下全看不见了。现在判据是「HEAD
+   从来没有过这个路径」：`untracked` 或者索引里的 `A…`，勾上只是框变了。） */
 groupAsk = null
-press(groupBox(tree, '未跟踪的文件'), 'onClick', { stopPropagation: function () {} })
+press(groupBox(tree, '新增的文件'), 'onClick', { stopPropagation: function () {} })
 await wait(10)
 tree = await settle()
-ok('点未跟踪那组的框：整组的两个路径一次发出去',
+ok('点新增那一组的框：整组的两个路径一次发出去',
   groupAsk != null && groupAsk.method === 'git/stage'
   && groupAsk.args.paths.slice().sort().join(',') === 'newdir/,tmp.bin')
 ok('本地这一帧就勾上了（tmp.bin 的框已是 ☑）',
@@ -1174,8 +1178,28 @@ ok('本地这一帧就勾上了（tmp.bin 的框已是 ☑）',
     const row = changeRow(tree, 'tmp.bin')
     return row !== undefined && textOf(byClass(row, 'dsh-git-cbox')[0]) === '☑'
   })())
-ok('那一组跟着空了（组里的行跳进了变更列表，空组不显示）',
-  groupRow(tree, '未跟踪的文件') === undefined)
+ok('这一组还在（没有跳进变更列表），两行都留在这里',
+  groupRow(tree, '新增的文件') !== undefined
+  && changeRow(tree, 'tmp.bin') !== undefined && changeRow(tree, 'newdir/') !== undefined)
+ok('这一组的框变成全选 ☑（组里的行都进索引了）',
+  groupBox(tree, '新增的文件') !== undefined && textOf(groupBox(tree, '新增的文件')) === '☑')
+ok('变更列表里没有混进新文件（新文件还在自己那一组里）',
+  membersOf(tree, '默认变更列表').every(function (x) {
+    return x.indexOf('tmp.bin') < 0 && x.indexOf('newdir/') < 0
+  }))
+
+/* 再点一次：整组撤出索引，行还是留在这一组里，只是框回到空的（可以来回切） */
+groupAsk = null
+press(groupBox(tree, '新增的文件'), 'onClick', { stopPropagation: function () {} })
+await wait(10)
+tree = await settle()
+ok('再点一次是整组撤出索引（unstage，路径还是整组）',
+  groupAsk != null && groupAsk.method === 'git/unstage'
+  && groupAsk.args.paths.slice().sort().join(',') === 'newdir/,tmp.bin')
+ok('撤出之后这一组照样在，框回到空的',
+  groupRow(tree, '新增的文件') !== undefined
+  && textOf(groupBox(tree, '新增的文件')) === '☐'
+  && changeRow(tree, 'tmp.bin') !== undefined)
 
 for (let i = 0; i < heldStages.length; i += 1) {
   heldStages[i]({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
@@ -1190,7 +1214,7 @@ tree = await settle()
    也是合法的（这个套件自己的 mock 用的就是字符串）。`mergeChanges` 两种都认，另外两个读
    这些列表的地方不认 —— 它们直接读 `entry.path`，在字符串上是 `undefined`，于是**按路径
    的读永远盖不掉一条字符串条目**：勾上一个未跟踪目录、它的文件已经进了索引，那条折叠的
-   目录行还留在「未跟踪的文件」里（量到过：十个框说「共 6 个文件」，一边是暂存好的文件、
+   目录行还留在「新增的文件」里（量到过：十个框说「共 6 个文件」，一边是暂存好的文件、
    一边是同名的目录），而 `pathsOfInterest` 在一棵「全是未跟踪」的树上会回答「没有要问的
    路径」，把省时间的那次按路径读变回整棵树的 `git status`。
 
@@ -1204,9 +1228,9 @@ press(tabBtn(tree, '变更'), 'onClick')
 await wait(10)
 tree = await settle()
 
-ok('前提：未跟踪目录在未跟踪那一组里',
-  membersOf(tree, '未跟踪的文件').some(function (x) { return x.indexOf('newdir/') >= 0 })
-  && membersOf(tree, '未跟踪的文件').some(function (x) { return x.indexOf('tmp.bin') >= 0 }))
+ok('前提：未跟踪目录在新增那一组里',
+  membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('newdir/') >= 0 })
+  && membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('tmp.bin') >= 0 }))
 
 const shapeSaved = host.call
 host.call = function (method, args) {
@@ -1217,7 +1241,7 @@ host.call = function (method, args) {
     for (let i = 0; i < args.paths.length; i += 1) {
       const p = args.paths[i]
       if (p === 'newdir/') {
-        staged.push({ path: 'newdir/a.txt', code: 'A' }, { path: 'newdir/deep/b.txt', code: 'A' })
+        staged.push({ path: 'newdir/a.txt', code: 'A.' }, { path: 'newdir/deep/b.txt', code: 'A.' })
       } else {
         untracked.push({ path: p, code: '??' })
       }
@@ -1236,12 +1260,13 @@ await wait(30)
 tree = await settle()
 host.call = shapeSaved
 
-ok('暂存未跟踪目录：里面的文件出现在变更列表里',
-  membersOf(tree, '默认变更列表').some(function (x) { return x.indexOf('a.txt') >= 0 }))
-ok('而那条折叠的目录行不在未跟踪那一组里了（按路径的读盖得掉字符串条目）',
-  membersOf(tree, '未跟踪的文件').every(function (x) { return x.indexOf('newdir/') < 0 }))
+ok('暂存未跟踪目录：里面的文件出现在**同一组**里（索引里的 A… 也算新文件）',
+  membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('a.txt') >= 0 })
+  && membersOf(tree, '默认变更列表').every(function (x) { return x.indexOf('a.txt') < 0 }))
+ok('而那条折叠的目录行不在这一组里了（按路径的读盖得掉字符串条目）',
+  membersOf(tree, '新增的文件').every(function (x) { return x.indexOf('newdir/') < 0 }))
 ok('同一次读没动别的路径（tmp.bin 还在未跟踪里）',
-  membersOf(tree, '未跟踪的文件').some(function (x) { return x.indexOf('tmp.bin') >= 0 }))
+  membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('tmp.bin') >= 0 }))
 
 /* 三处读未跟踪列表的地方必须走同一个读法。按路径的读（`mergePanelStatus`）和
    「要问哪些路径」（`pathsOfInterest`）都要认字符串形状 —— 少了前者，条目永远盖不掉；

@@ -1825,18 +1825,33 @@ textarea.dsh-git-input{resize:vertical}
     /* ── two groups ──
 
        IDEA's commit window does not show one list of everything git noticed. It
-       shows a changelist — the tracked changes — and under it "Unversioned
-       Files": the paths git has never seen. Two nodes, two counts, and every
-       unversioned entry stays a file rather than a folder mixed in among the
-       tracked ones.
+       shows a changelist — the tracked changes — and under it a node of new files:
+       the paths git has never committed. Two nodes, two counts, and a new file
+       stays a file rather than a folder mixed in among the tracked ones.
 
-       This pane merged all of it into one tree: an untracked directory sat
-       among the tracked ones with nothing saying it was untracked, and the only
-       way to tell was to read each row's status letter. The split is the test
-       the rest of the panel already uses — `untracked` and not staged means git
-       does not track the path — and it lines up with staging: tick an
-       unversioned file's box and it moves up into the changelist, which is what
-       IDEA's "add to the changelist" does.
+       This pane merged all of it into one tree: an untracked directory sat among
+       the tracked ones with nothing saying it was untracked, and the only way to
+       tell was to read each row's status letter.
+
+       ── which group a new file belongs to ──
+
+       Not `untracked` alone. Ticking a box runs `git add`, and the entry comes
+       back as `A.` — a path in the index that HEAD has never seen. Grouping by
+       `untracked` alone therefore made a ticked file leave this group for the
+       changelist, and ticking the group's own box emptied it: the reader pressed
+       one checkbox and lost sight of everything they had just ticked (reported
+       from the running panel: 「全选未跟踪文件列表，会导致这个未跟踪文件列表消失
+       合并到默认列表中」). A file that has been *added but not committed* is still
+       a new file, so it stays here, its box just moves. Un-ticking it puts it back
+       in the working tree as untracked, in the same row.
+
+       So the test is "HEAD has never had this path", in two shapes: git has not
+       seen it at all (`untracked`), or it is in the index as an addition
+       (`A…` — `git status --porcelain=v2` prints `A.` for added-unchanged and
+       `AM` for added-then-edited, so only the first letter is the test). A rename
+       is `R…` and is not a new file; nor is anything already committed. Staging an
+       unversioned *directory* still expands it into the files it holds, and those
+       files stay in this group too — each with its own ticked box.
 
        ── two views ──
 
@@ -1850,8 +1865,9 @@ textarea.dsh-git-input{resize:vertical}
        On a row of its own above the list it cost the list a full line of height
        to say two words. */
 
-    function isUnversioned(entry) {
-      return entry.untracked === true && entry.staged !== true
+    function isNewFile(entry) {
+      if (entry.untracked === true) return true
+      return entry.staged === true && text(entry.indexCode).slice(0, 1) === 'A'
     }
 
     function ChangesPane(props) {
@@ -1869,11 +1885,11 @@ textarea.dsh-git-input{resize:vertical}
 
       const changes = mergeChanges(work)
       const tracked = []
-      const unversioned = []
+      const fresh = []
       for (let i = 0; i < changes.length; i += 1) {
         const entry = changes[i]
         if (entry.path.length === 0) continue
-        if (isUnversioned(entry)) unversioned.push(entry)
+        if (isNewFile(entry)) fresh.push(entry)
         else tracked.push(entry)
       }
 
@@ -1934,7 +1950,7 @@ textarea.dsh-git-input{resize:vertical}
          A row is not always a file: git collapses an untracked directory into one
          entry ending in "/", and that entry is one box standing for however many
          files are underneath it. Calling it "1 个文件" is what made the numbers
-         disagree with the column of boxes — the panel said "未跟踪的文件 7 个文件"
+         disagree with the column of boxes — the panel said "新增的文件 7 个文件"
          about four files and three directories, and "共 10 个文件" about the ten
          boxes on screen, and staging those three directories would have reported
          "已暂存 3 个文件" for a whole subtree. So the two are counted apart, and
@@ -2123,7 +2139,7 @@ textarea.dsh-git-input{resize:vertical}
       const rows = []
       const groups = [
         { key: '@tracked', label: '默认变更列表', hint: 'git 管着的改动，框勾上就是进了索引', entries: tracked },
-        { key: '@untracked', label: '未跟踪的文件', hint: 'git 还没见过的文件', entries: unversioned },
+        { key: '@new', label: '新增的文件', hint: 'git 还没提交过的文件：勾上就是加入索引，但留在这一组里，直到提交', entries: fresh },
       ]
       for (let g = 0; g < groups.length; g += 1) {
         const group = groups[g]

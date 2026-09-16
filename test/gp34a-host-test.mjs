@@ -669,6 +669,39 @@ check('两条边都是虚线，而且都指向这一页里没有的提交（线�
 check('列宽数的是真正画出来的道（两条）',
   Math.max(branched.rows[0].lane, branched.rows[1].lane) + 1 === branched.lanes)
 
+/* ── 新文件的形状：客户端的分组判据靠它 ──
+   面板把「新文件」留在自己那一组里（勾上之后不跳进变更列表），判据是「HEAD 从来
+   没有过这个路径」：`untracked`，或者索引里以 `A` 开头。所以 Host 报出来的这一位
+   必须说得出「加进索引」—— porcelain=v2 给的是两位 XY：`A.` 是加了没改，`AM` 是
+   加了又改。哪天这两个字母的形状变了，这里先红，而不是等面板把新文件错分到变更
+   列表里去（那正是读者报上来的那个现象）。 */
+console.log('')
+console.log('=== 新文件在索引里的样子 ===')
+const A = '/tmp/gp42-addedrepo'
+await sh('rm -rf ' + A + ' && mkdir -p ' + A + ' && cd ' + A + ' && git init -q -b main .'
+  + " && git config user.email t@t && git config user.name T"
+  + " && echo one > tracked.txt && git add -A && git commit -qm base", '/tmp')
+await sh('echo new > brand-new.txt && git add -- brand-new.txt', A)
+await H('git/flush')({ repo: A })
+const addedPanel = await H('git/panel')({ repo: A })
+const added = addedPanel.staged.filter(function (x) { return x.path === 'brand-new.txt' })
+console.log('  git add 之后:', JSON.stringify(addedPanel.staged), ' untracked:', JSON.stringify(addedPanel.untracked))
+check('加了没改：索引给的以 A 开头（porcelain 的 `A.`）',
+  added.length === 1 && String(added[0].code).slice(0, 1) === 'A' && addedPanel.untracked.length === 0)
+await sh('echo more >> brand-new.txt', A)
+await H('git/flush')({ repo: A })
+const editedPanel = await H('git/panel')({ repo: A })
+const edited = editedPanel.staged.filter(function (x) { return x.path === 'brand-new.txt' })
+check('加了又改：还是以 A 开头（`AM`），工作区那一段也在',
+  edited.length === 1 && String(edited[0].code).slice(0, 1) === 'A'
+  && editedPanel.unstaged.some(function (x) { return x.path === 'brand-new.txt' }))
+await sh('echo second > tracked.txt && git add tracked.txt', A)
+await H('git/flush')({ repo: A })
+const modifiedPanel = await H('git/panel')({ repo: A })
+const modified = modifiedPanel.staged.filter(function (x) { return x.path === 'tracked.txt' })
+check('（对照）本来就有的文件改了：不是 A，客户端不该把它算成新文件',
+  modified.length === 1 && String(modified[0].code).slice(0, 1) !== 'A')
+
 /* ── 一个文件的差异 ──
    面板能说「哪个文件改了」很久了，但没有任何一次读取返回过 patch，所以两处的
    文件行都到那里为止。这一节盯的就是补上的那次读取：四种状态各自的形状。 */
