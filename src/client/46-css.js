@@ -6,6 +6,10 @@
 .dsh-git-chip-repo{color:var(--dsw-alias-label-primary)}
 .dsh-git-chip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .dsh-git-chip-idle{opacity:.72}
+/* 切换分支的时候图标转起来：慢盘上一次切换好几秒，卡片早就收起来了，能看见的
+   只剩这个图标。只转，不改尺寸，所以没有任何布局位移。 */
+@keyframes dsh-git-spin{to{transform:rotate(360deg)}}
+.dsh-git-spin{animation:dsh-git-spin .9s linear infinite;transform-origin:50% 50%}
 .dsh-git-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:10px;line-height:1;flex:none}
 /* 上一个测量值还在，新的还没回来：留个位置，但看得出来还没核对 */
 .dsh-git-badge-stale{opacity:.45}

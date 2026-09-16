@@ -151,10 +151,14 @@
         setPending('')
         setFly(null)
         /* Said out loud, because the flyout collapsing under the pointer makes
-           it look as if the click was never heard. */
+           it look as if the click was never heard. The chips say it too — their
+           branch icon turns while this is in flight, so the wait is visible even
+           after the card is gone. */
         setNote(useStash === true ? '正在暂存改动并切到 ' + name + '…' : '正在切到 ' + name + '…')
+        setSwitchingTo(name)
         rpc('git/checkout', request({ name: name, stash: useStash === true }), '切换失败').then(function (result) {
           setBusy(false)
+          setSwitchingTo(null)
           bumpData()
           rememberBranch(name)
           if (result.popConflict === true) {
@@ -166,6 +170,7 @@
           const reply = failure.reply
           const detail = failureText(failure)
           setBusy(false)
+          setSwitchingTo(null)
           if (reply != null && reply.stashed === true && reply.restored === true) {
             setError('切到 ' + name + ' 失败，你的改动已经放回工作区。' + (detail.length > 0 ? ' ' + detail : ''))
           } else if (reply != null && reply.stashed === true) {

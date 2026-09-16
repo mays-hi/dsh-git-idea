@@ -252,6 +252,16 @@ await wait(15)
 const during = await settle('pop')
 ok('切换还没回来时，卡片不会被自己收掉', byClass(during, 'dsh-git-switch-hover').length === 1)
 
+/* 切换在飞的时候，输入框上的图标必须转起来 —— 卡片收起后就剩它是唯一看得见的东西 */
+const spinningChip = await chipTree()
+const spinClass = (tree) => collect(tree).filter((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0)
+console.log('  切换中 chip 上的 svg 类:', JSON.stringify(spinClass(spinningChip).map((n) => n.props.className)))
+ok('切换在飞的时候，输入框上的分支图标在转', spinClass(spinningChip).length >= 1)
+ok('chip 的 tooltip 说明了正在切到哪个分支', String(spinningChip.props.title).indexOf('正在切到 solo') >= 0)
+const spinningPanel = byClass(during, 'dsh-git-branch-chip')
+ok('面板头部那个分支 chip 也在转',
+  spinningPanel.length === 1 && collect(spinningPanel[0]).some((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0))
+
 /* 现在让这次切换失败（工作区脏，正是最常见的失败） */
 const pending = held
 held = null
@@ -265,6 +275,26 @@ const failedCard = await settle('pop')
 ok('失败之后卡片仍在原地（错误不会被丢掉）', byClass(failedCard, 'dsh-git-switch-hover').length === 1)
 ok('错误信息看得见', textOf(failedCard).indexOf('overwritten') >= 0)
 ok('并且给出「先暂存再切」的补救按钮', buttons(failedCard).some((b) => textOf(b).indexOf('先暂存') >= 0))
+
+/* 失败也要停下来：转个不停的图标比不转更糟 */
+const stoppedChip = await chipTree()
+ok('切换失败之后，图标停下来（不会一直转）', spinClass(stoppedChip).length === 0)
+
+/* 成功那一路也要停：转个不停的图标和失败一样糟 */
+let okTree = await settle('pop')
+byClass(okTree, 'dsh-git-bs-row').find((r) => textOf(r).indexOf('zeta') >= 0).props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
+fireTimers()
+await wait(15)
+okTree = await settle('pop')
+const okFly = flyPanel(okTree)
+if (okFly !== undefined) buttons(okFly).find((b) => textOf(b) === '检出').props.onClick({ stopPropagation() {} })
+await wait(15)
+ok('成功那一路在飞的时候也转', spinClass(await chipTree()).length >= 1)
+const holdOk = held
+held = null
+holdOk.resolve({ ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: 'Switched to branch zeta', stderr: '', exitCode: 0 })
+await wait(25)
+ok('切换成功之后图标停下来', spinClass(await chipTree()).length === 0)
 
 /* 另一种失败：git 报的是 Permission denied，而真正的原因是文件沙箱不允许写这个
    仓库（.git/index.lock 建不出来）。读者得能分清「我的仓库坏了」和「沙箱不让写」。 */
@@ -280,9 +310,17 @@ host.call = function (method, args) {
   }
   return plainCheckout.call(host, method, args)
 }
-let deniedTree = await settle('pop')
-const deniedFly = flyPanel(deniedTree)
-byClass(deniedTree, 'dsh-git-bs-row').find((r) => textOf(r).indexOf('zeta') >= 0).props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
+/* 上一步成功切换之后卡片已经收起，这里重新把它打开，再挑第一行可检出的分支 */
+let deniedTree = await chipTree()
+if (deniedTree.props.className.indexOf('dsh-git-chip-open') >= 0) { deniedTree.props.onClick(); await wait(10) }
+deniedTree = await chipTree()
+deniedTree.props.onPointerEnter()
+fireTimers()
+await wait(15)
+deniedTree = await settle('pop')
+const deniedRows = byClass(deniedTree, 'dsh-git-bs-row').filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
+const deniedTarget = deniedRows.find((r) => textOf(r).indexOf('zeta') >= 0) || deniedRows[deniedRows.length - 1]
+deniedTarget.props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
 fireTimers()
 await wait(15)
 deniedTree = await settle('pop')

@@ -2,6 +2,7 @@
       const plugin = usePluginConfig()
       const sessionId = props.sessionId
       const switcher = useSwitchMode()
+      const switching = useSwitchingTo()
       const [tab, setTab] = React.useState('log')
       const [repoPath, setRepoPath] = React.useState(sessionRepo(sessionId))
       const [appliedRepo, setAppliedRepo] = React.useState(sessionRepo(sessionId))
@@ -466,10 +467,10 @@
       const branchChip = h('button', {
         key: 'chip', type: 'button',
         className: 'dsh-git-branch-chip' + (switcher === 'panel' ? ' dsh-git-branch-chip-on' : ''),
-        title: branchTitle + ' · 点击切换分支',
+        title: switching !== null ? '正在切到 ' + switching + '…' : branchTitle + ' · 点击切换分支',
         onClick: function () { setSwitchMode(switcher === 'panel' ? null : 'panel') },
       },
-        h(BranchIcon, { key: 'i', size: 13 }),
+        h(BranchIcon, { key: 'i', size: 13, spin: switching !== null }),
         h('span', { key: 'n', className: 'dsh-git-branch-name' }, currentName.length > 0 ? currentName : 'HEAD'),
         ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-ab' }, '↑' + String(ahead)) : null,
         behind > 0 ? h('span', { key: 'b', className: 'dsh-git-ab' }, '↓' + String(behind)) : null)

@@ -20,6 +20,9 @@
         width: size, height: size, viewBox: '0 0 16 16',
         fill: 'none', stroke: 'currentColor', strokeWidth: 1.6,
         strokeLinecap: 'round', style: { flex: 'none', display: 'block' },
+        /* 切换在飞的时候转起来：慢盘上一次切换要好几秒，卡片早就收起来了，
+           能看见的只剩这个图标。 */
+        className: props.spin === true ? 'dsh-git-spin' : undefined,
       }, shapes)
     }
 

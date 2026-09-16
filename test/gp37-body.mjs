@@ -352,3 +352,8 @@ ok('没悬浮的时候选中行也是选中色', bg(CROW_SEL, false).indexOf('--
 ok('没选中的行悬浮上去还是有悬停色', bg(CROW, true).indexOf('--dsw-alias-bg-layer-2') >= 0)
 ok('左侧分支树的行一直是这个规矩（对照）',
   bg(['dsh-git-trow', 'dsh-git-trow-sel'], true).indexOf('--dsw-alias-interactive-bg-hover') >= 0)
+
+/* 切换时图标转圈：只转不改尺寸，所以没有任何布局位移 */
+console.log('  转圈的规则:', (cssText.match(/@keyframes dsh-git-spin\{[^}]*\}/) || [''])[0])
+ok('转圈是一条 @keyframes 动画，不是靠改尺寸或位置',
+  /@keyframes dsh-git-spin\{/.test(cssText) && /\.dsh-git-spin\{[^}]*animation:dsh-git-spin/.test(cssText))

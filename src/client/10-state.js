@@ -224,6 +224,21 @@
         if (switchMode === null) setSwitchMode('hover')
       }, 180)
     }
+    /* ── the branch being switched to ──
+
+       A signal, unlike `switchBusy` below: the composer chip and the panel's branch
+       chip have to *repaint* while the switch is in flight, and a module-level flag
+       reaches nobody. Null means nothing is moving; a name means that is where we
+       are going. */
+    let switchingTo = null
+    const switchingSignal = createSignal(function () { return switchingTo })
+    const setSwitchingTo = function (next) {
+      if (switchingTo === next) return
+      switchingTo = next
+      switchingSignal.notify()
+    }
+    const useSwitchingTo = switchingSignal.use
+
     /* Set by the switcher while one of its operations is in flight. Clicking
        "check out" collapses the flyout under the pointer, which counts as
        leaving the card — without this the card closed itself 200ms later and

@@ -250,6 +250,21 @@ return {
         if (switchMode === null) setSwitchMode('hover')
       }, 180)
     }
+    /* ── the branch being switched to ──
+
+       A signal, unlike `switchBusy` below: the composer chip and the panel's branch
+       chip have to *repaint* while the switch is in flight, and a module-level flag
+       reaches nobody. Null means nothing is moving; a name means that is where we
+       are going. */
+    let switchingTo = null
+    const switchingSignal = createSignal(function () { return switchingTo })
+    const setSwitchingTo = function (next) {
+      if (switchingTo === next) return
+      switchingTo = next
+      switchingSignal.notify()
+    }
+    const useSwitchingTo = switchingSignal.use
+
     /* Set by the switcher while one of its operations is in flight. Clicking
        "check out" collapses the flyout under the pointer, which counts as
        leaving the card — without this the card closed itself 200ms later and
@@ -692,6 +707,9 @@ return {
         width: size, height: size, viewBox: '0 0 16 16',
         fill: 'none', stroke: 'currentColor', strokeWidth: 1.6,
         strokeLinecap: 'round', style: { flex: 'none', display: 'block' },
+        /* 切换在飞的时候转起来：慢盘上一次切换要好几秒，卡片早就收起来了，
+           能看见的只剩这个图标。 */
+        className: props.spin === true ? 'dsh-git-spin' : undefined,
       }, shapes)
     }
 
@@ -801,6 +819,10 @@ return {
 .dsh-git-chip-repo{color:var(--dsw-alias-label-primary)}
 .dsh-git-chip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .dsh-git-chip-idle{opacity:.72}
+/* 切换分支的时候图标转起来：慢盘上一次切换好几秒，卡片早就收起来了，能看见的
+   只剩这个图标。只转，不改尺寸，所以没有任何布局位移。 */
+@keyframes dsh-git-spin{to{transform:rotate(360deg)}}
+.dsh-git-spin{animation:dsh-git-spin .9s linear infinite;transform-origin:50% 50%}
 .dsh-git-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:10px;line-height:1;flex:none}
 /* 上一个测量值还在，新的还没回来：留个位置，但看得出来还没核对 */
 .dsh-git-badge-stale{opacity:.45}
@@ -2053,10 +2075,14 @@ textarea.dsh-git-input{resize:vertical}
         setPending('')
         setFly(null)
         /* Said out loud, because the flyout collapsing under the pointer makes
-           it look as if the click was never heard. */
+           it look as if the click was never heard. The chips say it too — their
+           branch icon turns while this is in flight, so the wait is visible even
+           after the card is gone. */
         setNote(useStash === true ? '正在暂存改动并切到 ' + name + '…' : '正在切到 ' + name + '…')
+        setSwitchingTo(name)
         rpc('git/checkout', request({ name: name, stash: useStash === true }), '切换失败').then(function (result) {
           setBusy(false)
+          setSwitchingTo(null)
           bumpData()
           rememberBranch(name)
           if (result.popConflict === true) {
@@ -2068,6 +2094,7 @@ textarea.dsh-git-input{resize:vertical}
           const reply = failure.reply
           const detail = failureText(failure)
           setBusy(false)
+          setSwitchingTo(null)
           if (reply != null && reply.stashed === true && reply.restored === true) {
             setError('切到 ' + name + ' 失败，你的改动已经放回工作区。' + (detail.length > 0 ? ' ' + detail : ''))
           } else if (reply != null && reply.stashed === true) {
@@ -2518,6 +2545,7 @@ textarea.dsh-git-input{resize:vertical}
       const plugin = usePluginConfig()
       const sessionId = props.sessionId
       const switcher = useSwitchMode()
+      const switching = useSwitchingTo()
       const [tab, setTab] = React.useState('log')
       const [repoPath, setRepoPath] = React.useState(sessionRepo(sessionId))
       const [appliedRepo, setAppliedRepo] = React.useState(sessionRepo(sessionId))
@@ -2982,10 +3010,10 @@ textarea.dsh-git-input{resize:vertical}
       const branchChip = h('button', {
         key: 'chip', type: 'button',
         className: 'dsh-git-branch-chip' + (switcher === 'panel' ? ' dsh-git-branch-chip-on' : ''),
-        title: branchTitle + ' · 点击切换分支',
+        title: switching !== null ? '正在切到 ' + switching + '…' : branchTitle + ' · 点击切换分支',
         onClick: function () { setSwitchMode(switcher === 'panel' ? null : 'panel') },
       },
-        h(BranchIcon, { key: 'i', size: 13 }),
+        h(BranchIcon, { key: 'i', size: 13, spin: switching !== null }),
         h('span', { key: 'n', className: 'dsh-git-branch-name' }, currentName.length > 0 ? currentName : 'HEAD'),
         ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-ab' }, '↑' + String(ahead)) : null,
         behind > 0 ? h('span', { key: 'b', className: 'dsh-git-ab' }, '↓' + String(behind)) : null)
@@ -3512,6 +3540,7 @@ textarea.dsh-git-input{resize:vertical}
 
     function GitChip(props) {
       const isOpen = useOpen()
+      const switching = useSwitchingTo()
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
       const reloadAt = useDataVersion()
       const sessionId = props.sessionId
@@ -3628,7 +3657,10 @@ textarea.dsh-git-input{resize:vertical}
       else if (info.reason === '') title = 'Git —— 点击打开面板'
       else title = where + ' 这个目录不是 Git 仓库 —— 点击选择路径或在这里初始化'
 
-      const children = [h(BranchIcon, { key: 'icon', size: 14, plus: !isRepo && info.phase === 'none' })]
+      const children = [h(BranchIcon, {
+        key: 'icon', size: 14, plus: !isRepo && info.phase === 'none',
+        spin: switching !== null,
+      })]
       if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
       if (isRepo && info.pending > 0) {
         children.push(h('span', {
@@ -3642,7 +3674,9 @@ textarea.dsh-git-input{resize:vertical}
         className: 'dsh-git-chip'
           + (isRepo ? ' dsh-git-chip-repo' : ' dsh-git-chip-idle')
           + (isOpen ? ' dsh-git-chip-open' : ''),
-        title: isRepo ? title + ' · 悬停可直接切换分支' : title,
+        title: switching !== null
+          ? '正在切到 ' + switching + '…'
+          : (isRepo ? title + ' · 悬停可直接切换分支' : title),
         ref: function (node) { chipNode = node },
         onClick: function () { clearHoverTimer(); setSwitchMode(null); setOpen(!isOpen) },
         /* Hover rather than right-click: the chip already names the branch, so

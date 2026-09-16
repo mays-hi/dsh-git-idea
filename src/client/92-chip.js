@@ -7,6 +7,7 @@
 
     function GitChip(props) {
       const isOpen = useOpen()
+      const switching = useSwitchingTo()
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
       const reloadAt = useDataVersion()
       const sessionId = props.sessionId
@@ -123,7 +124,10 @@
       else if (info.reason === '') title = 'Git —— 点击打开面板'
       else title = where + ' 这个目录不是 Git 仓库 —— 点击选择路径或在这里初始化'
 
-      const children = [h(BranchIcon, { key: 'icon', size: 14, plus: !isRepo && info.phase === 'none' })]
+      const children = [h(BranchIcon, {
+        key: 'icon', size: 14, plus: !isRepo && info.phase === 'none',
+        spin: switching !== null,
+      })]
       if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
       if (isRepo && info.pending > 0) {
         children.push(h('span', {
@@ -137,7 +141,9 @@
         className: 'dsh-git-chip'
           + (isRepo ? ' dsh-git-chip-repo' : ' dsh-git-chip-idle')
           + (isOpen ? ' dsh-git-chip-open' : ''),
-        title: isRepo ? title + ' · 悬停可直接切换分支' : title,
+        title: switching !== null
+          ? '正在切到 ' + switching + '…'
+          : (isRepo ? title + ' · 悬停可直接切换分支' : title),
         ref: function (node) { chipNode = node },
         onClick: function () { clearHoverTimer(); setSwitchMode(null); setOpen(!isOpen) },
         /* Hover rather than right-click: the chip already names the branch, so
