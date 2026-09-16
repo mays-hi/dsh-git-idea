@@ -57,6 +57,7 @@
 /* The branch the graph is currently scoped to. Distinct from the selection: the
    selection moves on a single click, this only moves on a double click. */
 .dsh-git-tdirty{flex:none;margin-left:auto;padding:0 4px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary);font-size:10px;line-height:15px}
+.dsh-git-trow-head .dsh-git-tname{font-weight:600}
 .dsh-git-trow-scope{box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
 .dsh-git-trow-scope .dsh-git-tname{color:var(--dsw-alias-brand-primary)}
 .dsh-git-tw{flex:none;width:10px;color:var(--dsw-alias-label-secondary);font-size:9px;cursor:pointer}
@@ -154,7 +155,12 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-sync{display:flex;align-items:center;gap:2px;flex:none}
 .dsh-git-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px}
 .dsh-git-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.dsh-git-ab{flex:none;color:var(--dsw-alias-label-secondary);font-size:10px}
+.dsh-git-ab{flex:none;font-size:10px;font-weight:600}
+/* IDEA's key, and now its colours: a branch with commits waiting on the remote
+   carries a blue down arrow, one with commits waiting to be pushed carries a
+   green up arrow. */
+.dsh-git-ab-in{color:var(--dsw-alias-brand-primary)}
+.dsh-git-ab-out{color:var(--dsw-alias-state-success)}
 .dsh-git-repo-path{flex:1 1 140px;min-width:110px;width:auto}
 .dsh-git-set{display:flex;flex-direction:column;gap:14px;padding:4px 2px;max-width:660px}
 .dsh-git-set-h{font-size:14px;font-weight:600}
@@ -219,7 +225,7 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-ico{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;color:var(--dsw-alias-brand-primary)}
 .dsh-git-bs-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-git-bs-up{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
-.dsh-git-bs-ab{flex:none;font-size:11px;color:var(--dsw-alias-brand-primary)}
+.dsh-git-bs-ab{flex:none;font-size:11px;font-weight:600}
 .dsh-git-bs-star{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
 .dsh-git-bs-row:hover .dsh-git-bs-star{color:var(--dsw-alias-label-secondary)}
 .dsh-git-bs-star-on,.dsh-git-bs-row:hover .dsh-git-bs-star-on{color:var(--dsw-alias-state-warn-primary)}

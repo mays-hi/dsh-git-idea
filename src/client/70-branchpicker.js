@@ -32,8 +32,8 @@
         h('span', { key: 'i', className: 'dsh-git-bs-ico' },
           isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
         h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
-        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
-        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
         upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
           : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         h('button', {
@@ -294,8 +294,8 @@
          and for what typing in the filter box can match. */
       const actionDefs = [
         { id: 'fetch', icon: 'fetch', short: '获取', label: '获取远端最新（fetch）', run: function () { act('git/fetch', {}, 'fetch') } },
-        { id: 'pull', icon: 'pull', short: '拉取', badge: behindNow > 0 ? '↙' + (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
-        { id: 'push', icon: 'push', short: '推送', badge: aheadNow > 0 ? '↗' + (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
+        { id: 'pull', icon: 'pull', short: '拉取', badge: behindNow > 0 ? '↓' + (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
+        { id: 'push', icon: 'push', short: '推送', badge: aheadNow > 0 ? '↑' + (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
       ]
       actionDefs.push({ id: 'new', icon: 'plus', short: '新建分支', label: '新建分支…', run: function () { setCreating({ at: '', value: '' }) } })
       const actions = []

@@ -816,6 +816,7 @@ return {
 /* The branch the graph is currently scoped to. Distinct from the selection: the
    selection moves on a single click, this only moves on a double click. */
 .dsh-git-tdirty{flex:none;margin-left:auto;padding:0 4px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary);font-size:10px;line-height:15px}
+.dsh-git-trow-head .dsh-git-tname{font-weight:600}
 .dsh-git-trow-scope{box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
 .dsh-git-trow-scope .dsh-git-tname{color:var(--dsw-alias-brand-primary)}
 .dsh-git-tw{flex:none;width:10px;color:var(--dsw-alias-label-secondary);font-size:9px;cursor:pointer}
@@ -913,7 +914,12 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-sync{display:flex;align-items:center;gap:2px;flex:none}
 .dsh-git-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px}
 .dsh-git-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.dsh-git-ab{flex:none;color:var(--dsw-alias-label-secondary);font-size:10px}
+.dsh-git-ab{flex:none;font-size:10px;font-weight:600}
+/* IDEA's key, and now its colours: a branch with commits waiting on the remote
+   carries a blue down arrow, one with commits waiting to be pushed carries a
+   green up arrow. */
+.dsh-git-ab-in{color:var(--dsw-alias-brand-primary)}
+.dsh-git-ab-out{color:var(--dsw-alias-state-success)}
 .dsh-git-repo-path{flex:1 1 140px;min-width:110px;width:auto}
 .dsh-git-set{display:flex;flex-direction:column;gap:14px;padding:4px 2px;max-width:660px}
 .dsh-git-set-h{font-size:14px;font-weight:600}
@@ -978,7 +984,7 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-ico{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;color:var(--dsw-alias-brand-primary)}
 .dsh-git-bs-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-git-bs-up{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
-.dsh-git-bs-ab{flex:none;font-size:11px;color:var(--dsw-alias-brand-primary)}
+.dsh-git-bs-ab{flex:none;font-size:11px;font-weight:600}
 .dsh-git-bs-star{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
 .dsh-git-bs-row:hover .dsh-git-bs-star{color:var(--dsw-alias-label-secondary)}
 .dsh-git-bs-star-on,.dsh-git-bs-row:hover .dsh-git-bs-star-on{color:var(--dsw-alias-state-warn-primary)}
@@ -1178,8 +1184,12 @@ textarea.dsh-git-input{resize:vertical}
         const ahead = typeof meta.ahead === 'number' ? meta.ahead : 0
         const behind = typeof meta.behind === 'number' ? meta.behind : 0
         const out = []
-        if (behind > 0) out.push(h('span', { key: 'b', className: 'dsh-git-ab', title: '落后上游 ' + String(behind) + ' 个提交' }, '↙' + (behind > 99 ? '99+' : String(behind))))
-        if (ahead > 0) out.push(h('span', { key: 'a', className: 'dsh-git-ab', title: '领先上游 ' + String(ahead) + ' 个提交' }, '↗' + (ahead > 99 ? '99+' : String(ahead))))
+        /* IDEA's two marks, and its two colours: a blue down arrow for the
+           commits waiting on the remote, a green up arrow for the ones waiting
+           to be pushed. The number stays because "three behind" is the question
+           people actually have; IDEA answers it in the mouseover only. */
+        if (behind > 0) out.push(h('span', { key: 'b', className: 'dsh-git-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))))
+        if (ahead > 0) out.push(h('span', { key: 'a', className: 'dsh-git-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))))
         return out
       }
       const rows = []
@@ -1207,7 +1217,7 @@ textarea.dsh-git-input{resize:vertical}
             }
             if (props.dirty > 0) headTip.push('工作区有 ' + String(props.dirty) + ' 个未提交改动')
             rows.push(h('div', {
-              className: 'dsh-git-trow'
+              className: 'dsh-git-trow dsh-git-trow-head'
                 + (props.selectedKey === name ? ' dsh-git-trow-sel' : '')
                 + (props.activeRef === name ? ' dsh-git-trow-scope' : ''),
               key: 'cur:' + name,
@@ -1266,7 +1276,7 @@ textarea.dsh-git-input{resize:vertical}
             /* What the branch is worth knowing at a glance: where it stands
                against its upstream, and — for the branch that is checked out —
                how much is sitting uncommitted in the working tree. Both are
-               spelled out in the tooltip, because ↗2 and a bare number are only
+               spelled out in the tooltip, because ↑2 and a bare number are only
                legible once you have been told what they mean. */
             const tip = [branchName + '（双击只看这个分支的历史）']
             if (upstream.length > 0) tip.push(trackTitle(ahead, behind) + ' · ' + upstream)
@@ -1276,6 +1286,7 @@ textarea.dsh-git-input{resize:vertical}
             if (onHead && props.dirty > 0) tip.push('工作区有 ' + String(props.dirty) + ' 个未提交改动')
             rows.push(h('div', {
               className: 'dsh-git-trow'
+                + (onHead ? ' dsh-git-trow-head' : '')
                 + (props.selectedKey === branchName ? ' dsh-git-trow-sel' : '')
                 + (props.activeRef === branchName ? ' dsh-git-trow-scope' : ''),
               key: node.id,
@@ -1876,8 +1887,8 @@ textarea.dsh-git-input{resize:vertical}
         h('span', { key: 'i', className: 'dsh-git-bs-ico' },
           isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
         h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
-        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
-        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
         upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
           : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         h('button', {
@@ -2138,8 +2149,8 @@ textarea.dsh-git-input{resize:vertical}
          and for what typing in the filter box can match. */
       const actionDefs = [
         { id: 'fetch', icon: 'fetch', short: '获取', label: '获取远端最新（fetch）', run: function () { act('git/fetch', {}, 'fetch') } },
-        { id: 'pull', icon: 'pull', short: '拉取', badge: behindNow > 0 ? '↙' + (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
-        { id: 'push', icon: 'push', short: '推送', badge: aheadNow > 0 ? '↗' + (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
+        { id: 'pull', icon: 'pull', short: '拉取', badge: behindNow > 0 ? '↓' + (behindNow > 99 ? '99+' : String(behindNow)) : undefined, label: '拉取当前分支（pull）', run: function () { act('git/pull', {}, 'pull') } },
+        { id: 'push', icon: 'push', short: '推送', badge: aheadNow > 0 ? '↑' + (aheadNow > 99 ? '99+' : String(aheadNow)) : undefined, label: '推送当前分支（push）', run: function () { act('git/push', {}, 'push') } },
       ]
       actionDefs.push({ id: 'new', icon: 'plus', short: '新建分支', label: '新建分支…', run: function () { setCreating({ at: '', value: '' }) } })
       const actions = []

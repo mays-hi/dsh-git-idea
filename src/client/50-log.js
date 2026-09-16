@@ -168,8 +168,12 @@
         const ahead = typeof meta.ahead === 'number' ? meta.ahead : 0
         const behind = typeof meta.behind === 'number' ? meta.behind : 0
         const out = []
-        if (behind > 0) out.push(h('span', { key: 'b', className: 'dsh-git-ab', title: '落后上游 ' + String(behind) + ' 个提交' }, '↙' + (behind > 99 ? '99+' : String(behind))))
-        if (ahead > 0) out.push(h('span', { key: 'a', className: 'dsh-git-ab', title: '领先上游 ' + String(ahead) + ' 个提交' }, '↗' + (ahead > 99 ? '99+' : String(ahead))))
+        /* IDEA's two marks, and its two colours: a blue down arrow for the
+           commits waiting on the remote, a green up arrow for the ones waiting
+           to be pushed. The number stays because "three behind" is the question
+           people actually have; IDEA answers it in the mouseover only. */
+        if (behind > 0) out.push(h('span', { key: 'b', className: 'dsh-git-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))))
+        if (ahead > 0) out.push(h('span', { key: 'a', className: 'dsh-git-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))))
         return out
       }
       const rows = []
@@ -197,7 +201,7 @@
             }
             if (props.dirty > 0) headTip.push('工作区有 ' + String(props.dirty) + ' 个未提交改动')
             rows.push(h('div', {
-              className: 'dsh-git-trow'
+              className: 'dsh-git-trow dsh-git-trow-head'
                 + (props.selectedKey === name ? ' dsh-git-trow-sel' : '')
                 + (props.activeRef === name ? ' dsh-git-trow-scope' : ''),
               key: 'cur:' + name,
@@ -256,7 +260,7 @@
             /* What the branch is worth knowing at a glance: where it stands
                against its upstream, and — for the branch that is checked out —
                how much is sitting uncommitted in the working tree. Both are
-               spelled out in the tooltip, because ↗2 and a bare number are only
+               spelled out in the tooltip, because ↑2 and a bare number are only
                legible once you have been told what they mean. */
             const tip = [branchName + '（双击只看这个分支的历史）']
             if (upstream.length > 0) tip.push(trackTitle(ahead, behind) + ' · ' + upstream)
@@ -266,6 +270,7 @@
             if (onHead && props.dirty > 0) tip.push('工作区有 ' + String(props.dirty) + ' 个未提交改动')
             rows.push(h('div', {
               className: 'dsh-git-trow'
+                + (onHead ? ' dsh-git-trow-head' : '')
                 + (props.selectedKey === branchName ? ' dsh-git-trow-sel' : '')
                 + (props.activeRef === branchName ? ' dsh-git-trow-scope' : ''),
               key: node.id,

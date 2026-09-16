@@ -695,11 +695,19 @@ await wait(30)
 const withCounts = await settle()
 const trows = collect(withCounts).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf('dsh-git-trow') >= 0)
 const rowNamed = (name) => trows.find((n) => textOf(n).indexOf(name) >= 0)
-ok('落后 3 的分支显示 ↙3', textOf(rowNamed('feature')).indexOf('↙3') >= 0)
-ok('领先 4 的分支显示 ↗4', textOf(rowNamed('stable')).indexOf('↗4') >= 0)
-ok('领先又落后的两个都显示', textOf(rowNamed('main')).indexOf('↗2') >= 0 && textOf(rowNamed('main')).indexOf('↙1') >= 0)
-ok('没有上游的分支两个都不显示', textOf(rowNamed('lone')).indexOf('↗') < 0 && textOf(rowNamed('lone')).indexOf('↙') < 0)
+ok('落后 3 的分支显示 ↓3，而且是「需要拉取」的蓝色一档',
+  textOf(rowNamed('feature')).indexOf('↓3') >= 0
+  && /dsh-git-ab-in/.test(String(pick(rowNamed('feature'), 'dsh-git-ab')[0].props.className)))
+ok('领先 4 的分支显示 ↑4，而且是「需要推送」的绿色一档',
+  textOf(rowNamed('stable')).indexOf('↑4') >= 0
+  && /dsh-git-ab-out/.test(String(pick(rowNamed('stable'), 'dsh-git-ab')[0].props.className)))
+ok('领先又落后的两个都显示', textOf(rowNamed('main')).indexOf('↑2') >= 0 && textOf(rowNamed('main')).indexOf('↓1') >= 0)
+ok('没有上游的分支两个都不显示', textOf(rowNamed('lone')).indexOf('↑') < 0 && textOf(rowNamed('lone')).indexOf('↓') < 0)
 ok('当前分支顶上显示未提交改动数（●3）', textOf(rowNamed('main')).indexOf('●3') >= 0)
+const headRow = rowNamed('main')
+ok('当前分支加粗（IDEA 的写法）',
+  /dsh-git-trow-head/.test(String(headRow.props.className))
+  && /dsh-git-trow-head/.test(String(rowNamed('feature').props.className)) === false)
 ok('tooltip 说明了箭头与未提交的含义',
   String(rowNamed('feature').props.title).indexOf('落后上游 3 个提交') >= 0
   && String(rowNamed('main').props.title).indexOf('未提交改动') >= 0)
