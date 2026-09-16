@@ -36,6 +36,7 @@ export const TARGETS = [
     parts: [
       'src/client/00-plugin.js',
       'src/client/10-state.js',
+      'src/client/12-window.js',
       'src/client/20-prefs.js',
       'src/client/30-watch.js',
       'src/client/40-format.js',

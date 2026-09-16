@@ -4,12 +4,17 @@
       const laneCount = Math.max(1, props.lanes)
       const width = laneCount * LANE_W + 6
       const height = commits.length * ROW_H
+      /* Only the rows inside the window are drawn, but their coordinates stay
+         absolute, because the svg still spans the whole list: an edge from a
+         visible row to a parent far below is still the same curve it was. */
+      const first = typeof props.first === 'number' ? props.first : 0
+      const last = typeof props.last === 'number' ? Math.min(props.last, rows.length) : rows.length
       const rowOf = {}
       for (let i = 0; i < commits.length; i += 1) rowOf[commits[i].hash] = i
       const cx = function (lane) { return lane * LANE_W + LANE_W / 2 + 3 }
       const cy = function (row) { return row * ROW_H + ROW_H / 2 }
       const shapes = []
-      for (let i = 0; i < rows.length; i += 1) {
+      for (let i = first; i < last; i += 1) {
         const row = rows[i]
         for (let k = 0; k < row.edges.length; k += 1) {
           const edge = row.edges[k]
@@ -29,7 +34,7 @@
           }))
         }
       }
-      for (let i = 0; i < rows.length; i += 1) {
+      for (let i = first; i < last; i += 1) {
         shapes.push(h('circle', {
           key: 'n' + i,
           cx: cx(rows[i].lane),
@@ -42,44 +47,79 @@
       }
       return h('svg', { className: 'gitops-graph', width: width, height: height }, shapes)
     }
+    /* Redrawn only when the history itself changes: picking a commit, hovering a
+       row or typing in the filter box does not move a single one of these lines. */
+    const GraphCanvasMemo = memo(GraphCanvas)
+
+    /* One commit, as its own component so that picking a commit repaints the two
+       rows whose highlight changed instead of every row on screen. `selected` is
+       a boolean rather than the picked hash for exactly that reason: the other
+       rows' props are then untouched by a new selection. */
+    function CommitRow(props) {
+      const commit = props.commit
+      const refs = splitRefs(commit.refs)
+      const chips = []
+      for (let k = 0; k < refs.length; k += 1) {
+        chips.push(h('span', { className: 'gitops-ref gitops-ref-' + refKind(refs[k]), key: 'r' + k }, refs[k]))
+      }
+      return h('div', {
+        className: 'gitops-crow' + (props.selected === true ? ' gitops-crow-sel' : ''),
+        key: commit.hash,
+        title: commit.hash + '\n' + commit.subject,
+        onClick: function () { props.onPick(commit.hash) },
+      },
+        h('span', { className: 'gitops-subject' }, commit.subject),
+        chips.length > 0 ? h('span', { className: 'gitops-refs' }, chips) : null,
+        h('span', { className: 'gitops-author' }, commit.author),
+        h('span', { className: 'gitops-date' }, relativeDate(commit.date)))
+    }
+    const CommitRowMemo = memo(CommitRow)
 
     function CommitList(props) {
       const graph = props.graph
-      if (graph == null || graph.ok !== true) {
+      const commits = graph != null && graph.ok === true && Array.isArray(graph.commits) ? graph.commits : null
+      const count = commits === null ? 0 : commits.length
+      /* The window has to be asked for before the two early returns below, or a
+         list that is empty on one render and full on the next would change how
+         many hooks this component calls. */
+      const win = useVirtualWindow('log', count, ROW_H)
+
+      if (commits === null) {
         const reason = graph != null && graph.error === 'not-a-repository'
           ? ('不是 git 仓库：' + text(graph.repo))
           : '无法读取提交历史'
         return h('div', { className: 'gitops-pane gitops-error' }, reason)
       }
-      const commits = graph.commits
-      if (commits.length === 0) return h('div', { className: 'gitops-pane gitops-dim' }, '没有匹配的提交')
+      if (count === 0) return h('div', { className: 'gitops-pane gitops-dim' }, '没有匹配的提交')
 
       const laneNum = Math.max(1, graph.lanes)
       const graphWidth = laneNum * LANE_W + 6
       const listRows = []
-      for (let i = 0; i < commits.length; i += 1) {
-        const commit = commits[i]
-        const refs = splitRefs(commit.refs)
-        const chips = []
-        for (let k = 0; k < refs.length; k += 1) {
-          chips.push(h('span', { className: 'gitops-ref gitops-ref-' + refKind(refs[k]), key: 'r' + k }, refs[k]))
-        }
-        listRows.push(h('div', {
-          className: 'gitops-crow' + (props.selected === commit.hash ? ' gitops-crow-sel' : ''),
-          key: commit.hash,
-          title: commit.hash + '\n' + commit.subject,
-          onClick: function () { props.onPick(commit.hash) },
-        },
-          h('span', { className: 'gitops-subject' }, commit.subject),
-          chips.length > 0 ? h('span', { className: 'gitops-refs' }, chips) : null,
-          h('span', { className: 'gitops-author' }, commit.author),
-          h('span', { className: 'gitops-date' }, relativeDate(commit.date))))
+      for (let i = win.first; i < win.last; i += 1) {
+        listRows.push(h(CommitRowMemo, {
+          key: commits[i].hash,
+          commit: commits[i],
+          selected: props.selected === commits[i].hash,
+          onPick: props.onPick,
+        }))
       }
 
-      return h('div', { className: 'gitops-log' },
-        h('div', { className: 'gitops-logwrap', style: { minHeight: (commits.length * ROW_H) + 'px' } },
-          h(GraphCanvas, { rows: graph.rows, commits: commits, lanes: graph.lanes }),
-          h('div', { style: { marginLeft: graphWidth + 'px' } }, listRows)))
+      /* Two spacers carry the rows that are not built, so the scrollbar keeps
+         describing the whole history and every built row lands on the pixel it
+         would have had. */
+      const padTop = win.first * ROW_H
+      const padBottom = (count - win.last) * ROW_H
+      return h('div', {
+        className: 'gitops-log',
+        ref: win.attach,
+        onScroll: win.measure,
+      },
+        h('div', { className: 'gitops-logwrap', style: { minHeight: (count * ROW_H) + 'px' } },
+          h(GraphCanvasMemo, { rows: graph.rows, commits: commits, lanes: graph.lanes, first: win.first, last: win.last }),
+          h('div', { style: { marginLeft: graphWidth + 'px' } },
+            padTop > 0 ? h('div', { key: 'pad-top', style: { height: padTop + 'px' } }) : null,
+            listRows,
+            padBottom > 0 ? h('div', { key: 'pad-bottom', style: { height: padBottom + 'px' } }) : null)))
     }
 
     function RefTree(props) {

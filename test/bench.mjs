@@ -273,93 +273,102 @@ async function openSwitcher() {
 }
 
 const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + label + (value ? '' : '   ← 不符合预期'))
+/* ── 性能基准：200 个提交的历史列表 ──
 
-/* ── 切换工作区：chip 不能还显示上一个工作区的分支 ── */
+   跑法：node test/bench.mjs
+         GP_SRC=<旧版 client.js> node test/bench.mjs     （对比重构前后）
+   输出：无高度信息（回退到全量渲染）与 600px 视口（窗口化）两组：
+         首次打开耗时、DOM 节点数、渲染行数、SVG 路径数，以及
+         面板稳定之后单遍重渲染的耗时。 */
 
-const realCall = host.call
-const panelArgs = []
-let panelResolvers = []
+const COUNT = 200
+const many = []
+for (let i = 0; i < COUNT; i += 1) {
+  many.push({
+    hash: 'h' + String(i).padStart(6, '0'),
+    subject: 'commit number ' + String(i) + ' with a reasonably long subject line',
+    author: i % 3 === 0 ? 'mays' : 'jiangzx',
+    date: '2026-09-16',
+    committedAt: nowSec - i * 60,
+    refs: i === 0 ? ['HEAD -> dev'] : (i % 40 === 0 ? ['tag: v' + String(i)] : []),
+  })
+}
+const manyRows = []
+for (let i = 0; i < COUNT; i += 1) {
+  manyRows.push({ lane: 0, edges: i + 1 < COUNT ? [{ hash: 'h' + String(i + 1).padStart(6, '0'), lane: 0 }] : [] })
+}
+graphCommits = many
+const realGraph = host.call
 host.call = function (method, args) {
-  if (method === 'git/panel') {
-    panelArgs.push(args)
-    return new Promise(function (resolve) { panelResolvers.push(resolve) })
+  if (method === 'git/graph') {
+    calls.push({ method, args })
+    return Promise.resolve({ ok: true, repo: '/tmp/ws', ref: 'main', currentBranch: 'main', commits: many, rows: manyRows, lanes: 1 })
   }
-  return realCall(method, args)
+  return realGraph.call(host, method, args)
 }
-const panelPending = () => panelResolvers.length
-const answerPanel = async (reply) => {
-  const resolve = panelResolvers.shift()
-  if (resolve === undefined) throw new Error('没有待决的 git/panel 请求')
-  resolve(reply)
-  await new Promise((r) => setTimeout(r, 5))
+
+/* 先把面板点开，否则它是隐藏的、什么都不读 */
+await openPanel()
+
+/* 视口：0 = 页面不肯说高度（窗口化之前的行为），600 = 真实滚动容器 */
+async function measureRun(viewport) {
+  const label = 'bench-' + String(viewport)
+  fakeNode.clientHeight = viewport
+  fakeNode.scrollTop = 0
+  const element = makeElement(popover, { sessionId: 's-1' })
+  const t0 = process.hrtime.bigint()
+  let tree = await renderUntilStable(element, label)
+  await wait(20)
+  tree = await renderUntilStable(element, label)
+  const openMs = Number(process.hrtime.bigint() - t0) / 1e6
+
+  /* 稳定之后量单遍重渲染：一次 renderRoot 就是一遍组件树，不受 settle 圈数影响 */
+  let pass = 0
+  for (let i = 0; i < 20; i += 1) {
+    const t = process.hrtime.bigint()
+    renderRoot(element, label)
+    pass += Number(process.hrtime.bigint() - t) / 1e6
+  }
+
+  return {
+    open: openMs,
+    pass: pass / 20,
+    nodes: collect(tree).length,
+    rows: byClass(tree, 'gitops-crow').length,
+    paths: collect(tree).filter((n) => n.type === 'path').length,
+  }
 }
-/* 同一个 fiber 换 props —— 这才是真实的「切换工作区」；label 必须稳定，
-   否则每次都是一个全新挂载的组件，测的就成了挂载而不是切换。 */
-const chipFor = (sessionId) => renderUntilStable(makeElement(chip, { sessionId: sessionId }), 'chip')
-const fireTimers = () => {
-  timers.filter((t) => t.kind === 'timeout' && !t.dead).forEach((t) => { t.dead = true; t.cb() })
+
+const full = await measureRun(0)
+const win = await measureRun(600)
+
+/* 点一个提交：选中态变了，理想情况下只重画两行 */
+fakeNode.scrollTop = 0
+const selectElement = makeElement(popover, { sessionId: 's-1' })
+let selectTree = await renderUntilStable(selectElement, 'bench-select')
+await wait(20)
+selectTree = await renderUntilStable(selectElement, 'bench-select')
+const clickable = byClass(selectTree, 'gitops-crow')
+const beforeSkips = memoSkips
+clickable[2].props.onClick()
+await wait(5)
+let selectMs = 0
+for (let i = 0; i < 10; i += 1) {
+  const t = process.hrtime.bigint()
+  renderRoot(selectElement, 'bench-select')
+  selectMs += Number(process.hrtime.bigint() - t) / 1e6
 }
-const branchesFor = (repo) => calls.filter((c) => c.method === 'git/branches' && c.args != null && c.args.repo === repo)
-const panelOf = (repo, branch, pending) => ({
-  ok: true, repo: repo, branch: branch, detached: false, upstream: 'origin/' + branch,
-  ahead: 0, behind: 0, sequencer: null,
-  staged: [], unstaged: new Array(pending || 0).fill('f'), untracked: [], unmerged: [],
-})
 
-console.log('== 先在那个工作区里待一会儿 ==')
-calls.length = 0
-let chipTree1 = await chipFor('s-1')
-ok('chip 先要求读这个工作区', panelArgs.length === 1 && panelArgs[0].sessionId === 's-1')
-await answerPanel(panelOf('/tmp/ws', 'main', 2))
-chipTree1 = await chipFor('s-1')
-console.log('  s-1 的按钮:', JSON.stringify(textOf(chipTree1)))
-ok('读到分支后按钮写 main', textOf(chipTree1).indexOf('main') >= 0)
-ok('带来改动数徽标', textOf(chipTree1).indexOf('2') >= 0)
-ok('顺手预热了这个仓库的分支列表（不用等打开弹层）', branchesFor('/tmp/ws').length === 1)
+/* 滚到深处：仍然只画视口里的行，而且首行要对得上 */
+fakeNode.scrollTop = 2600
+const scrolled = await renderUntilStable(makeElement(popover, { sessionId: 's-1' }), 'bench-2600')
+const scrolledRows = byClass(scrolled, 'gitops-crow')
+const pads = collect(scrolled).filter((n) => n.props && n.props.style && typeof n.props.style.height === 'string' && n.type === 'div' && n.props.style.height !== '26px')
 
-console.log('')
-console.log('== 切到另一个工作区：不能还挂着上一个的分支 ==')
-panelArgs.length = 0
-let chipTree2 = await chipFor('s-2')
-await new Promise((r) => setTimeout(r, 5))
-chipTree2 = await chipFor('s-2')
-console.log('  s-2 还没读回来时的按钮:', JSON.stringify(textOf(chipTree2)))
-ok('切过去后马上就不再显示上个工作区的 main', textOf(chipTree2).indexOf('main') < 0)
-ok('也不再挂着上个工作区的改动数', textOf(chipTree2).indexOf('2') < 0)
-ok('为 s-2 发了新的一次读', panelArgs.length >= 1 && panelArgs[panelArgs.length - 1].sessionId === 's-2')
-await answerPanel(panelOf('/tmp/ws2', 'dev', 1))
-chipTree2 = await chipFor('s-2')
-console.log('  s-2 读回来后的按钮:', JSON.stringify(textOf(chipTree2)))
-ok('读到后按钮写 dev', textOf(chipTree2).indexOf('dev') >= 0)
-ok('预热了 s-2 自己的仓库', branchesFor('/tmp/ws2').length === 1)
-
-console.log('')
-console.log('== 切回去：记忆里的分支立刻出现，不等往返 ==')
-ok('切到 s-2 之前没有遗留的未决读', panelPending() === 0)
-let chipTree3 = await chipFor('s-1')
-await new Promise((r) => setTimeout(r, 5))
-chipTree3 = await chipFor('s-1')
-console.log('  s-1 重新读回来之前的按钮:', JSON.stringify(textOf(chipTree3)), ' 未决读:', panelPending())
-ok('切回 s-1 立刻又显示 main（用的是记住的标签）', textOf(chipTree3).indexOf('main') >= 0)
-ok('这次读还没回来就已经显示了', panelPending() > 0)
-await answerPanel(panelOf('/tmp/ws', 'main', 0))
-chipTree3 = await chipFor('s-1')
-ok('读回来之后仍然是 main', textOf(chipTree3).indexOf('main') >= 0)
-
-console.log('')
-console.log('== 预热过的仓库：hover 卡片第一次渲染就有分支 ==')
-host.call = realCall
-calls.length = 0
-const chipTree4 = await chipFor('s-1')
-chipTree4.props.onPointerEnter()
-fireTimers()
-await wait(15)
-/* renderRoot 只渲染一遍、不等待 promise，所以「第一帧」是可观察的：
-   预热过的仓库这一帧就有分支行，没预热就只有「正在读取分支…」。 */
-const firstFrame = renderRoot(makeElement(popover, { sessionId: 's-2' }), 'pop')
-const firstCard = byClass(firstFrame, 'gitops-switch-hover')[0]
-ok('s-2 的 hover 卡片已经在了', firstCard !== undefined)
-const firstRows = firstCard === undefined ? [] : byClass(firstCard, 'gitops-bs-row')
-console.log('  第一帧里的行:', JSON.stringify(firstRows.map(textOf).slice(0, 5)))
-ok('预热过：第一帧就列出了分支（不是「正在读取分支…」）', firstRows.length > 0)
-ok('读的是 s-2 自己的仓库 /tmp/ws2', calls.filter((c) => c.method === 'git/branches').every((c) => c.args.repo === '/tmp/ws2'))
+const row = (label, m) => console.log('  ' + label.padEnd(14) + String(m.open.toFixed(1)).padStart(7) + 'ms' + String(m.nodes).padStart(7) + String(m.rows).padStart(7) + String(m.paths).padStart(7) + String(m.pass.toFixed(3)).padStart(9) + 'ms')
+console.log('  源文件          ' + String(process.env.GP_SRC || 'client.js'))
+console.log('  ' + ''.padEnd(14) + '首次打开'.padStart(9) + '节点'.padStart(6) + '提交行'.padStart(6) + '路径'.padStart(6) + '单遍渲染'.padStart(11))
+row('无高度信息', full)
+row('600px 视口', win)
+console.log('  选中一个提交后：单遍 ' + (selectMs / 10).toFixed(3) + 'ms，memo 命中 ' + String(memoSkips - beforeSkips) + ' 次（视口内 ' + clickable.length + ' 行）')
+console.log('  滚到 2600px：渲染 ' + scrolledRows.length + ' 行，首行 = ' + String(textOf(scrolledRows[0]).slice(0, 18)) + '，占位块 ' + pads.length + ' 个')

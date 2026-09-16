@@ -1,3 +1,49 @@
+    /* One branch row. Its own component so that a hover, a keystroke in the
+       filter or a new keyboard highlight repaints the rows whose state actually
+       changed instead of the whole list. */
+    function BranchRow(props) {
+      const row = props.row
+      const name = text(row.name)
+      const isCurrent = props.current === true
+      const starred = props.starred === true
+      const ahead = typeof row.ahead === 'number' ? row.ahead : 0
+      const behind = typeof row.behind === 'number' ? row.behind : 0
+      const upstream = text(row.upstream)
+      const where = text(props.where)
+      const when = branchRelative(row.committedAt)
+      const tip = []
+      if (text(row.subject).length > 0) tip.push(text(row.subject))
+      if (when.length > 0) tip.push(when)
+      tip.push(trackTitle(ahead, behind))
+      return h('div', {
+        className: 'gitops-bs-row' + (props.active === true ? ' gitops-bs-row-on' : '') + (isCurrent ? ' gitops-bs-row-cur' : '')
+          + (props.busy === true ? ' gitops-bs-busy' : '') + (props.flying === true ? ' gitops-bs-row-fly' : ''),
+        title: tip.join('\n'),
+        onMouseEnter: function (event) { props.onEnter(props.rowKey, props.at, event) },
+        onMouseLeave: function () { props.onLeave() },
+        onClick: function (event) { props.onPick(name, isCurrent, props.rowKey, event) },
+      },
+        h('button', {
+          key: 's', type: 'button',
+          className: 'gitops-bs-star' + (starred ? ' gitops-bs-star-on' : ''),
+          title: starred ? '取消收藏' : '收藏这个分支',
+          onClick: function (event) { props.onStar(name, event) },
+        }, h(Icon, { name: 'star', size: 12, filled: starred })),
+        h('span', { key: 'i', className: 'gitops-bs-ico' },
+          isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
+        h('span', { key: 'n', className: 'gitops-bs-name' }, name),
+        ahead > 0 ? h('span', { key: 'a', className: 'gitops-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'gitops-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
+        upstream.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, upstream)
+          : (where.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, where) : null),
+        h('button', {
+          key: 'm', type: 'button', className: 'gitops-bs-more',
+          title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
+          onClick: function (event) { props.onMenu(props.rowKey, event) },
+        }, h(Icon, { name: 'right', size: 12 })))
+    }
+    const BranchRowMemo = memo(BranchRow)
+
     function BranchPicker(props) {
       const version = useDataVersion()
       useBranchPrefs()
@@ -263,10 +309,16 @@
       /* Keyboard order is the visual order: the action rows first, then every
          group's rows, skipping whatever is collapsed. */
       const nav = []
+      /* row → its place in the keyboard order. The row loop below used to search
+         for it with findIndex, which is a scan of the whole list per row: three
+         hundred branches meant ninety thousand comparisons on every render, for
+         an answer that is already known while the list is being built. */
+      const navAt = new Map()
       for (let i = 0; i < actions.length; i += 1) nav.push({ kind: 'action', def: actions[i] })
       for (let g = 0; g < groups.length; g += 1) {
         if (collapsed[groups[g].id] === true) continue
         for (let i = 0; i < groups[g].rows.length; i += 1) {
+          navAt.set(groups[g].rows[i], nav.length)
           nav.push({ kind: 'row', row: groups[g].rows[i], remote: groups[g].remote, group: groups[g].id })
         }
       }
@@ -274,6 +326,50 @@
       /* The submenu IDEA opens beside a hovered branch. It keeps the same
          capabilities the inline strip had, in IDEA's order, with the destructive
          one last and behind the same two-step arm the strip used. */
+      /* ── the rows are memoised, so their props must not change for nothing ──
+
+         Moving the pointer down three hundred branches used to rebuild all three
+         hundred of them, because the keyboard highlight is state and every row
+         re-rendered when it moved. Handing each row its own component fixes that
+         only if the handlers it receives keep one identity across renders — and
+         the handlers above close over the state of the render that made them.
+
+         So they are rebuilt once and read the current state out of `live`, which
+         every render refreshes. `useState` is the holder because the box has to
+         belong to this component rather than to the file: two switchers in two
+         sessions must not share one. */
+      const [live] = React.useState(function () { return {} })
+      live.setIndex = setIndex
+      live.choose = choose
+      live.toggleStar = toggleStar
+      live.rowTop = rowTop
+      live.flyOpenSoon = flyOpenSoon
+      live.flyCloseSoon = flyCloseSoon
+      live.flyPin = flyPin
+      live.busy = busy
+      live.stash = stash
+
+      const onRowEnter = useCallback(function (rowKey, at, event) {
+        if (at >= 0) live.setIndex(at)
+        if (live.busy !== true) live.flyOpenSoon(rowKey, live.rowTop(event))
+      }, [])
+      const onRowLeave = useCallback(function () { live.flyCloseSoon() }, [])
+      const onRowClick = useCallback(function (name, isCurrent, rowKey, event) {
+        /* The current branch has nothing to check out, so the row click pins its
+           submenu — the touch/keyboard way to the same panel the pointer gets by
+           hovering. */
+        if (isCurrent === true) { live.flyPin(rowKey, live.rowTop(event)); return }
+        live.choose(name, live.stash)
+      }, [])
+      const onRowStar = useCallback(function (name, event) {
+        stopEvent(event)
+        live.toggleStar(name)
+      }, [])
+      const onRowMenu = useCallback(function (rowKey, event) {
+        stopEvent(event)
+        live.flyPin(rowKey, live.rowTop(event))
+      }, [])
+
       const rowActions = function (name, remote, isCurrent) {
         const items = []
         if (remote === true) {
@@ -363,56 +459,25 @@
         for (let r = 0; r < group.rows.length; r += 1) {
           const row = group.rows[r]
           const name = text(row.name)
-          const isCurrent = row.current === true
-          const starred = starredBranches.indexOf(name) >= 0
-          const at = nav.findIndex(function (entry) { return entry.kind === 'row' && entry.row === row })
-          const on = at >= 0 && at === index
-          const ahead = typeof row.ahead === 'number' ? row.ahead : 0
-          const behind = typeof row.behind === 'number' ? row.behind : 0
-          const upstream = text(row.upstream)
-          const where = group.remote === true ? text(row.remote) : ''
-          const when = branchRelative(row.committedAt)
-          const tip = []
-          if (text(row.subject).length > 0) tip.push(text(row.subject))
-          if (when.length > 0) tip.push(when)
-          tip.push(trackTitle(ahead, behind))
           const rowKey = (group.remote === true ? 'r:' : 'l:') + name
-          items.push(h('div', {
-            key: 'r:' + (group.remote === true ? where + '/' : '') + name,
-            className: 'gitops-bs-row' + (on ? ' gitops-bs-row-on' : '') + (isCurrent ? ' gitops-bs-row-cur' : '')
-              + (busy === true ? ' gitops-bs-busy' : '') + (fly !== null && fly.key === rowKey ? ' gitops-bs-row-fly' : ''),
-            title: tip.join('\n'),
-            onMouseEnter: function (event) {
-              if (at >= 0) setIndex(at)
-              if (busy !== true) flyOpenSoon(rowKey, rowTop(event))
-            },
-            onMouseLeave: function () { flyCloseSoon() },
-            onClick: function (event) {
-              /* The current branch has nothing to check out, so the row click
-                 pins its submenu — the touch/keyboard way to the same panel the
-                 pointer gets by hovering. */
-              if (isCurrent === true) { flyPin(rowKey, rowTop(event)); return }
-              choose(name, stash)
-            },
-          },
-            h('button', {
-              key: 's', type: 'button',
-              className: 'gitops-bs-star' + (starred ? ' gitops-bs-star-on' : ''),
-              title: starred ? '取消收藏' : '收藏这个分支',
-              onClick: function (event) { stopEvent(event); toggleStar(name) },
-            }, h(Icon, { name: 'star', size: 12, filled: starred })),
-            h('span', { key: 'i', className: 'gitops-bs-ico' },
-              isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
-            h('span', { key: 'n', className: 'gitops-bs-name' }, name),
-            ahead > 0 ? h('span', { key: 'a', className: 'gitops-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
-            behind > 0 ? h('span', { key: 'b', className: 'gitops-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
-            upstream.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, upstream)
-              : (where.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, where) : null),
-            h('button', {
-              key: 'm', type: 'button', className: 'gitops-bs-more',
-              title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
-              onClick: function (event) { stopEvent(event); flyPin(rowKey, rowTop(event)) },
-            }, h(Icon, { name: 'right', size: 12 }))))
+          const at = navAt.has(row) ? navAt.get(row) : -1
+          items.push(h(BranchRowMemo, {
+            key: 'r:' + (group.remote === true ? text(row.remote) + '/' : '') + name,
+            row: row,
+            rowKey: rowKey,
+            where: group.remote === true ? text(row.remote) : '',
+            at: at,
+            active: at >= 0 && at === index,
+            current: row.current === true,
+            starred: starredBranches.indexOf(name) >= 0,
+            busy: busy === true,
+            flying: fly !== null && fly.key === rowKey,
+            onEnter: onRowEnter,
+            onLeave: onRowLeave,
+            onPick: onRowClick,
+            onStar: onRowStar,
+            onMenu: onRowMenu,
+          }))
         }
       }
 

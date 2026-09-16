@@ -280,17 +280,20 @@
         return watchRepo(appliedRepo, sessionId, bump, props.active === true)
       }, [appliedRepo, repoOk, sessionId, props.active, props.ready])
 
-      const openCommit = function (hash) {
+      /* One identity for as long as the repository does not change: the commit
+         rows are memoised, and a handler rebuilt on every render would defeat
+         every one of them — including for the rows whose own state did not move. */
+      const openCommit = useCallback(function (hash) {
         setSelected(hash)
         pickedCommit = hash
         const request = base(appliedRepo)
         request.hash = hash
-        host.call('git/commit-detail', request).then(function (data) {
+        rpc('git/commit-detail', request).then(function (data) {
           setDetail(data)
-        }).catch(function (failure) {
+        }, function (failure) {
           setError(failureText(failure))
         })
-      }
+      }, [appliedRepo, sessionId])
 
       const toggle = function (path) {
         setCollapsed(function (previous) {

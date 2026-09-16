@@ -42,8 +42,33 @@ function makeElement(type, props, ...children) {
   merged.children = flat
   return { type: type, key: merged.key === undefined ? null : merged.key, props: merged }
 }
+/* memo：真实 React 会跳过 props 没变的子树，基准与断言都应该能看到这件事 */
+const memoCache = new Map()
+let memoSkips = 0
+function shallowSame(a, b) {
+  const ka = Object.keys(a)
+  const kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) { if (k === 'children') continue; if (a[k] !== b[k]) return false }
+  return true
+}
 const React = {
   createElement: makeElement,
+  memo(component) { return { $$memo: true, render: component } },
+  /* useCallback 按依赖记忆，和真实 React 一样：否则 memo 永远命中不了，
+     基准和断言也就看不到「行级记忆」到底有没有生效 */
+  useCallback(fn, deps) {
+    const fiber = currentFiber
+    const index = fiber.cursor
+    fiber.cursor += 1
+    const previous = fiber.memos === undefined ? undefined : fiber.memos[index]
+    if (previous !== undefined && Array.isArray(deps) && Array.isArray(previous.deps)
+      && deps.length === previous.deps.length && deps.every((d, i) => d === previous.deps[i])) return previous.fn
+    if (fiber.memos === undefined) fiber.memos = []
+    fiber.memos[index] = { deps: deps, fn: fn }
+    return fn
+  },
+  useMemo(factory) { return factory() },
   useState(initial) {
     const fiber = currentFiber
     const index = fiber.cursor
@@ -110,6 +135,17 @@ function renderRoot(element, label) {
     if (typeof node === 'string' || typeof node === 'number') return node
     if (Array.isArray(node)) return node.map((c, i) => render(c, path + '.' + i))
     const type = node.type
+    if (type != null && typeof type === 'object' && type.$$memo === true) {
+      const memoKey = path + '#' + (type.render.name || 'memo')
+      const previous = memoCache.get(memoKey)
+      if (previous !== undefined && shallowSame(previous.props, node.props)) {
+        memoSkips += 1
+        return previous.tree
+      }
+      const tree = render({ type: type.render, props: node.props, key: node.key, props2: null }, path)
+      memoCache.set(memoKey, { props: node.props, tree: tree })
+      return tree
+    }
     if (typeof type !== 'function') {
       const kids = (node.props.children || []).map((c, i) => render(c, path + '/' + i))
       const out = { type: type, key: node.key, props: Object.assign({}, node.props, { children: kids }) }
@@ -127,7 +163,7 @@ function renderRoot(element, label) {
     }
     const fiberKey = path + '#' + (type.name || 'anon') + '#' + (node.key === null ? '' : node.key)
     let fiber = fibers.get(fiberKey)
-    if (fiber === undefined) { fiber = { hooks: [], effects: [], cursor: 0, pending: [] }; fibers.set(fiberKey, fiber) }
+    if (fiber === undefined) { fiber = { hooks: [], memos: [], effects: [], cursor: 0, pending: [] }; fibers.set(fiberKey, fiber) }
     fiber.cursor = 0
     fiber.pending = []
     const previous = currentFiber
@@ -237,6 +273,7 @@ async function openSwitcher() {
 }
 
 const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + label + (value ? '' : '   ← 不符合预期'))
+
 /* ── 左侧分支树：单击只选中，双击才联动中间的历史 ── */
 
 /* 样式由 styles.insert 注入，测试里拿不到，预算要用的数字直接从源文件读 */
