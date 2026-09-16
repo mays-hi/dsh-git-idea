@@ -17,6 +17,7 @@ src/host/*.js        Host 源码片段（9 个）
 src/client/*.js      Client 源码片段（22 个）
 test/                断言套件 + 性能基准
 dsh-git-idea.json    （运行时生成）插件配置，默认 {initBranch:'main', cherryPickRecord:false}
+bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```
 
 `host.js` / `client.js` 的第一行就写着「GENERATED」。它们只是 `src/` 按
@@ -89,11 +90,20 @@ Client（`src/client/`）：
 
 WSL 重启、进程重启都会清掉动态插件。恢复只需要重新定义一次桥（一次批准）：
 
-- pluginId `dshgit-3`，包 `pkg-4`，名字 `dsh-git-idea`
+- pluginId `dshgit-3`，当前包 `pkg-5`，名字 `dsh-git-idea`
 - Host 半侧 = `test/gp34-bridge-host.js` 的内容
 - Client 半侧 = `test/gp34-bridge-client.js` 的内容
 - 桥从 `<DSH_HOME:-$HOME/.dsh>/dsh-git-idea/` 读 `host.js` 与 `client.js` 求值，
   并用 `harness.handle('dsh-git-idea/source')` 把 Client 半侧交给浏览器
+
+两半是**同时**被派发的，而 Client 挂载的那一刻就会 `git/panel`。所以桥先等
+Host 半侧装载完成才交付 Client 源码（否则面板会带着一串「未注册」的失败请求
+挂上去），装载失败会重试三次并写 `bridge.log`。客户端这边另有一层保险：
+`callHost()` 只对「is not registered」这一种拒绝重试（24 次 × 120ms），
+其余错误一次就报出来。
+
+`host.js` / `client.js` 的改动不需要重新批准：`node build.mjs` 之后把这个插件
+停止再运行即可。只有改**桥本身**才需要新包（`pkg-6` 之类）。
 
 `gitops` 时代的旧名字、旧 localStorage 键、旧目录都已经不再兼容：只认
 `<DSH_HOME>/dsh-git-idea`，只读 `dsh.git-idea.*` 这几个键。
