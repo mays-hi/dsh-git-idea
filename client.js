@@ -1733,10 +1733,13 @@ textarea.dsh-git-input{resize:vertical}
     }
 
     /* The identity of one request set, as a string: the effect below has to
-       re-read when the file or the mode changes, and an array rebuilt on every
-       render would look like a change every time. */
-    function diffShape(requests) {
-      const parts = []
+       re-read when the file, the mode or the rename's other path changes, and an
+       array rebuilt on every render would look like a change every time. The path
+       is in it and not only in the mode list: two files of one commit are the
+       same request shape, and a view that kept the first file's patch under the
+       second file's name would be the worst kind of wrong — plausible. */
+    function diffShape(requests, target) {
+      const parts = [text(target.path), text(target.from), text(target.ref)]
       for (let i = 0; i < requests.length; i += 1) {
         parts.push(requests[i].key + ':' + requests[i].mode + ':' + text(requests[i].ref))
       }
@@ -1864,7 +1867,7 @@ textarea.dsh-git-input{resize:vertical}
     function DiffView(props) {
       const target = props.target
       const requests = diffRequests(target)
-      const shape = diffShape(requests)
+      const shape = diffShape(requests, target)
       const [rows, setRows] = React.useState(null)
 
       React.useEffect(function () {

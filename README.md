@@ -29,7 +29,7 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（498 条断言）
+node test/run-all.mjs     # 全部套件（500 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
 node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）

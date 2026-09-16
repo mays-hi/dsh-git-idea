@@ -221,3 +221,17 @@ toolByTitle(tree, '重新读取这个文件的差异').props.onClick()
 await wait(10)
 await settle()
 ok('刷新键重新读一次同一个文件', diffCalls.length - beforeRefresh === 1 && diffCalls[diffCalls.length - 1].path === 'new.txt')
+
+/* ── 一条源码规矩 ──
+   差异的「身份」必须把路径算进去。同一个提交里的两个文件，请求的形状（模式、ref）
+   完全一样：少了路径，视图会把上一个文件的 patch 留在新文件的名字下面 —— 那是
+   最坏的一种错，因为它看起来是对的。现在从列表进差异必然先卸载再挂载，所以这条
+   还是预防性的；将来要是把列表和差异摆在一起，它就是承重的。 */
+const sourceText = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const shapeSource = sourceText.slice(sourceText.indexOf('function diffShape'), sourceText.indexOf('function hunkHeader'))
+console.log('')
+console.log('== 源码规矩 ==')
+ok('差异的身份里带着路径与重命名的旧路径',
+  shapeSource.indexOf('text(target.path)') >= 0 && shapeSource.indexOf('text(target.from)') >= 0)
+ok('那两行确实进了依赖表（shape 在 useEffect 的依赖里）',
+  sourceText.indexOf('[shape, props.repo, props.sessionId, props.sig]') >= 0)
