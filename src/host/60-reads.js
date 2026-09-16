@@ -106,9 +106,8 @@ async function pathKind(input, target) {
 
 /* One shell process answers everything the setup page needs: whether the path
    exists, what it is, git's own status with its exit code carried out
-   explicitly, whether an operation is caught half-done, and whether the
-   directory is empty. The previous shape cost two or three spawns for the same
-   information. */
+   explicitly, and whether an operation is caught half-done. The previous shape
+   cost two or three spawns for the same information. */
 /* ── the cheap half of a panel read ──
 
    `git status` stats every tracked file. On a Windows-mounted worktree of a few
@@ -119,14 +118,31 @@ async function pathKind(input, target) {
    on, where that branch stands against its upstream, and whether a cherry-pick,
    merge or rebase is half-done. The working tree is asked for separately, by the
    request that actually shows it. */
+/* ── one directory, no discovery ──
+
+   A workspace is a repository when **that directory** is one: `$dir/.git` (a
+   directory, or the file a worktree and a submodule keep there). Git's own
+   discovery would instead walk up and answer for whatever repository happens to
+   be above — the panel would name another project's branch, its watcher would
+   follow that repository's refs, and the answer for a bare subdirectory would
+   silently be about a tree the reader never pointed at. So every command below
+   tests that one path and stops there; nothing looks upward, and nothing looks
+   into the directory either. */
+function repoHere(target) {
+  return '[ -e ' + shq(target) + '/.git ]'
+}
+
 function panelIdentityCommand(target) {
   const quoted = shq(target)
   return [
     'if [ -d ' + quoted + ' ]; then',
     "  printf 'K:dir\\n'",
-    "  gd=$(git -C " + quoted + " rev-parse --absolute-git-dir 2>/dev/null)",
+    '  if ' + repoHere(target) + '; then',
+    '    gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
+    '  else',
+    "    gd=''",
+    '  fi',
     '  if [ -z "$gd" ]; then',
-    "    if [ -z \"$(ls -A " + quoted + " 2>/dev/null | head -n 1)\" ]; then printf 'E:1\\n'; else printf 'E:0\\n'; fi",
     "    printf 'RC:1\\n'",
     "    printf 'fatal: not a git repository\\n'",
     '  else',
@@ -156,14 +172,18 @@ function panelCommand(target) {
   return [
     'if [ -d ' + quoted + ' ]; then',
     "  printf 'K:dir\\n'",
-    "  out=$(git -C " + quoted + " -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1); rc=$?",
+    '  if ' + repoHere(target) + '; then',
+    "    out=$(git -C " + quoted + " -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1); rc=$?",
+    '  else',
+    "    out='fatal: not a git repository'; rc=1",
+    '  fi',
     "  printf '%s\\n' \"$out\"",
     "  printf 'RC:%s\\n' \"$rc\"",
-    '  case "$out" in',
-    "    *'not a git repository'*)",
-    "      if [ -z \"$(ls -A " + quoted + " 2>/dev/null | head -n 1)\" ]; then printf 'E:1\\n'; else printf 'E:0\\n'; fi ;; ",
-    '  esac',
-    '  gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
+    '  if [ $rc -eq 0 ]; then',
+    '    gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
+    '  else',
+    "    gd=''",
+    '  fi',
     '  if [ -n "$gd" ]; then',
     "    [ -e \"$gd/CHERRY_PICK_HEAD\" ] && printf 'S:cherry-pick\\n'",
     "    [ -e \"$gd/REVERT_HEAD\" ] && printf 'S:revert\\n'",
@@ -198,16 +218,26 @@ function panelCommand(target) {
    the signature is three stats, one for-each-ref and one small file read. */
 function watchCommand(target, deep) {
   const quoted = shq(target)
+  /* Every git call below is inside `[ -n "$gd" ]`: on a directory that is not a
+     repository, git would happily answer for one of its parents, and the
+     signature would then follow a tree this workspace does not own. */
+  const whenRepo = function (command) {
+    return '$(if [ -n "$gd" ]; then ' + command + '; fi)'
+  }
   const out = [
     "st() { stat -c '%Y:%s' \"$1\" 2>/dev/null || stat -f '%m:%z' \"$1\" 2>/dev/null; }",
-    "gd=$(git -C " + quoted + " rev-parse --absolute-git-dir 2>/dev/null)",
+    'if ' + repoHere(target) + '; then',
+    '  gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
+    'else',
+    "  gd=''",
+    'fi',
   ]
   if (deep === true) {
-    out.push("git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1")
+    out.push('if [ -n "$gd" ]; then git -C ' + quoted + ' --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1; fi')
   }
   out.push(
-    "printf 'F:%s\\n' \"$(git -C " + quoted + " for-each-ref --format='%(refname):%(objectname)' refs/heads refs/remotes 2>/dev/null)\"",
-    "printf 'H:%s\\n' \"$(git -C " + quoted + " rev-parse -q --verify HEAD 2>/dev/null)\"",
+    "printf 'F:%s\\n' \"" + whenRepo("git -C " + quoted + " for-each-ref --format='%(refname):%(objectname)' refs/heads refs/remotes 2>/dev/null") + "\"",
+    "printf 'H:%s\\n' \"" + whenRepo("git -C " + quoted + " rev-parse -q --verify HEAD 2>/dev/null") + "\"",
     "printf 'I:%s\\n' \"$(st \"$gd/index\")\"",
     /* The HEAD *file*, not just its stamp. Two branches can point at the same
        commit — `git switch -c` always does, and so does any pair left level by a
@@ -237,7 +267,6 @@ async function readPanelIdentity(input, target) {
   if (kind !== 'K:dir') return missingPanel(target, 'missing')
 
   let exitCode = null
-  let empty = false
   let sequencer = null
   let branch = null
   let upstream = null
@@ -246,8 +275,6 @@ async function readPanelIdentity(input, target) {
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i]
     if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
-    if (line === 'E:1') { empty = true; continue }
-    if (line === 'E:0') { empty = false; continue }
     if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
     if (line.indexOf('B:') === 0) { branch = line.slice(2); continue }
     if (line.indexOf('U:') === 0) { upstream = line.slice(2); continue }
@@ -255,7 +282,7 @@ async function readPanelIdentity(input, target) {
     body.push(line)
   }
   if (exitCode !== 0) {
-    const failed = missingPanel(target, empty ? 'empty-dir' : 'not-a-repo')
+    const failed = missingPanel(target, 'not-a-repo')
     failed.exitCode = exitCode
     failed.stderr = ''
     return failed
@@ -281,14 +308,11 @@ async function readPanel(input, target) {
   if (kind !== 'K:dir') return missingPanel(target, 'missing')
 
   let exitCode = null
-  let empty = false
   let sequencer = null
   const body = []
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i]
     if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
-    if (line === 'E:1') { empty = true; continue }
-    if (line === 'E:0') { empty = false; continue }
     if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
     body.push(line)
   }
@@ -296,7 +320,7 @@ async function readPanel(input, target) {
 
   if (exitCode !== 0) {
     const outsideRepo = output.indexOf('not a git repository') >= 0
-    const failed = missingPanel(target, outsideRepo ? (empty ? 'empty-dir' : 'not-a-repo') : 'git-error')
+    const failed = missingPanel(target, outsideRepo ? 'not-a-repo' : 'git-error')
     failed.exitCode = exitCode
     failed.stderr = outsideRepo ? '' : output
     return failed

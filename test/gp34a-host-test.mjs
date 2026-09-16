@@ -190,6 +190,43 @@ const detached = await H('git/panel')({ repo: W, quick: true })
 check('游离 HEAD 时身份读说 detached，chip 显示 HEAD', detached.branch === null && detached.detached === true)
 
 console.log('')
+console.log('=== 只认这一个目录：不向上找，也不往里看 ===')
+/* 工作区是仓库就在它自己身上：`$dir/.git`（worktree 和子模块那里是个文件）。
+   少了这道判断，git 会自己往上找 —— 面板会报出楼上某个仓库的分支，轮询也会跟着
+   那个仓库的引用走。 */
+const P = '/tmp/gp41-one-dir'
+await sh('rm -rf ' + P + ' && mkdir -p ' + P + '/inner/deep', '/tmp')
+await sh('git init -q -b main . && git config user.email t@t && git config user.name t && echo x > a.txt && git add -A && git commit -qm one', P)
+const panelAt = async (dir) => { await H('git/flush')({ repo: dir }); return await H('git/panel')({ repo: dir, quick: true }) }
+const watchAt = async (dir) => (await H('git/watch')({ repo: dir })).sig
+const atRoot = await panelAt(P)
+const atInner = await panelAt(P + '/inner')
+const atDeep = await panelAt(P + '/inner/deep')
+console.log('  仓库根目录      :', atRoot.ok === true ? '在 ' + atRoot.branch : atRoot.reason)
+console.log('  它的子目录      :', atInner.ok !== true ? atInner.reason : '在 ' + atInner.branch)
+check('仓库根目录本身照常是仓库', atRoot.ok === true && atRoot.branch === 'main')
+check('仓库的子目录：不认楼上那个仓库', atInner.ok !== true && atInner.reason === 'not-a-repo')
+check('再深一层也一样', atDeep.ok !== true && atDeep.reason === 'not-a-repo')
+const innerSig = await watchAt(P + '/inner')
+console.log('  子目录的轮询签名:', JSON.stringify(innerSig.replace(/\n/g, '|')))
+check('子目录的签名里没有楼上仓库的引用', innerSig.indexOf('refs/heads') < 0 && innerSig.indexOf('F:refs') < 0)
+
+/* 反过来：在子目录里自己建一个仓库，它就该被认出来 —— 规则看的是这个目录，
+   不是「不许有子目录」 */
+await sh('git init -q -b inner . && git config user.email t@t && git config user.name t', P + '/inner')
+const innerOwn = await panelAt(P + '/inner')
+const innerSig2 = await watchAt(P + '/inner')
+check('子目录自己成了仓库，就认它', innerOwn.ok === true && innerOwn.branch === 'inner')
+check('而且这时候签名变了（轮询能发现刚 init 的目录）', innerSig !== innerSig2)
+
+/* 空目录 / 随便一个目录：就是「不是仓库」，不再偷看里面有什么 */
+const E = '/tmp/gp41-empty'
+await sh('rm -rf ' + E + ' && mkdir -p ' + E, '/tmp')
+const empty = await panelAt(E)
+check('空目录也只是「不是仓库」，没有别的花样', empty.ok !== true && empty.reason === 'not-a-repo')
+check('连目录里有什么都不看（脚本里没有 ls）', body.indexOf('ls -A') < 0 && body.indexOf('ls -1') < 0)
+
+console.log('')
 console.log('=== 分支树需要的领先/落后 ===')
 await H('git/flush')({ repo: R })
 const refTree = await H('git/refs')({ repo: R })

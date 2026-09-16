@@ -1573,8 +1573,7 @@ textarea.dsh-git-input{resize:vertical}
       'no-path': { title: '无法确定要查看的仓库路径', hint: '会话工作区未知，请在下面手动填写一个目录。' },
       'missing': { title: '目录不存在', hint: '填写的路径在当前文件系统上找不到。改成一个存在的目录。' },
       'file': { title: '这不是一个目录', hint: '该路径指向一个文件，而 Git 仓库必须是一个目录。' },
-      'empty-dir': { title: '这是一个空目录', hint: '里面还没有任何文件 —— 正好可以在这里开始一个新仓库。' },
-      'not-a-repo': { title: '不在任何 Git 仓库中', hint: '该目录以及它的所有上级目录都没有 .git。' },
+      'not-a-repo': { title: '这个目录不是 Git 仓库', hint: '只看这个目录本身：不在它的上级目录里找，也不看它的子目录。' },
       'git-error': { title: 'git 命令执行失败', hint: '目录存在，但 git 没能读取它。下方是 git 的原话。' },
     }
 
@@ -3619,10 +3618,9 @@ textarea.dsh-git-input{resize:vertical}
       else if (isRepo) title = info.label + ' · ' + info.repo + ' · ' + count
       else if (info.reason === 'missing') title = '目录不存在：' + where + ' —— 点击修改路径'
       else if (info.reason === 'file') title = '这不是一个目录：' + where + ' —— 点击修改路径'
-      else if (info.reason === 'empty-dir') title = where + ' 是空目录 —— 点击可在这里初始化仓库'
       else if (info.reason === 'git-error') title = where + ' 读取失败 —— 点击查看原因'
       else if (info.reason === '') title = 'Git —— 点击打开面板'
-      else title = where + ' 不在任何 Git 仓库中 —— 点击选择路径或在这里初始化'
+      else title = where + ' 这个目录不是 Git 仓库 —— 点击选择路径或在这里初始化'
 
       const children = [h(BranchIcon, { key: 'icon', size: 14, plus: !isRepo && info.phase === 'none' })]
       if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))

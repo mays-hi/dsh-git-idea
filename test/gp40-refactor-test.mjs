@@ -729,3 +729,41 @@ const sectionReg = registered.find((r) => r.options.id === 'dsh-git-idea')
 ok('左栏里的名字就是页面上那行标题',
   sectionReg.options.label === 'dsh-git-idea配置'
   && textOf(byClass(await renderUntilStable(makeElement(section, {}), 'gp40-label'), 'dsh-git-set-h')[0]) === 'dsh-git-idea配置')
+
+/* ── 7. 工作区不是仓库时：只认这个目录 ── */
+
+console.log('')
+console.log('== 工作区不是仓库时的说明页 ==')
+/* 面板只说「这个目录不是仓库」：不声称查过上级目录，也不偷看里面有什么。
+   指路和初始化仍然留着 —— 那是人的决定，不是插件自己去探索。 */
+const beforeSetup = host.call
+host.call = function (method, args) {
+  if (method === 'git/panel') {
+    calls.push({ method: method, args: args })
+    return Promise.resolve({
+      ok: false, repo: '/home/u/work/plain', error: 'not-a-repository', reason: 'not-a-repo',
+      stderr: '', exitCode: 1, staged: [], unstaged: [], untracked: [], unmerged: [],
+    })
+  }
+  return beforeSetup(method, args)
+}
+let setupTree = null
+for (let i = 0; i < 4; i += 1) {
+  setupTree = await renderUntilStable(makeElement(popover, { sessionId: 's-setup' }), 'gp40-setup')
+  await wait(10)
+}
+const setupTitle = textOf(byClass(setupTree, 'dsh-git-setup-h')[0])
+const setupHints = byClass(setupTree, 'dsh-git-hint').map((n) => textOf(n)).join(' | ')
+const setupButtons = buttons(setupTree).filter((b) => String(b.props.className).indexOf('dsh-git-btn') >= 0).map((b) => textOf(b))
+console.log('  标题:', setupTitle)
+console.log('  说明:', setupHints)
+console.log('  按钮:', setupButtons.join(' / '))
+console.log('  展示的路径:', textOf(byClass(setupTree, 'dsh-git-setup-path')[0]))
+ok('标题只说这个目录不是仓库', setupTitle === '这个目录不是 Git 仓库')
+ok('不再声称「所有上级目录都没有 .git」',
+  setupHints.indexOf('所有上级目录') < 0 && setupHints.indexOf('都没有') < 0)
+ok('也不再声称看过目录里有什么', setupHints.indexOf('空目录') < 0 && setupHints.indexOf('没有任何文件') < 0)
+ok('说的是「只看这个目录本身」', setupHints.indexOf('只看这个目录本身') >= 0)
+ok('指路与初始化仍然在（不替用户做决定，也不挡着）',
+  setupButtons.indexOf('打开这个目录') >= 0 && setupButtons.indexOf('在此初始化仓库') >= 0)
+host.call = beforeSetup
