@@ -53,6 +53,10 @@ onRpc('git/commit-detail', function (input) { return commitDetailSnapshot(input)
    it is the live text of a file the reader is looking at. */
 onRpc('git/diff', function (input) { return readFileDiff(input) })
 
+/* git collapses an untracked directory into a single entry; this is what is
+   inside it, asked for only when the reader opens that row. */
+onRpc('git/untracked', function (input) { return readUntrackedTree(input) })
+
 onRpc('git/stage', function (input) {
   const paths = panelPaths(input)
   if (paths.length === 0) return { ok: false, error: 'no paths given' }

@@ -831,11 +831,12 @@ async function commitDetailSnapshot(input) {
    colour, `--no-ext-diff` because a configured diff driver is not a viewer, and
    `core.quotePath=false` so a non-ASCII path arrives as itself.
 
-   `--no-optional-locks` is the same rule every read here follows. Measured on
-   this box against a foreign `.git/index.lock` and against 120 concurrent
-   `git add`s, `git diff` succeeded either way — a diff does not take the index
-   lock, unlike `git status`. It stays for uniformity, not because a failure was
-   measured. */
+   `--no-optional-locks` is the same rule every read here follows, and here it is
+   load-bearing rather than decorative: measured on this box after `touch f` made
+   the cached stat stale, a plain `git diff` rewrote `.git/index` in 2 of 20 runs
+   while the flagged one did 0 of 20 (`git status` writes 20 of 20) — a read that
+   may refresh the index may also take the lock, occasionally being exactly the
+   case that hurts. */
 const DIFF_MODES = ['worktree', 'staged', 'commit', 'untracked']
 const DIFF_LINES_MAX = 6000
 const DIFF_CHARS_MAX = 400000
@@ -939,6 +940,42 @@ async function readFileDiff(input) {
     text: patch, added: counts.added, removed: counts.removed,
     binary: binary, truncated: truncated, empty: patch.length === 0,
     exitCode: result.exitCode,
+  }
+}
+
+/* ── what is inside an untracked directory ──
+
+   git reports an untracked directory as one entry ending in "/" and says nothing
+   about what is in it, which is exactly why the panel could not show those files:
+   it had nothing to show. Ticking the row needs no answer (`git add -- dir`
+   takes the whole thing); opening it is a second, deliberate act, and that is the
+   right moment to pay — `-uall` on a repository with one large untracked tree is
+   the cost git's own collapsing exists to avoid.
+
+   `ls-files --others --exclude-standard` lists the files `git add <dir>` would
+   take, honours .gitignore the same way, and is a read: `--no-optional-locks`,
+   no index write. Not cached — the directory is the thing most likely to be
+   changing while the reader looks at it. */
+const UNTRACKED_FILES_MAX = 2000
+
+async function readUntrackedTree(input) {
+  const raw = input != null && isStr(input.dir) ? input.dir : ''
+  const dir = raw.replace(/\/+$/, '')
+  const bad = repoRelativePath(dir)
+  if (bad.length > 0) return { ok: false, error: 'invalid-path', stderr: bad }
+  const result = await git(argsFor(input), ['--no-optional-locks', '-c', 'core.quotePath=false',
+    'ls-files', '--others', '--exclude-standard', '-z', '--', dir], null, { maxBytes: 800000 })
+  if (result.exitCode !== 0) {
+    return { ok: false, error: 'ls-files-failed', exitCode: result.exitCode, stderr: result.stderr, dir: dir }
+  }
+  const files = []
+  const parts = result.stdout.split('\u0000')
+  for (let i = 0; i < parts.length; i += 1) {
+    if (parts[i].length > 0 && files.length < UNTRACKED_FILES_MAX) files.push(parts[i])
+  }
+  return {
+    ok: true, dir: dir, files: files,
+    truncated: result.truncated === true || parts.length > UNTRACKED_FILES_MAX + 1,
   }
 }
 

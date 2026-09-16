@@ -48,6 +48,7 @@ const PATCH_COMMIT = L(
   '+added in commit')
 
 const diffCalls = []
+const untrackedCalls = []
 const baseCall = host.call
 host.call = function (method, args) {
   if (method === 'git/panel') {
@@ -60,7 +61,7 @@ host.call = function (method, args) {
     return Promise.resolve(Object.assign(reply, {
       staged: [{ path: 'src/app.js', code: 'M' }],
       unstaged: [{ path: 'src/app.js', code: 'M' }, { path: 'notes.md', code: 'M' }],
-      untracked: ['tmp.bin'],
+      untracked: ['tmp.bin', 'newdir/'],
       unmerged: [],
     }))
   }
@@ -70,6 +71,10 @@ host.call = function (method, args) {
       author: 'mays', email: 'mays@example.com', date: '2026-09-16T10:00:00',
       files: [{ status: 'R100', path: 'new.txt', from: 'old.txt' }], branches: ['main'],
     })
+  }
+  if (method === 'git/untracked') {
+    untrackedCalls.push(args)
+    return Promise.resolve({ ok: true, dir: args.dir, files: ['newdir/a.txt', 'newdir/deep/b.txt'], truncated: false })
   }
   if (method === 'git/diff') {
     diffCalls.push(args)
@@ -103,7 +108,7 @@ const modes = function () { return diffCalls.map(function (c) { return c.mode + 
 
 let tree = await openPanel()
 const changesTab = buttons(tree).find(function (b) { return textOf(b).indexOf('变更') >= 0 })
-ok('变更页签上带着未提交文件数（否则它只是个没有内容暗示的页签）', textOf(changesTab) === '变更3')
+ok('变更页签上带着未提交文件数（否则它只是个没有内容暗示的页签）', textOf(changesTab) === '变更4')
 changesTab.props.onClick()
 await wait(10)
 tree = await settle()
@@ -235,3 +240,83 @@ ok('差异的身份里带着路径与重命名的旧路径',
   shapeSource.indexOf('text(target.path)') >= 0 && shapeSource.indexOf('text(target.from)') >= 0)
 ok('那两行确实进了依赖表（shape 在 useEffect 的依赖里）',
   sourceText.indexOf('[shape, props.repo, props.sessionId, props.sig]') >= 0)
+
+/* ── 6. 勾选框那一列，和被折叠的未跟踪目录 ──
+   截图量出来的两件事：每个目录层级把勾选框往右推一格（深度 5 的时候框已经在
+   60px 处），所以一列框永远对不齐；而 git 折叠掉的未跟踪目录（路径以 / 结尾）
+   在树里根本没有行 —— 变更页签说 12 个，树里只数得出 10 个，那两个目录里的文件
+   既看不见也暂存不了。 */
+
+console.log('')
+console.log('== 勾选框那一列 ==')
+/* 上一节停在历史页的提交差异里：先退出来，再回到变更页 */
+toolByTitle(tree, '返回文件列表').props.onClick()
+await wait(10)
+tree = await settle()
+buttons(tree).find(function (b) { return textOf(b).indexOf('变更') >= 0 }).props.onClick()
+await wait(10)
+tree = await settle()
+
+const listRows = byClass(tree, 'dsh-git-trow').filter(function (r) { return String(r.props.className).indexOf('dsh-git-trow-head') < 0 })
+ok('每一行的第一个孩子都是勾选框（框在最左边一列）',
+  listRows.length >= 4 && listRows.every(function (r) {
+    const kids = r.props.children || []
+    return kids.length > 0 && String(kids[0].props.className).indexOf('dsh-git-cbox') >= 0
+  }))
+ok('行自己不再带缩进（缩进是行内的空块，所以框不会被推着走）',
+  listRows.every(function (r) { return r.props.style === undefined || r.props.style.paddingLeft === undefined }))
+const padOf = function (row) {
+  const pad = byClass(row, 'dsh-git-tind')[0]
+  return pad === undefined ? null : pad.props.style.width
+}
+ok('顶层行的缩进块宽度是 0', padOf(changeRow(tree, 'notes.md')) === '0px')
+ok('下一层是 12px（缩进仍然逐层加宽，只是不再动勾选框）',
+  padOf(changeRow(tree, 'app.js')) === '12px')
+
+console.log('')
+console.log('== 被折叠的未跟踪目录 ==')
+const dirRow = changeRow(tree, 'newdir/')
+ok('git 折叠掉的目录照样有一行（以前它被整行丢掉）', dirRow !== undefined)
+ok('这一行说得出自己是目录', byClass(dirRow, 'dsh-git-tdir').length === 1)
+ok('它也有展开的三角', byClass(dirRow, 'dsh-git-tw').length === 1)
+ok('它的缩进块和同层文件一样是 0', padOf(dirRow) === '0px')
+
+byClass(dirRow, 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+tree = await settle()
+ok('展开时才去读一次目录里的文件', untrackedCalls.length === 1 && untrackedCalls[0].dir === 'newdir/')
+ok('读的是这个会话的那次请求', untrackedCalls[0].sessionId === 's-1')
+
+const insideRow = changeRow(tree, 'a.txt')
+ok('目录里的文件成为子行', insideRow !== undefined)
+ok('子行按名字显示（相对目录的路径）', textOf(insideRow).indexOf('newdir') < 0)
+ok('子行缩进一层', padOf(insideRow) === '12px')
+ok('子行也是勾选框在最左', String((insideRow.props.children || [])[0].props.className).indexOf('dsh-git-cbox') >= 0)
+
+const beforeChildDiff = diffCalls.length
+insideRow.props.onClick()
+await wait(10)
+tree = await settle()
+const childAsk = diffCalls[diffCalls.length - 1]
+ok('点开目录里的文件就是它的差异', diffCalls.length - beforeChildDiff === 1
+  && childAsk.mode === 'untracked' && childAsk.path === 'newdir/a.txt')
+
+toolByTitle(tree, '返回文件列表').props.onClick()
+await wait(10)
+tree = await settle()
+const deepRow = changeRow(tree, 'deep/b.txt')
+ok('多层子路径也照常显示', deepRow !== undefined)
+const beforeChildStage = calls.length
+byClass(deepRow, 'dsh-git-cbox')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+tree = await settle()
+ok('子行的勾选框暂存的是那个文件本身',
+  calls.some(function (c) { return c.method === 'git/stage' && c.args.paths[0] === 'newdir/deep/b.txt' }))
+
+const beforeDirStage = calls.length
+const dirAgain = changeRow(tree, 'newdir/')
+byClass(dirAgain, 'dsh-git-cbox')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+await settle()
+ok('目录那一行的勾选框暂存整个目录（git add -- dir 不需要先列出内容）',
+  calls.some(function (c) { return c.method === 'git/stage' && c.args.paths[0] === 'newdir/' }))

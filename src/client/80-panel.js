@@ -53,6 +53,11 @@
          end in this one view, which is why it lives here and not in either. */
       const [diffTarget, setDiffTarget] = React.useState(null)
       const [diffAt, setDiffAt] = React.useState(0)
+      /* Which collapsed untracked directories are open, and what is inside the
+         ones that have been read. Keyed by the directory's path; the read happens
+         on the click that opens one, never for the whole tree up front. */
+      const [untrackedOpen, setUntrackedOpen] = React.useState({})
+      const [untrackedFiles, setUntrackedFiles] = React.useState({})
 
       /* work is the only truth about whether this path is a usable repository.
          Everything that reads refs, history or the index is gated on it, so a
@@ -111,6 +116,8 @@
         setSelectedKey(null)
         setDetail(null)
         setDiffTarget(null)
+        setUntrackedOpen({})
+        setUntrackedFiles({})
       }
 
       const bump = bumpData
@@ -347,6 +354,44 @@
           if (next[path] === true) delete next[path]
           else next[path] = true
           return next
+        })
+      }
+
+      /* Opening a collapsed untracked directory: the list of files inside is one
+         read, asked for at that moment and not before. The entry for this path is
+         dropped first so the rows say "正在读取…" instead of showing the previous
+         listing — after a stage or a commit that listing is what changed. */
+      const toggleUntracked = function (dir) {
+        if (untrackedOpen[dir] === true) {
+          const closed = Object.assign({}, untrackedOpen)
+          delete closed[dir]
+          setUntrackedOpen(closed)
+          return
+        }
+        const opened = Object.assign({}, untrackedOpen)
+        opened[dir] = true
+        setUntrackedOpen(opened)
+        setUntrackedFiles(function (previous) {
+          const next = Object.assign({}, previous)
+          delete next[dir]
+          return next
+        })
+        const request = base(appliedRepo)
+        request.dir = dir
+        callHost('git/untracked', request).then(function (data) {
+          const files = data != null && data.ok === true && Array.isArray(data.files) ? data.files : []
+          setUntrackedFiles(function (previous) {
+            const next = Object.assign({}, previous)
+            next[dir] = files
+            return next
+          })
+        }).catch(function (failure) {
+          setError(failureText(failure))
+          setUntrackedFiles(function (previous) {
+            const next = Object.assign({}, previous)
+            next[dir] = []
+            return next
+          })
         })
       }
 
@@ -834,6 +879,9 @@
              right is the same gesture, and a row that only highlights leaves the
              reader with no way to the text at all. */
           onOpenDiff: function (file) { setDiffTarget(changeDiffTarget(file)) },
+          untrackedOpen: untrackedOpen,
+          untrackedFiles: untrackedFiles,
+          onToggleUntracked: toggleUntracked,
         })
       } else {
         body = h('div', { className: 'dsh-git-body' },

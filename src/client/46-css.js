@@ -56,10 +56,14 @@
 .dsh-git-lclear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dsh-git-count{position:absolute;right:8px;top:5px;flex:none;font-size:11px;line-height:26px}
 .dsh-git-log{flex:1;overflow:auto}
-.dsh-git-trow{display:flex;align-items:center;gap:6px;padding:2px 6px 2px 0;cursor:pointer;white-space:nowrap;border-radius:4px;-webkit-user-select:none;user-select:none}
+.dsh-git-trow{display:flex;align-items:center;gap:6px;padding:2px 6px 2px 6px;cursor:pointer;white-space:nowrap;border-radius:4px;-webkit-user-select:none;user-select:none}
 .dsh-git-trow:hover{background:var(--dsw-alias-bg-layer-2)}
 .dsh-git-trow-sel{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-trow-sel:hover{background:var(--dsw-alias-interactive-bg-hover)}
+/* 树的缩进是行内的一个空块，不是行的 padding：勾选框要留在最左边一列才对得齐
+   （见 54-changes.js 里的注释）。 */
+.dsh-git-tind{flex:none;height:1px}
+.dsh-git-tdir{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
 /* The branch the graph is currently scoped to. Distinct from the selection: the
    selection moves on a single click, this only moves on a double click. */
 .dsh-git-tdirty{flex:none;margin-left:auto;padding:0 4px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary);font-size:10px;line-height:15px}

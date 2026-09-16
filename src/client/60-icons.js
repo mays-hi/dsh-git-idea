@@ -22,6 +22,10 @@
         'M9.4 4.2 C 11.6 4.5, 12.4 6, 11.2 7'],
       revert: ['M6.4 3.8 L3.2 7 L6.4 10.2', 'M3.2 7 H9.6 A3.4 3.4 0 0 1 9.6 13.8 H7.8'],
       tag: ['M3 3.4 H7.4 L13 9 L9 13 L3.4 7.4 Z', 'M5.6 5 A0.9 0.9 0 1 0 5.6 6.8 A0.9 0.9 0 1 0 5.6 5'],
+      /* An untracked directory git collapsed into one entry: the row has to say
+         "directory" on its own, because there is no listing behind it until it is
+         opened. */
+      folder: ['M2.2 4.4 H6.4 L7.8 6.2 H13.8 V12.4 H2.2 Z'],
       undo: ['M5.9 3.6 L2.7 6.8 L5.9 10', 'M2.7 6.8 H9.3 A3.5 3.5 0 0 1 9.3 13.8 H7.3'],
     }
     /* One field, one clear button: the × sits inside the box, where the eye

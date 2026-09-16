@@ -31,16 +31,26 @@
       for (let i = 0; i < entries.length; i += 1) {
         const segments = entries[i].segments
         if (segments.length === 0) continue
+        /* ── a directory git collapsed ──
+           An untracked directory arrives as one entry ending in "/" — that is
+           git saying "a directory, contents not listed". The last segment is
+           then empty, and the one before it names the row; the container has to
+           stop one level higher, or the row would be its own parent. Without
+           this the entry was dropped on the floor: the tree quietly showed 10 of
+           the 12 changes, the numbers under a folder did not add up to the count
+           on the tab, and those files could not be staged from here at all. */
+        const collapsed = segments[segments.length - 1].length === 0
+        const stops = collapsed ? segments.length - 2 : segments.length - 1
         let node = root
-        for (let k = 0; k < segments.length - 1; k += 1) {
+        for (let k = 0; k < stops; k += 1) {
           const key = segments[k]
           if (key.length === 0) continue
           if (node.children[key] === undefined) node.children[key] = { children: {}, leaves: [] }
           node = node.children[key]
         }
-        const name = segments[segments.length - 1]
-        if (name.length === 0) continue
-        node.leaves.push({ name: name, data: entries[i].data })
+        const name = collapsed ? (segments[stops] + '/') : segments[segments.length - 1]
+        if (name.length === 0 || name === '/') continue
+        node.leaves.push({ name: name, data: entries[i].data, dir: collapsed })
       }
       return root
     }
@@ -108,7 +118,7 @@
       }
       for (let i = 0; i < node.leaves.length; i += 1) {
         const leaf = node.leaves[i]
-        out.push({ kind: 'leaf', name: leaf.name, depth: depth, data: leaf.data, id: id + ':f:' + prefix + '/' + leaf.name })
+        out.push({ kind: 'leaf', name: leaf.name, depth: depth, data: leaf.data, dir: leaf.dir === true, id: id + ':f:' + prefix + '/' + leaf.name })
       }
       return out
     }

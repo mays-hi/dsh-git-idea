@@ -378,26 +378,31 @@ const afterTool = await indexStamp()
 console.log('  git_status 工具:', toolRead.ok === true ? 'ok' : String(toolRead.error), ' index 有没被动:', beforeTool !== afterTool)
 check('模型工具 git_status 也没有写 index', toolRead.ok === true && beforeTool === afterTool)
 
-/* 差异读（`git/diff`）照同一套规矩。这里量到的是：不带标志它本来也不写 index ——
-   所以那个标志在 diff 上是**统一**，不是修好了一个量到的故障。写下来是为了让后来
-   的人不必重新怀疑一次。 */
-await sh('touch f', LOCK)
-const beforeDiff = await indexStamp()
-await H('git/diff')({ repo: LOCK, mode: 'worktree', path: 'f' })
-const afterDiff = await indexStamp()
-check('diff 读没有写 index（不带标志也一样，见下一条）', beforeDiff === afterDiff)
+/* 差异读（`git/diff`）照同一套规矩，而且这里只钉能钉住的那一件事。
 
-/* argv 里确实带着那个标志，而且是在子命令前面（顶层选项的位置） */
-const seenCommands = []
+   先说量到的事实（20 次一组，同一台机器）：裸 `git diff` 在 `touch f` 之后
+   **2/20 次**重写了 .git/index，带 `--no-optional-locks` 的 **0/20** 次，而裸
+   `git status` 是 **20/20**。也就是说这条读确实会碰 index，但只在少数状态下
+   （stat 缓存过期那一类）——所以「跑一次、比 mtime」这种测法本身是不稳的：它
+   在带标志时也可能偶尔撞上（本套件在 Node 这一侧见过一次）。能稳定钉住的是
+   argv：四种模式发出去的每一条命令，标志都在子命令前面。 */
+const diffCommands = []
 const realRun = shellService.run
-shellService.run = function (spec) { seenCommands.push(spec.command); return realRun(spec) }
+shellService.run = function (spec) { diffCommands.push(spec.command); return realRun(spec) }
+await sh("printf 'x\\n' > untr.txt", LOCK)
+const lockHead = (await sh('git rev-parse HEAD', LOCK)).out.trim()
 await H('git/diff')({ repo: LOCK, mode: 'worktree', path: 'f' })
+await H('git/diff')({ repo: LOCK, mode: 'staged', path: 'f' })
+await H('git/diff')({ repo: LOCK, mode: 'untracked', path: 'untr.txt' })
+await H('git/diff')({ repo: LOCK, mode: 'commit', path: 'f', ref: lockHead })
 shellService.run = realRun
-const diffCommand = seenCommands.length > 0 ? seenCommands[seenCommands.length - 1] : ''
-console.log('  diff 的命令:', diffCommand)
-check('diff 的命令里 --no-optional-locks 在 diff 子命令前面',
-  diffCommand.indexOf("'--no-optional-locks'") >= 0
-  && diffCommand.indexOf("'--no-optional-locks'") < diffCommand.indexOf("'diff'"))
+console.log('  四种模式的命令:')
+for (const cmd of diffCommands) console.log('    ' + cmd)
+check('四种模式的命令里都带着 --no-optional-locks，而且在子命令前面',
+  diffCommands.length === 4 && diffCommands.every(function (cmd) {
+    const at = cmd.indexOf("'--no-optional-locks'")
+    return at >= 0 && at < cmd.search(/'diff'|'show'/)
+  }))
 
 /* 规矩写死在源码里：以后再加一条读状态的地方，忘了标志就红。
    只认真正的调用行（`git -C …` 的 shell 串，或 `git(args, […])` 的参数表），
@@ -607,6 +612,38 @@ await sh("printf 's\\nchanged\\n' > s.txt", D)
 const afterEdit = await H('git/diff')({ repo: D, mode: 'worktree', path: 's.txt' })
 check('改完再读就是新的（这是给正在看的那个人读的文本）',
   beforeEdit.empty === true && afterEdit.added === 1 && afterEdit.text.indexOf('+changed') > 0)
+
+/* ── 未跟踪目录里有什么 ──
+   git 把未跟踪目录折叠成一行（路径以 / 结尾），不说里面有什么。勾选整行不需要
+   答案；展开它是一次单独的读，`ls-files --others --exclude-standard` 列的正是
+   `git add <dir>` 会收的那些，.gitignore 同样生效。 */
+
+console.log('')
+console.log('=== 未跟踪目录里有什么 ===')
+await sh("mkdir -p newdir/deep && printf 'a\\n' > newdir/a.txt && printf 'b\\n' > newdir/deep/b.txt"
+  + " && printf 'c\\n' > newdir/c.bin && printf '*.log\\n' > .gitignore && printf 'x\\n' > newdir/skip.log", D)
+
+const listed = await H('git/untracked')({ repo: D, dir: 'newdir/' })
+console.log('  目录里:', JSON.stringify(listed.files))
+check('列出的是 git add <dir> 会收的那些文件（递归）',
+  listed.ok === true && listed.files.length === 3
+  && listed.files.indexOf('newdir/a.txt') >= 0 && listed.files.indexOf('newdir/deep/b.txt') >= 0
+  && listed.files.indexOf('newdir/c.bin') >= 0)
+check('被 .gitignore 排除的不在其中', listed.files.indexOf('newdir/skip.log') < 0)
+
+/* 对照：面板那一次读对同一个目录只有一行，没有内容 —— 展开是另一件事 */
+await H('git/flush')({ repo: D })
+const panelWithDir = await H('git/panel')({ repo: D })
+const collapsedRows = panelWithDir.untracked.filter(function (x) { return String(x.path).indexOf('newdir/') === 0 })
+console.log('  面板读里这个目录:', JSON.stringify(collapsedRows))
+check('（对照）面板那一次读只给一行、末尾带斜杠、没有内容',
+  collapsedRows.length === 1 && collapsedRows[0].path === 'newdir/')
+
+const dirEscape = await H('git/untracked')({ repo: D, dir: '../../etc' })
+check('目录同样不许跑出仓库', dirEscape.ok === false && dirEscape.error === 'invalid-path')
+
+const insideDiff = await H('git/diff')({ repo: D, mode: 'untracked', path: 'newdir/a.txt' })
+check('目录里的文件照样读得出差异', insideDiff.ok === true && insideDiff.added === 1)
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {
