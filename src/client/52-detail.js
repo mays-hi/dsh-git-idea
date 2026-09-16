@@ -21,17 +21,7 @@
       for (let i = 0; i < flat.length; i += 1) {
         const node = flat[i]
         if (node.kind === 'dir') {
-          fileRows.push(h('div', {
-            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
-            key: node.id,
-            style: { paddingLeft: (6 + node.depth * 12) + 'px' },
-            title: node.name + '（双击展开/折叠）',
-            onClick: function () { props.onSelect(node.id) },
-            onDoubleClick: function () { props.onToggle(node.path) },
-          },
-            twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-            h('span', { className: 'dsh-git-tname' }, node.name),
-            h('span', { className: 'dsh-git-tdim' }, String(node.count) + ' 个文件')))
+          fileRows.push(treeDirRow(node, props, String(node.count) + ' 个文件'))
         } else {
           const file = node.data || {}
           fileRows.push(h('div', {

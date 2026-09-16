@@ -45,7 +45,7 @@ export const TARGETS = [
       'src/client/30-watch.js',
       'src/client/40-format.js',
       'src/client/42-tree.js',
-      'src/client/44-twisty.js',
+      'src/client/44-treerow.js',
       'src/client/46-css.js',
       'src/client/50-log.js',
       'src/client/52-detail.js',

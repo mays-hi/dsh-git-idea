@@ -936,6 +936,28 @@ return {
       }, props.collapsed === true ? '▶' : '▼')
     }
 
+    /* The directory row, drawn the same way by every tree in the plugin: the log
+       sidebar, a commit's file list, the changes tree, the untracked directory's
+       own listing. One element, one set of classes, one gesture — a click selects
+       the row, a double click folds it, and the twisty is the second way to fold
+       the same thing.
+
+       Only the dim text at the right edge differs, and what it counts depends on
+       what the tree is a tree of ("12" branches, "3 个文件"), so that is the one
+       argument. */
+    function treeDirRow(node, props, dim) {
+      return h('div', {
+        className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
+        key: node.id,
+        style: { paddingLeft: (6 + node.depth * 12) + 'px' },
+        title: node.name + '（双击展开/折叠）',
+        onClick: function () { props.onSelect(node.id) },
+        onDoubleClick: function () { props.onToggle(node.path) },
+      },
+        twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
+        h('span', { className: 'dsh-git-tname' }, node.name),
+        h('span', { className: 'dsh-git-tdim' }, dim))
+    }
     ctx.effect(function () {
       return styles.insert(`
 .dsh-git-chip{display:inline-flex;align-items:center;gap:6px;height:28px;max-width:200px;padding:0 10px;border:none;border-radius:8px;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:13px;font-weight:500;line-height:20px;cursor:pointer;flex:none}
@@ -1522,17 +1544,7 @@ textarea.dsh-git-input{resize:vertical}
         for (let i = 0; i < flat.length; i += 1) {
           const node = flat[i]
           if (node.kind === 'dir') {
-            rows.push(h('div', {
-              className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
-              key: node.id,
-              style: { paddingLeft: (6 + node.depth * 12) + 'px' },
-              title: node.name + '（双击展开/折叠）',
-              onClick: function () { props.onSelect(node.id) },
-              onDoubleClick: function () { props.onToggle(node.path) },
-            },
-              twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-              h('span', { className: 'dsh-git-tname' }, node.name),
-              h('span', { className: 'dsh-git-tdim' }, String(node.count))))
+            rows.push(treeDirRow(node, props, String(node.count)))
           } else {
             const branchName = text(node.data)
             /* Looked up by name rather than carried on the leaf: the tree is
@@ -1617,17 +1629,7 @@ textarea.dsh-git-input{resize:vertical}
       for (let i = 0; i < flat.length; i += 1) {
         const node = flat[i]
         if (node.kind === 'dir') {
-          fileRows.push(h('div', {
-            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
-            key: node.id,
-            style: { paddingLeft: (6 + node.depth * 12) + 'px' },
-            title: node.name + '（双击展开/折叠）',
-            onClick: function () { props.onSelect(node.id) },
-            onDoubleClick: function () { props.onToggle(node.path) },
-          },
-            twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-            h('span', { className: 'dsh-git-tname' }, node.name),
-            h('span', { className: 'dsh-git-tdim' }, String(node.count) + ' 个文件')))
+          fileRows.push(treeDirRow(node, props, String(node.count) + ' 个文件'))
         } else {
           const file = node.data || {}
           fileRows.push(h('div', {

@@ -264,17 +264,7 @@
         for (let i = 0; i < flat.length; i += 1) {
           const node = flat[i]
           if (node.kind === 'dir') {
-            rows.push(h('div', {
-              className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
-              key: node.id,
-              style: { paddingLeft: (6 + node.depth * 12) + 'px' },
-              title: node.name + '（双击展开/折叠）',
-              onClick: function () { props.onSelect(node.id) },
-              onDoubleClick: function () { props.onToggle(node.path) },
-            },
-              twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-              h('span', { className: 'dsh-git-tname' }, node.name),
-              h('span', { className: 'dsh-git-tdim' }, String(node.count))))
+            rows.push(treeDirRow(node, props, String(node.count)))
           } else {
             const branchName = text(node.data)
             /* Looked up by name rather than carried on the leaf: the tree is

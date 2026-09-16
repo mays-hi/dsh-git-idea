@@ -1599,3 +1599,91 @@ ok('「是不是新增」只有一个读法（isNewFile 和 stageLocally 都走 
   && /function stageLocally[\s\S]{0,2000}addedInIndex\(/.test(panelCss))
 
 host.call = tickSaved
+
+/* ═══ 14. 提交下的文件列表：目录行 ═══
+   提交的文件列表和左侧的树画的是同一种目录行（同一个 `treeDirRow`）。这一节把
+   「同一种」钉住：以前没有任何一套件画过它 —— 每个套件给 `git/commit-detail` 的
+   files 都是一层的，目录行只有树那边有断言，所以那一份复制品可以静静地偏离。 */
+console.log('')
+console.log('== 提交下的文件列表：目录行 ==')
+const detailSaved = host.call
+host.call = function (method, args) {
+  if (method === 'git/commit-detail') {
+    return Promise.resolve({
+      ok: true, repo: '/tmp/ws', hash: (args && args.hash) || 'aaa111',
+      subject: 'detail subject', body: '', author: 'mays', date: '2026-09-16T10:00:00',
+      files: [
+        { status: 'M', path: 'deep/inner/app.js', from: null },
+        { status: 'A', path: 'deep/README.md', from: null },
+        { status: 'M', path: 'notes.md', from: null },
+      ],
+      branches: ['main'],
+    })
+  }
+  return detailSaved(method, args)
+}
+press(buttons(tree).find(function (b) { return textOf(b).indexOf('历史') >= 0 }), 'onClick')
+await wait(10)
+tree = await settle()
+press(byClass(tree, 'dsh-git-crow')[0], 'onClick')
+await wait(10)
+tree = await settle()
+
+const paneOf = function (t) { return byClass(t, 'dsh-git-detail')[0] }
+const paneRows = function (t) { return byClass(paneOf(t), 'dsh-git-trow') }
+/* 目录行带一个条数（`dsh-git-tdim`），文件行带状态字母 —— 这是两者的分界 */
+const paneDir = function (t, name) {
+  return paneRows(t).filter(function (r) {
+    return byClass(r, 'dsh-git-tdim').length === 1 && textOf(r).indexOf(name) >= 0
+  })[0]
+}
+const paneFile = function (t, name) {
+  return paneRows(t).filter(function (r) {
+    return byClass(r, 'dsh-git-tdim').length === 0 && textOf(r).indexOf(name) >= 0
+  })[0]
+}
+const deepDir = paneDir(tree, 'deep')
+ok('提交的文件列表里画出了目录行', deepDir !== undefined && paneDir(tree, 'inner') !== undefined)
+ok('目录行的条数说得清是什么的条数',
+  deepDir !== undefined && textOf(byClass(deepDir, 'dsh-git-tdim')[0]) === '2 个文件')
+ok('缩进按层级来（deep 6px，inner 18px）',
+  deepDir !== undefined && paneDir(tree, 'inner') !== undefined
+  && String(deepDir.props.style.paddingLeft) === '6px'
+  && String(paneDir(tree, 'inner').props.style.paddingLeft) === '18px')
+
+press(deepDir, 'onClick')
+await wait(10)
+tree = await settle()
+ok('单击目录行：只选中，不折叠（里面的行都还在）',
+  paneDir(tree, 'deep') !== undefined
+  && String(paneDir(tree, 'deep').props.className).indexOf('dsh-git-trow-sel') >= 0
+  && paneDir(tree, 'inner') !== undefined && paneFile(tree, 'notes.md') !== undefined)
+
+press(paneDir(tree, 'deep'), 'onDoubleClick')
+await wait(10)
+tree = await settle()
+ok('双击目录行：这一层折起来（深处的行不见了，别的还在）',
+  paneDir(tree, 'deep') !== undefined
+  && paneDir(tree, 'inner') === undefined
+  && paneFile(tree, 'notes.md') !== undefined)
+
+press(paneDir(tree, 'deep'), 'onDoubleClick')
+await wait(10)
+tree = await settle()
+ok('再双击展开：深处的行回来了', paneDir(tree, 'inner') !== undefined)
+
+/* 一处构造，两个调用点。谁再把它抄回去一份，这里就会红。 */
+ok('目录行只有一份构造，两个调用点（分支树和提交文件列表）',
+  (panelCss.match(/function treeDirRow/g) || []).length === 1
+  && (panelCss.match(/push\(treeDirRow\(node, props,/g) || []).length === 2)
+
+const beforeDetailDiff = diffCalls.length
+press(paneFile(tree, 'app.js'), 'onClick')
+await wait(10)
+tree = await settle()
+ok('从提交的文件列表点开的是那次提交的差异',
+  diffCalls.length - beforeDetailDiff === 1
+  && diffCalls[diffCalls.length - 1].mode === 'commit'
+  && diffCalls[diffCalls.length - 1].ref === 'aaa111'
+  && diffCalls[diffCalls.length - 1].path === 'deep/inner/app.js')
+host.call = detailSaved
