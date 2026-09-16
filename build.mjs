@@ -55,7 +55,6 @@ export const TARGETS = [
       'src/client/90-settings.js',
       'src/client/92-chip.js',
       'src/client/94-popover.js',
-      'src/client/96-navmark.js',
       'src/client/98-register.js',
     ],
   },

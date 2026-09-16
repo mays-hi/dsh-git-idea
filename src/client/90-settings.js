@@ -1,6 +1,7 @@
-    /* The section's name in the settings rail, and the page's own heading; the
-       git mark in the rail hangs off this same string, so the two cannot drift
-       apart. */
+    /* The section's name in the settings rail, and the page's own heading. The
+       rail's glyph for it stays the shell's gear: the registration contract is
+       id/order/label with no icon field, and swapping a glyph the shell owns
+       would be a workaround around its own tree, not a feature. */
     const SETTINGS_NAV_LABEL = 'dsh-git-idea配置'
 
     function GitSettingsSection(props) {

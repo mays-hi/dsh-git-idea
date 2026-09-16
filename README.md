@@ -29,7 +29,7 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（378 条断言）
+node test/run-all.mjs     # 全部套件（372 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
 node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）
@@ -68,8 +68,7 @@ Client（`src/client/`）：
 | `70-branchpicker` | 分支切换器（含 IDEA 式子菜单） |
 | `80-panel` | 主面板 |
 | `90-settings` / `92-chip` / `94-popover` | 设置页、输入框 chip、浮层 |
-| `96-navmark` | 设置左栏里我们那一项的名字与图标（外壳按 section id 给图标，未知的退回齿轮） |
-| `98-register` | 五个 slot 的注册 |
+| `98-register` | 四个 slot 的注册 |
 
 ## 界面：照 IDEA 的 Git Log 摆
 
@@ -96,11 +95,10 @@ Client（`src/client/`）：
 面板本身仍是挂在输入框上方的浮层（DSH 的面板就是这么承载的），
 不是 IDEA 那种可停靠的工具窗。
 
-设置页里的名字是 `dsh-git-idea配置`。左栏那个图标本来由外壳按 section id 挑，只有
-`models` / `agent-presets` / `plugins` 有专属字形，其余（包括我们）都退回齿轮，
-而注册选项只有 `id` / `order` / `label`，没有图标这一项 —— 所以插件只能把**自己
-那一行**标出来，再由样式表把齿轮藏掉、用遮罩画上 git 的分支标记：不碰外壳的树、
-不新增节点，外壳结构万一变了就什么也不做（齿轮留着）。
+设置页的名字是 `dsh-git-idea配置`。左栏那个图标仍由外壳给：它按 section id 挑，
+只有 `models` / `agent-presets` / `plugins` 有专属字形，其余（包括我们）都退回
+齿轮，而注册选项只有 `id` / `order` / `label`，没有图标这一项。**不绕路去改它** ——
+把外壳自己那棵树里的字形换掉不是插件该做的事；等外壳支持了再说。
 
 ## 性能
 

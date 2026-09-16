@@ -9,11 +9,6 @@
 .dsh-git-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:10px;line-height:1;flex:none}
 /* 上一个测量值还在，新的还没回来：留个位置，但看得出来还没核对 */
 .dsh-git-badge-stale{opacity:.45}
-/* 设置弹窗左栏里我们这一项：外壳给未知 section 的图标是那个齿轮，注册选项里
-   没有图标这一项，所以只能在自己这一行上换 —— 标记由 JS 加上，齿轮藏掉，
-   同一个 viewBox 里的分支标记用遮罩画出来，颜色跟着行本身（选中态也在内）。 */
-.dsh-git-navmark>svg{display:none}
-.dsh-git-navmark::before{content:"";flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Cg%20fill='%23000'%3E%3Ccircle%20cx='4'%20cy='3.5'%20r='1.7'/%3E%3Ccircle%20cx='4'%20cy='12.5'%20r='1.7'/%3E%3Ccircle%20cx='12'%20cy='6'%20r='1.7'/%3E%3C/g%3E%3Cg%20fill='none'%20stroke='%23000'%20stroke-width='1.6'%20stroke-linecap='round'%3E%3Cpath%20d='M4%205.4%20L4%2010.6'/%3E%3Cpath%20d='M4%208%20C%207.5%208,%208.5%206,%2010.2%206'/%3E%3C/g%3E%3C/svg%3E") center/16px 16px no-repeat;mask:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Cg%20fill='%23000'%3E%3Ccircle%20cx='4'%20cy='3.5'%20r='1.7'/%3E%3Ccircle%20cx='4'%20cy='12.5'%20r='1.7'/%3E%3Ccircle%20cx='12'%20cy='6'%20r='1.7'/%3E%3C/g%3E%3Cg%20fill='none'%20stroke='%23000'%20stroke-width='1.6'%20stroke-linecap='round'%3E%3Cpath%20d='M4%205.4%20L4%2010.6'/%3E%3Cpath%20d='M4%208%20C%207.5%208,%208.5%206,%2010.2%206'/%3E%3C/g%3E%3C/svg%3E") center/16px 16px no-repeat}
 .dsh-git-pop{position:absolute;left:8px;right:8px;bottom:100%;margin-bottom:8px;z-index:30;pointer-events:auto;box-sizing:border-box;height:74vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
 .dsh-git-top{display:flex;align-items:center;gap:8px;row-gap:6px;flex-wrap:wrap;flex:none;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);position:relative}
 .dsh-git-tabs{display:flex;gap:2px;flex:none}

@@ -17,14 +17,5 @@
         return slots.register({ name: 'settings.section', id: 'dsh-git-idea', order: 30, label: SETTINGS_NAV_LABEL }, GitSettingsSection)
       })
     }, 'dsh-git-idea settings section')
-
-    /* Not a control: this renders nothing. It exists so the settings modal has an
-       always-mounted seat of ours while it is open — which is where the rail's git
-       mark is kept, on whichever page the user happens to be looking at. */
-    ctx.effect(function () {
-      return slots.inject('settings.action', function () {
-        return slots.register({ name: 'settings.action', id: 'dsh-git-idea-navmark', order: 10 }, SettingsNavMark)
-      })
-    }, 'dsh-git-idea settings nav mark')
   },
 }
