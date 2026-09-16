@@ -32,8 +32,8 @@
            queue: coming back to a workspace you have used should not feel like
            waiting for the branch list twice. */
         prefetchBranches(sessionId, mine)
-        callHost('git/panel', request).then(function (data) {
-          if (!alive) return
+
+        const apply = function (data) {
           if (data != null && data.ok === true) {
             const branch = text(data.branch)
             const detached = data.detached === true
@@ -50,7 +50,6 @@
               repo: text(data.repo),
               reason: '',
             }
-            setInfo(chipLabels[sessionId])
           } else {
             chipInfos[sessionId] = { repo: data != null ? text(data.repo) : '', pending: 0 }
             chipLabels[sessionId] = {
@@ -58,8 +57,22 @@
               repo: data != null ? text(data.repo) : '',
               reason: data != null ? text(data.reason) : '',
             }
-            setInfo(chipLabels[sessionId])
           }
+          setInfo(chipLabels[sessionId])
+        }
+
+        /* Two reads, cheapest first. The identity read answers in about a fifth
+           of a second on a repository where the full one takes seven, and it
+           carries everything the chip shows except the change count — so the
+           workspace you switched to is named immediately and the badge catches
+           up. The full read also leaves the Host's cache warm for the panel,
+           which is what usually opens next. */
+        callHost('git/panel', Object.assign({ quick: true }, request)).then(function (data) {
+          if (!alive) return
+          apply(data)
+          callHost('git/panel', request).then(function (full) {
+            if (alive) apply(full)
+          }).catch(function () {})
         }).catch(function () {
           if (alive) setInfo({ phase: 'none', label: null, pending: 0, repo: '', reason: '' })
         })

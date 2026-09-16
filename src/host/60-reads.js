@@ -109,12 +109,54 @@ async function pathKind(input, target) {
    explicitly, whether an operation is caught half-done, and whether the
    directory is empty. The previous shape cost two or three spawns for the same
    information. */
+/* ── the cheap half of a panel read ──
+
+   `git status` stats every tracked file. On a Windows-mounted worktree of a few
+   thousand files that is the whole cost of opening the panel: measured on one
+   here, 7.0s for the status against 0.13s for the four commands below. Nothing
+   in the composer chip, and nothing in the panel's frame, needs the working
+   tree — they need to know whether this path is a repository, which branch it is
+   on, where that branch stands against its upstream, and whether a cherry-pick,
+   merge or rebase is half-done. The working tree is asked for separately, by the
+   request that actually shows it. */
+function panelIdentityCommand(target) {
+  const quoted = shq(target)
+  return [
+    'if [ -d ' + quoted + ' ]; then',
+    "  printf 'K:dir\\n'",
+    "  gd=$(git -C " + quoted + " rev-parse --absolute-git-dir 2>/dev/null)",
+    '  if [ -z "$gd" ]; then',
+    "    if [ -z \"$(ls -A " + quoted + " 2>/dev/null | head -n 1)\" ]; then printf 'E:1\\n'; else printf 'E:0\\n'; fi",
+    "    printf 'RC:1\\n'",
+    "    printf 'fatal: not a git repository\\n'",
+    '  else',
+    "    b=$(git -C " + quoted + " symbolic-ref --quiet --short HEAD 2>/dev/null)",
+    '    if [ -n "$b" ]; then',
+    "      printf 'B:%s\\n' \"$b\"",
+    "      printf 'U:%s\\n' \"$(git -C " + quoted + " for-each-ref --format='%(upstream:short)' \"refs/heads/$b\" 2>/dev/null)\"",
+    "      printf 'T:%s\\n' \"$(git -C " + quoted + " for-each-ref --format='%(upstream:track)' \"refs/heads/$b\" 2>/dev/null)\"",
+    '    fi',
+    "    [ -e \"$gd/CHERRY_PICK_HEAD\" ] && printf 'S:cherry-pick\\n'",
+    "    [ -e \"$gd/REVERT_HEAD\" ] && printf 'S:revert\\n'",
+    "    [ -e \"$gd/MERGE_HEAD\" ] && printf 'S:merge\\n'",
+    "    [ -d \"$gd/rebase-merge\" ] && printf 'S:rebase\\n'",
+    "    [ -d \"$gd/rebase-apply\" ] && printf 'S:rebase\\n'",
+    "    printf 'RC:0\\n'",
+    '  fi',
+    'elif [ -f ' + quoted + ' ]; then',
+    "  printf 'K:file\\n'",
+    'else',
+    "  printf 'K:none\\n'",
+    'fi',
+  ].join('\n')
+}
+
 function panelCommand(target) {
   const quoted = shq(target)
   return [
     'if [ -d ' + quoted + ' ]; then',
     "  printf 'K:dir\\n'",
-    "  out=$(git -C " + quoted + " -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=all 2>&1); rc=$?",
+    "  out=$(git -C " + quoted + " -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1); rc=$?",
     "  printf '%s\\n' \"$out\"",
     "  printf 'RC:%s\\n' \"$rc\"",
     '  case "$out" in',
@@ -149,23 +191,77 @@ function panelCommand(target) {
    poller racing the user's own `git add` makes THEIR command fail. Measured on
    this machine: 3 of 20 adds failed without the flag, 0 of 30 with it, and the
    reported status is identical either way. */
-function watchCommand(target) {
+/* What "did anything move?" costs. The status is the expensive part — seconds
+   on a slow mount, every tick — and it is only worth paying while something is
+   showing the working tree, which is what `deep` asks for. Everything else in
+   the signature is four stats and one for-each-ref. */
+function watchCommand(target, deep) {
   const quoted = shq(target)
-  return [
+  const out = [
     "st() { stat -c '%Y:%s' \"$1\" 2>/dev/null || stat -f '%m:%z' \"$1\" 2>/dev/null; }",
     "gd=$(git -C " + quoted + " rev-parse --absolute-git-dir 2>/dev/null)",
-    "git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1",
+  ]
+  if (deep === true) {
+    out.push("git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1")
+  }
+  out.push(
+    "printf 'F:%s\\n' \"$(git -C " + quoted + " for-each-ref --format='%(refname):%(objectname)' refs/heads refs/remotes 2>/dev/null)\"",
     "printf 'H:%s\\n' \"$(git -C " + quoted + " rev-parse -q --verify HEAD 2>/dev/null)\"",
     "printf 'I:%s\\n' \"$(st \"$gd/index\")\"",
     "printf 'R:%s\\n' \"$(st \"$gd/HEAD\")\"",
     "printf 'P:%s\\n' \"$(st \"$gd/packed-refs\")\"",
-  ].join('\n')
+  )
+  return out.join('\n')
 }
 
 function missingPanel(target, reason) {
   return {
     ok: false, repo: target, error: 'not-a-repository', reason: reason,
     stderr: '', exitCode: null, staged: [], unstaged: [], untracked: [], unmerged: [],
+  }
+}
+
+async function readPanelIdentity(input, target) {
+  const probe = await probeShell(input, panelIdentityCommand(target))
+  const lines = probe.stdout.split('\n')
+  const kind = lines.length > 0 ? lines[0] : ''
+  if (kind === 'K:file') return missingPanel(target, 'file')
+  if (kind !== 'K:dir') return missingPanel(target, 'missing')
+
+  let exitCode = null
+  let empty = false
+  let sequencer = null
+  let branch = null
+  let upstream = null
+  let track = ''
+  const body = []
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
+    if (line === 'E:1') { empty = true; continue }
+    if (line === 'E:0') { empty = false; continue }
+    if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
+    if (line.indexOf('B:') === 0) { branch = line.slice(2); continue }
+    if (line.indexOf('U:') === 0) { upstream = line.slice(2); continue }
+    if (line.indexOf('T:') === 0) { track = line.slice(2); continue }
+    body.push(line)
+  }
+  if (exitCode !== 0) {
+    const failed = missingPanel(target, empty ? 'empty-dir' : 'not-a-repo')
+    failed.exitCode = exitCode
+    failed.stderr = ''
+    return failed
+  }
+  const counts = trackCounts(track)
+  return {
+    ok: true, repo: target, branch: branch, detached: branch === null,
+    upstream: upstream !== null && upstream.length > 0 ? upstream : null,
+    ahead: counts.ahead, behind: counts.behind,
+    sequencer: sequencer,
+    staged: [], unstaged: [], untracked: [], unmerged: [],
+    /* Says outright that the working tree was not read, so nothing downstream
+       can mistake "no changes" for "not asked". */
+    partial: true,
   }
 }
 
@@ -212,13 +308,18 @@ async function readPanel(input, target) {
 async function panelSnapshot(input) {
   const target = repoFrom(input, null)
   if (target === undefined) return missingPanel(null, 'no-path')
+  /* Two tags, never one: a cheap answer cached under the full read's name would
+     hand an empty working tree to the changes tab. */
+  if (input != null && input.quick === true) {
+    return await cached(target, 'panel-ident', TTL_FOREVER, function () { return readPanelIdentity(input, target) })
+  }
   return await cached(target, 'panel', TTL_FOREVER, function () { return readPanel(input, target) })
 }
 
 async function readGraph(input, repo) {
   const args = argsFor(input)
   const requested = input != null && typeof input.maxCount === 'number' && input.maxCount > 0 ? Math.floor(input.maxCount) : 200
-  const maxCount = requested > 400 ? 400 : requested
+  const maxCount = requested > 20000 ? 20000 : requested
 
   const head = await git(args, ['-c', 'core.quotePath=false', 'symbolic-ref', '--quiet', '--short', 'HEAD'], null, {})
   const currentBranch = head.exitCode === 0 ? head.stdout.trim() : null
@@ -238,7 +339,9 @@ async function readGraph(input, repo) {
   const regex = input != null && input.regex === true
   const caseSensitive = input != null && input.caseSensitive === true
 
-  const argv = ['-c', 'core.quotePath=false', 'log', '--max-count=' + String(maxCount), '--date-order',
+  /* One commit more than asked for: the extra row is not returned, it is how
+     "there is more history" is answered without a second read. */
+  const argv = ['-c', 'core.quotePath=false', 'log', '--max-count=' + String(maxCount + 1), '--date-order',
     '--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x1f%P%x1e']
   if ((search.length > 0 && regex !== true) || author.length > 0) argv.push('--fixed-strings')
   if (search.length > 0) {
@@ -257,11 +360,13 @@ async function readGraph(input, repo) {
   if (logged.exitCode !== 0) {
     return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: logged.stderr, currentBranch: currentBranch, ref: ref, commits: [], rows: [], lanes: 1 }
   }
-  const commits = parseCommitRecords(logged.stdout)
+  const parsed = parseCommitRecords(logged.stdout)
+  const hasMore = parsed.length > maxCount
+  const commits = hasMore ? parsed.slice(0, maxCount) : parsed
   const layout = layoutGraph(commits, 14)
   return {
     ok: true, repo: logged.cwd, currentBranch: currentBranch, ref: ref, allRefs: allRefs,
-    commits: commits, rows: layout.rows, lanes: layout.lanes,
+    commits: commits, rows: layout.rows, lanes: layout.lanes, hasMore: hasMore, maxCount: maxCount,
   }
 }
 

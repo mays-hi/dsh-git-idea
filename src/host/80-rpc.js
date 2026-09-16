@@ -32,7 +32,8 @@ onRpc('git/config-save', function (input) {
 onRpc('git/watch', function (input) {
   const target = repoFrom(input, null)
   if (target === undefined) return { ok: false, repo: null, sig: '' }
-  return probeShell(input, watchCommand(target)).then(function (probe) {
+  const deep = input != null && input.deep === true
+  return probeShell(input, watchCommand(target, deep)).then(function (probe) {
     return { ok: true, repo: target, sig: probe.stdout }
   })
 })

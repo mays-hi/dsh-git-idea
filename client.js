@@ -502,7 +502,7 @@ return {
 
     function watcherFor(repo) {
       if (repoWatchers[repo] === undefined) {
-        repoWatchers[repo] = { listeners: new Set(), fast: 0, stop: null, sig: null, busy: false, sessionId: undefined }
+        repoWatchers[repo] = { listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false, sessionId: undefined }
       }
       return repoWatchers[repo]
     }
@@ -525,6 +525,10 @@ return {
         entry.busy = true
         const request = repo.length > 0 ? { repo: repo } : {}
         if (request.repo === undefined) request.sessionId = entry.sessionId
+        /* Only while something is showing the working tree: the deep signature
+           is the one that notices edits inside files, and it is the expensive
+           one — seconds on a slow mount, every tick. */
+        if (entry.deep > 0) request.deep = true
         callHost('git/watch', request).then(function (data) {
           entry.busy = false
           if (data == null || data.ok !== true) return
@@ -542,11 +546,12 @@ return {
       for (let i = 0; i < keys.length; i += 1) watcherSchedule(keys[i])
     }
 
-    function watchRepo(repo, sessionId, listener, fast) {
+    function watchRepo(repo, sessionId, listener, fast, deep) {
       const entry = watcherFor(repo)
       entry.sessionId = sessionId
       entry.listeners.add(listener)
       if (fast === true) entry.fast += 1
+      if (deep === true) entry.deep += 1
       if (watchPageDoc == null) {
         const node = chipNode != null ? chipNode : panelNode
         const doc = node != null ? node.ownerDocument : null
@@ -556,12 +561,17 @@ return {
       return function () {
         entry.listeners.delete(listener)
         if (fast === true && entry.fast > 0) entry.fast -= 1
+        if (deep === true && entry.deep > 0) entry.deep -= 1
         watcherSchedule(repo)
       }
     }
 
     const LANE_COLORS = ['#4a86e8', '#22a06b', '#d98e04', '#9b59b6', '#d64545', '#0e9aa7', '#b8860b', '#c2478f']
     const ROW_H = 26
+    /* One page of history. Big enough that nobody scrolls to the end of it by
+       accident, small enough that the first paint of a large repository is a
+       single read; `git log` says whether there is more. */
+    const PAGE_COMMITS = 200
     const LANE_W = 14
 
     const DATE_PRESETS = [
@@ -835,6 +845,7 @@ return {
 .dsh-git-ref-remote{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1)}
 .dsh-git-ref-tag{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary);border:1px solid var(--dsw-alias-border-l1)}
 .dsh-git-logwrap{position:relative}
+.dsh-git-more{display:flex;align-items:center;justify-content:center;gap:10px;padding:8px;font-size:11px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
 .dsh-git-graph{position:absolute;left:0;top:0;pointer-events:none}
 .dsh-git-btn{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-family:inherit;flex:none}
 .dsh-git-btn:disabled{opacity:.45;cursor:default}
@@ -1099,6 +1110,17 @@ textarea.dsh-git-input{resize:vertical}
          would have had. */
       const padTop = win.first * ROW_H
       const padBottom = (count - win.last) * ROW_H
+      /* The read stops at a page. When git had one commit more than the page
+         asked for, there is more history and the list offers it — the count is
+         the honest one, because a repository with ten thousand commits must not
+         have to say so in order to be readable. */
+      const more = graph.hasMore === true && typeof props.onLoadMore === 'function'
+        ? h('div', { key: 'more', className: 'dsh-git-more' },
+            h('span', { key: 'n', className: 'dsh-git-dim' }, '已显示 ' + String(count) + ' 条'),
+            h('button', {
+              key: 'b', type: 'button', className: 'dsh-git-btn', onClick: function () { props.onLoadMore() },
+            }, '加载更多'))
+        : null
       return h('div', {
         className: 'dsh-git-log',
         ref: win.attach,
@@ -1109,7 +1131,8 @@ textarea.dsh-git-input{resize:vertical}
           h('div', { style: { marginLeft: graphWidth + 'px' } },
             padTop > 0 ? h('div', { key: 'pad-top', style: { height: padTop + 'px' } }) : null,
             listRows,
-            padBottom > 0 ? h('div', { key: 'pad-bottom', style: { height: padBottom + 'px' } }) : null)))
+            padBottom > 0 ? h('div', { key: 'pad-bottom', style: { height: padBottom + 'px' } }) : null)),
+        more)
     }
 
     const NO_COLLAPSE = {}
@@ -2376,6 +2399,11 @@ textarea.dsh-git-input{resize:vertical}
       const [graph, setGraph] = React.useState(null)
       const [detail, setDetail] = React.useState(null)
       const [work, setWork] = React.useState(null)
+      /* The working tree, read separately from the repository's identity: on a
+         Windows-mounted worktree that part alone costs seconds, and nothing on
+         screen needs it before the frame is drawn. */
+      const [status, setStatus] = React.useState(null)
+      const [maxCount, setMaxCount] = React.useState(PAGE_COMMITS)
       const [message, setMessage] = React.useState('')
       const [selected, setSelected] = React.useState(null)
       const [selectedKey, setSelectedKey] = React.useState(null)
@@ -2418,9 +2446,22 @@ textarea.dsh-git-input{resize:vertical}
         return request
       }
 
+      /* Identity first, working tree after. The identity answer is what decides
+         whether this path is a repository at all, so waiting for `git status`
+         before drawing anything made every switch to an unused workspace feel
+         like the panel had hung. */
       const loadWork = function (repo) {
-        callHost('git/panel', base(repo)).then(function (data) {
+        const request = base(repo)
+        const asked = request.repo === undefined ? '' : request.repo
+        callHost('git/panel', Object.assign({ quick: true }, request)).then(function (data) {
           setWork(data)
+          if (data == null || data.ok !== true) { setStatus(null); return }
+          callHost('git/panel', request).then(function (full) {
+            /* A read that came back after the path changed is not this path's
+               answer; the effect below will load the new one anyway. */
+            if (asked !== appliedRepo && asked.length > 0) return
+            setStatus(full != null && full.ok === true ? full : null)
+          }).catch(function () { setStatus(null) })
         }).catch(function (failure) {
           setError(failureText(failure))
         })
@@ -2442,6 +2483,8 @@ textarea.dsh-git-input{resize:vertical}
       const applyRepo = function (next) {
         rememberRepo(sessionId, next)
         setAppliedRepo(next)
+        setStatus(null)
+        setMaxCount(PAGE_COMMITS)
         resetFilters()
         setSelected(null)
         setSelectedKey(null)
@@ -2593,7 +2636,7 @@ textarea.dsh-git-input{resize:vertical}
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
         let alive = true
         const request = base(appliedRepo)
-        request.maxCount = 200
+        request.maxCount = maxCount
         if (allRefs) request.allRefs = true
         else if (activeRef.length > 0) request.ref = activeRef
         if (search.length > 0) {
@@ -2631,7 +2674,7 @@ textarea.dsh-git-input{resize:vertical}
           if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
-      }, [appliedRepo, activeRef, allRefs, search, regexSearch, caseSensitive, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
+      }, [appliedRepo, activeRef, allRefs, search, regexSearch, caseSensitive, author, datePreset, pathFilter, maxCount, tab, repoOk, freshAt, props.ready])
 
       /* The panel node exists by the time effects run, so its document is the
          first place a remembered size or preference can be read from. */
@@ -2655,8 +2698,11 @@ textarea.dsh-git-input{resize:vertical}
          falls back to the chip's slow lane and shares that poller. */
       React.useEffect(function () {
         if (!repoOk || props.ready !== true) return undefined
-        return watchRepo(appliedRepo, sessionId, bump, props.active === true)
-      }, [appliedRepo, repoOk, sessionId, props.active, props.ready])
+        /* The deep signature is the one that notices edits inside files, and it
+           is the expensive one; it is worth paying only while the changes tab is
+           the thing being looked at. */
+        return watchRepo(appliedRepo, sessionId, bump, props.active === true, tab === 'changes')
+      }, [appliedRepo, repoOk, sessionId, props.active, props.ready, tab])
 
       /* One identity for as long as the repository does not change: the commit
          rows are memoised, and a handler rebuilt on every render would defeat
@@ -2699,7 +2745,7 @@ textarea.dsh-git-input{resize:vertical}
         })
       }
 
-      const changes = work != null && work.ok === true ? mergeChanges(work) : []
+      const changes = status != null && status.ok === true ? mergeChanges(status) : []
       let stagedCount = 0
       for (let i = 0; i < changes.length; i += 1) if (changes[i].staged === true) stagedCount += 1
 
@@ -2771,7 +2817,7 @@ textarea.dsh-git-input{resize:vertical}
       const ahead = work != null && work.ok === true ? work.ahead : 0
       const behind = work != null && work.ok === true ? work.behind : 0
       const sequencer = work != null && work.ok === true ? text(work.sequencer) : ''
-      const conflicts = work != null && work.ok === true ? work.unmerged.length : 0
+      const conflicts = status != null && status.ok === true ? status.unmerged.length : 0
 
       const tool = function (key, label, title, onClick, options) {
         const opts = options == null ? {} : options
@@ -2832,8 +2878,8 @@ textarea.dsh-git-input{resize:vertical}
               sessionId: sessionId,
               repo: appliedRepo,
               mode: 'panel',
-              dirty: work != null && work.ok === true
-                ? work.staged.length + work.unstaged.length + work.untracked.length + work.unmerged.length
+              dirty: status != null && status.ok === true
+                ? status.staged.length + status.unstaged.length + status.untracked.length + status.unmerged.length
                 : 0,
               onDone: function () { setSwitchMode(null) },
               onClose: function () { setSwitchMode(null) },
@@ -3113,7 +3159,7 @@ textarea.dsh-git-input{resize:vertical}
         })
       } else if (tab === 'changes') {
         body = h(ChangesPane, {
-          work: work,
+          work: status,
           collapsed: collapsed,
           busy: busy,
           message: message,
@@ -3138,7 +3184,12 @@ textarea.dsh-git-input{resize:vertical}
             toolbar,
             promptRow,
             upstreamHint,
-            h(CommitList, { graph: graph, selected: selected, onPick: openCommit })),
+            h(CommitList, {
+              graph: graph,
+              selected: selected,
+              onPick: openCommit,
+              onLoadMore: function () { setMaxCount(maxCount + PAGE_COMMITS) },
+            })),
           h(CommitDetail, {
             detail: detail, collapsed: collapsed, selectedKey: selectedKey,
             onToggle: toggle, onSelect: function (key) { setSelectedKey(key) },
@@ -3341,8 +3392,8 @@ textarea.dsh-git-input{resize:vertical}
            queue: coming back to a workspace you have used should not feel like
            waiting for the branch list twice. */
         prefetchBranches(sessionId, mine)
-        callHost('git/panel', request).then(function (data) {
-          if (!alive) return
+
+        const apply = function (data) {
           if (data != null && data.ok === true) {
             const branch = text(data.branch)
             const detached = data.detached === true
@@ -3359,7 +3410,6 @@ textarea.dsh-git-input{resize:vertical}
               repo: text(data.repo),
               reason: '',
             }
-            setInfo(chipLabels[sessionId])
           } else {
             chipInfos[sessionId] = { repo: data != null ? text(data.repo) : '', pending: 0 }
             chipLabels[sessionId] = {
@@ -3367,8 +3417,22 @@ textarea.dsh-git-input{resize:vertical}
               repo: data != null ? text(data.repo) : '',
               reason: data != null ? text(data.reason) : '',
             }
-            setInfo(chipLabels[sessionId])
           }
+          setInfo(chipLabels[sessionId])
+        }
+
+        /* Two reads, cheapest first. The identity read answers in about a fifth
+           of a second on a repository where the full one takes seven, and it
+           carries everything the chip shows except the change count — so the
+           workspace you switched to is named immediately and the badge catches
+           up. The full read also leaves the Host's cache warm for the panel,
+           which is what usually opens next. */
+        callHost('git/panel', Object.assign({ quick: true }, request)).then(function (data) {
+          if (!alive) return
+          apply(data)
+          callHost('git/panel', request).then(function (full) {
+            if (alive) apply(full)
+          }).catch(function () {})
         }).catch(function () {
           if (alive) setInfo({ phase: 'none', label: null, pending: 0, repo: '', reason: '' })
         })

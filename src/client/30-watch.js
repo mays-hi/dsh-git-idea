@@ -12,7 +12,7 @@
 
     function watcherFor(repo) {
       if (repoWatchers[repo] === undefined) {
-        repoWatchers[repo] = { listeners: new Set(), fast: 0, stop: null, sig: null, busy: false, sessionId: undefined }
+        repoWatchers[repo] = { listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false, sessionId: undefined }
       }
       return repoWatchers[repo]
     }
@@ -35,6 +35,10 @@
         entry.busy = true
         const request = repo.length > 0 ? { repo: repo } : {}
         if (request.repo === undefined) request.sessionId = entry.sessionId
+        /* Only while something is showing the working tree: the deep signature
+           is the one that notices edits inside files, and it is the expensive
+           one — seconds on a slow mount, every tick. */
+        if (entry.deep > 0) request.deep = true
         callHost('git/watch', request).then(function (data) {
           entry.busy = false
           if (data == null || data.ok !== true) return
@@ -52,11 +56,12 @@
       for (let i = 0; i < keys.length; i += 1) watcherSchedule(keys[i])
     }
 
-    function watchRepo(repo, sessionId, listener, fast) {
+    function watchRepo(repo, sessionId, listener, fast, deep) {
       const entry = watcherFor(repo)
       entry.sessionId = sessionId
       entry.listeners.add(listener)
       if (fast === true) entry.fast += 1
+      if (deep === true) entry.deep += 1
       if (watchPageDoc == null) {
         const node = chipNode != null ? chipNode : panelNode
         const doc = node != null ? node.ownerDocument : null
@@ -66,6 +71,7 @@
       return function () {
         entry.listeners.delete(listener)
         if (fast === true && entry.fast > 0) entry.fast -= 1
+        if (deep === true && entry.deep > 0) entry.deep -= 1
         watcherSchedule(repo)
       }
     }

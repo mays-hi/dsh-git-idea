@@ -22,12 +22,14 @@ ok('新键里的既有内容原样保留', JSON.parse(store['dsh.git-idea.stars'
 
 /* 改一个设置：写进的就是新键，而且写的是默认值而不是老键里的 7 秒 */
 const settingsTree = await renderUntilStable(makeElement(section, {}), 'gp40-store')
-/* 第一个勾选框属于「插件配置」（写进 Host 的配置文件），本浏览器的设置从第二个开始 */
+/* 第一个勾选框属于「插件配置」（写进 Host 的配置文件），本浏览器的设置从第二个开始。
+   挑最后一个（悬停切换）来拨：它不影响后面的用例，而 watchEnabled 关掉的话
+   整个套件后半段都不会再有轮询了。 */
 const localBoxes = inputs(settingsTree).filter((n) => n.props.type === 'checkbox')
-localBoxes[1].props.onChange({ target: { checked: false } })
+localBoxes[localBoxes.length - 1].props.onChange({ target: { checked: false } })
 await wait(10)
 const savedSettings = JSON.parse(store['dsh.git-idea.settings'])
-ok('设置写进 dsh.git-idea.settings', savedSettings.watchEnabled === false)
+ok('设置写进 dsh.git-idea.settings', savedSettings.hoverSwitch === false)
 ok('写进去的是默认值，不是老键里的 7 秒', savedSettings.watchFastSec === 3)
 
 /* 页面拒绝存储时：设置页照样渲染，写入不抛错 */
@@ -304,6 +306,72 @@ const noSelection = await settle()
 const emptyPane = byClass(noSelection, 'dsh-git-detail-empty')
 ok('右栏空态有自己的版式', emptyPane.length === 1 && textOf(emptyPane[0]).indexOf('选择一个提交') >= 0 && textOf(emptyPane[0]).indexOf('未选择提交') >= 0)
 
-/* 右栏空态：中间一句，底下再一句 */
-const empty = byClass(await settle(), 'dsh-git-detail-empty')
-ok('右栏空态有自己的版式', empty.length === 1 && textOf(empty[0]).indexOf('选择一个提交') >= 0 && textOf(empty[0]).indexOf('未选择提交') >= 0)
+/* ── 7. 加载更多 + 面板分两段读 + 轮询按需加深 ── */
+
+console.log('')
+console.log('== 加载更多 / 分两段读 ==')
+
+/* 比一页多的历史：260 条，第一页只能给 200 */
+graphCommits = many.concat(many.slice(0, 60).map((c, i) => Object.assign({}, c, { hash: 'x' + String(i).padStart(6, '0') })))
+const graphPage = function (args) {
+  const want = args != null && typeof args.maxCount === 'number' ? args.maxCount : 200
+  const slice = graphCommits.slice(0, want)
+  return {
+    ok: true, repo: '/tmp/ws', ref: 'main', currentBranch: 'main',
+    commits: slice, rows: graphRows(slice), lanes: 1,
+    hasMore: graphCommits.length > want, maxCount: want,
+  }
+}
+host.call = function (method, args) {
+  if (method !== 'git/graph') return plainCall2.call(host, method, args)
+  calls.push({ method, args })
+  return Promise.resolve(graphPage(args))
+}
+/* 触发一次重读：换个开关 */
+pick(await settle(), 'dsh-git-lf-flag')[0].props.onClick()
+await wait(20)
+let paged = await settle()
+ok('历史读到一页时列表底部给出「加载更多」', byClass(paged, 'dsh-git-more').length === 1 && textOf(byClass(paged, 'dsh-git-more')[0]).indexOf('已显示 200 条') >= 0)
+
+calls.length = 0
+buttons(byClass(paged, 'dsh-git-more')[0]).find((b) => textOf(b) === '加载更多').props.onClick()
+await wait(20)
+paged = await settle()
+const asks = calls.filter((c) => c.method === 'git/graph')
+ok('点它就去要更大的一页', asks.length >= 1 && asks[asks.length - 1].args.maxCount === 400)
+ok('第二页把剩下的也要来了（列表长到 260 行），底部收起来',
+  byClass(paged, 'dsh-git-more').length === 0
+  && byClass(paged, 'dsh-git-logwrap')[0].props.style.minHeight === String(260 * ROW_H) + 'px')
+
+/* 面板读工作区也是两段：先身份、后工作区 */
+calls.length = 0
+buttons(paged).find((b) => textOf(b) === '变更').props.onClick()
+await wait(20)
+const changesTab = await settle()
+const panelAsks = calls.filter((c) => c.method === 'git/panel')
+ok('切到变更页时先发便宜的身份读', panelAsks.length >= 1 && panelAsks[0].args.quick === true)
+
+/* 轮询：历史页用便宜的签名，变更页才加深 */
+buttons(changesTab).find((b) => textOf(b) === '历史').props.onClick()
+await wait(20)
+let logTab = await settle()
+const tickIntervals = async () => {
+  timers.filter((t) => t.kind === 'interval' && t.dead !== true).forEach((t) => t.cb())
+  await wait(10)
+}
+const lastWatch = () => calls.filter((c) => c.method === 'git/watch').pop()
+calls.length = 0
+await tickIntervals()
+const watchLog = lastWatch()
+ok('历史页的轮询不带 deep', watchLog !== undefined && watchLog.args.deep === undefined)
+
+calls.length = 0
+buttons(logTab).find((b) => textOf(b) === '变更').props.onClick()
+await wait(20)
+const backToChanges = await settle()
+await tickIntervals()
+const watchChanges = lastWatch()
+ok('变更页的轮询带 deep（要看工作区）', watchChanges !== undefined && watchChanges.args.deep === true)
+buttons(backToChanges).find((b) => textOf(b) === '历史').props.onClick()
+await wait(20)
+await settle()

@@ -275,7 +275,11 @@ tree = await openPanel()
 await wait(30)
 console.log('  无变化重开的 RPC:', JSON.stringify(calls.map((c) => c.method + ' @' + c.tree)))
 ok('没有重读历史/分支/作者', heavy().length === 0)
-ok('只有芯片自己那一次状态读（走缓存，0ms）', calls.length === 1 && calls[0].tree === 'chip')
+/* 芯片发两次：先便宜的「哪个仓库哪个分支」，再补工作区状态（走缓存，0ms） */
+const panelCalls = calls.filter((c) => c.method === 'git/panel')
+ok('只有芯片自己那两次状态读（走缓存，0ms）',
+  calls.length === 2 && panelCalls.length === 2 && calls.every((c) => c.tree === 'chip')
+  && panelCalls.filter((c) => c.args.quick === true).length === 1)
 ok('面板内容还在（标签页没丢）', textOf(tree).indexOf('历史') >= 0)
 
 console.log('')

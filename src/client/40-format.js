@@ -1,5 +1,9 @@
     const LANE_COLORS = ['#4a86e8', '#22a06b', '#d98e04', '#9b59b6', '#d64545', '#0e9aa7', '#b8860b', '#c2478f']
     const ROW_H = 26
+    /* One page of history. Big enough that nobody scrolls to the end of it by
+       accident, small enough that the first paint of a large repository is a
+       single read; `git log` says whether there is more. */
+    const PAGE_COMMITS = 200
     const LANE_W = 14
 
     const DATE_PRESETS = [

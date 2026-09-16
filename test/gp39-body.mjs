@@ -1,21 +1,31 @@
 
 /* ── 切换工作区：chip 不能还显示上一个工作区的分支 ── */
 
+/* 芯片现在分两段读：先便宜的「哪个仓库哪个分支」，再补工作区状态。
+   这个套件要观察的是**第一段还没回来**时的中间态，所以第一段挂住由测试
+   逐个放行，第二段（完整读）立刻用该会话已知的答案回掉 —— 它的时序不是
+   这里要考的东西。 */
 const realCall = host.call
 const panelArgs = []
 let panelResolvers = []
+const settled = {}
 host.call = function (method, args) {
   if (method === 'git/panel') {
     panelArgs.push(args)
-    return new Promise(function (resolve) { panelResolvers.push(resolve) })
+    const sid = args == null ? undefined : args.sessionId
+    if (args != null && args.quick === true) {
+      return new Promise(function (resolve) { panelResolvers.push({ sid: sid, resolve: resolve }) })
+    }
+    return Promise.resolve(settled[sid] !== undefined ? settled[sid] : { ok: false, repo: null, reason: '' })
   }
   return realCall(method, args)
 }
 const panelPending = () => panelResolvers.length
 const answerPanel = async (reply) => {
-  const resolve = panelResolvers.shift()
-  if (resolve === undefined) throw new Error('没有待决的 git/panel 请求')
-  resolve(reply)
+  const next = panelResolvers.shift()
+  if (next === undefined) throw new Error('没有待决的 git/panel 请求')
+  settled[next.sid] = reply
+  next.resolve(reply)
   await new Promise((r) => setTimeout(r, 5))
 }
 /* 同一个 fiber 换 props —— 这才是真实的「切换工作区」；label 必须稳定，

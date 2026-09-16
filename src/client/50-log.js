@@ -109,6 +109,17 @@
          would have had. */
       const padTop = win.first * ROW_H
       const padBottom = (count - win.last) * ROW_H
+      /* The read stops at a page. When git had one commit more than the page
+         asked for, there is more history and the list offers it — the count is
+         the honest one, because a repository with ten thousand commits must not
+         have to say so in order to be readable. */
+      const more = graph.hasMore === true && typeof props.onLoadMore === 'function'
+        ? h('div', { key: 'more', className: 'dsh-git-more' },
+            h('span', { key: 'n', className: 'dsh-git-dim' }, '已显示 ' + String(count) + ' 条'),
+            h('button', {
+              key: 'b', type: 'button', className: 'dsh-git-btn', onClick: function () { props.onLoadMore() },
+            }, '加载更多'))
+        : null
       return h('div', {
         className: 'dsh-git-log',
         ref: win.attach,
@@ -119,7 +130,8 @@
           h('div', { style: { marginLeft: graphWidth + 'px' } },
             padTop > 0 ? h('div', { key: 'pad-top', style: { height: padTop + 'px' } }) : null,
             listRows,
-            padBottom > 0 ? h('div', { key: 'pad-bottom', style: { height: padBottom + 'px' } }) : null)))
+            padBottom > 0 ? h('div', { key: 'pad-bottom', style: { height: padBottom + 'px' } }) : null)),
+        more)
     }
 
     const NO_COLLAPSE = {}

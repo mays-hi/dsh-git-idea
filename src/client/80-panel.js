@@ -10,6 +10,11 @@
       const [graph, setGraph] = React.useState(null)
       const [detail, setDetail] = React.useState(null)
       const [work, setWork] = React.useState(null)
+      /* The working tree, read separately from the repository's identity: on a
+         Windows-mounted worktree that part alone costs seconds, and nothing on
+         screen needs it before the frame is drawn. */
+      const [status, setStatus] = React.useState(null)
+      const [maxCount, setMaxCount] = React.useState(PAGE_COMMITS)
       const [message, setMessage] = React.useState('')
       const [selected, setSelected] = React.useState(null)
       const [selectedKey, setSelectedKey] = React.useState(null)
@@ -52,9 +57,22 @@
         return request
       }
 
+      /* Identity first, working tree after. The identity answer is what decides
+         whether this path is a repository at all, so waiting for `git status`
+         before drawing anything made every switch to an unused workspace feel
+         like the panel had hung. */
       const loadWork = function (repo) {
-        callHost('git/panel', base(repo)).then(function (data) {
+        const request = base(repo)
+        const asked = request.repo === undefined ? '' : request.repo
+        callHost('git/panel', Object.assign({ quick: true }, request)).then(function (data) {
           setWork(data)
+          if (data == null || data.ok !== true) { setStatus(null); return }
+          callHost('git/panel', request).then(function (full) {
+            /* A read that came back after the path changed is not this path's
+               answer; the effect below will load the new one anyway. */
+            if (asked !== appliedRepo && asked.length > 0) return
+            setStatus(full != null && full.ok === true ? full : null)
+          }).catch(function () { setStatus(null) })
         }).catch(function (failure) {
           setError(failureText(failure))
         })
@@ -76,6 +94,8 @@
       const applyRepo = function (next) {
         rememberRepo(sessionId, next)
         setAppliedRepo(next)
+        setStatus(null)
+        setMaxCount(PAGE_COMMITS)
         resetFilters()
         setSelected(null)
         setSelectedKey(null)
@@ -227,7 +247,7 @@
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
         let alive = true
         const request = base(appliedRepo)
-        request.maxCount = 200
+        request.maxCount = maxCount
         if (allRefs) request.allRefs = true
         else if (activeRef.length > 0) request.ref = activeRef
         if (search.length > 0) {
@@ -265,7 +285,7 @@
           if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
-      }, [appliedRepo, activeRef, allRefs, search, regexSearch, caseSensitive, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
+      }, [appliedRepo, activeRef, allRefs, search, regexSearch, caseSensitive, author, datePreset, pathFilter, maxCount, tab, repoOk, freshAt, props.ready])
 
       /* The panel node exists by the time effects run, so its document is the
          first place a remembered size or preference can be read from. */
@@ -289,8 +309,11 @@
          falls back to the chip's slow lane and shares that poller. */
       React.useEffect(function () {
         if (!repoOk || props.ready !== true) return undefined
-        return watchRepo(appliedRepo, sessionId, bump, props.active === true)
-      }, [appliedRepo, repoOk, sessionId, props.active, props.ready])
+        /* The deep signature is the one that notices edits inside files, and it
+           is the expensive one; it is worth paying only while the changes tab is
+           the thing being looked at. */
+        return watchRepo(appliedRepo, sessionId, bump, props.active === true, tab === 'changes')
+      }, [appliedRepo, repoOk, sessionId, props.active, props.ready, tab])
 
       /* One identity for as long as the repository does not change: the commit
          rows are memoised, and a handler rebuilt on every render would defeat
@@ -333,7 +356,7 @@
         })
       }
 
-      const changes = work != null && work.ok === true ? mergeChanges(work) : []
+      const changes = status != null && status.ok === true ? mergeChanges(status) : []
       let stagedCount = 0
       for (let i = 0; i < changes.length; i += 1) if (changes[i].staged === true) stagedCount += 1
 
@@ -405,7 +428,7 @@
       const ahead = work != null && work.ok === true ? work.ahead : 0
       const behind = work != null && work.ok === true ? work.behind : 0
       const sequencer = work != null && work.ok === true ? text(work.sequencer) : ''
-      const conflicts = work != null && work.ok === true ? work.unmerged.length : 0
+      const conflicts = status != null && status.ok === true ? status.unmerged.length : 0
 
       const tool = function (key, label, title, onClick, options) {
         const opts = options == null ? {} : options
@@ -466,8 +489,8 @@
               sessionId: sessionId,
               repo: appliedRepo,
               mode: 'panel',
-              dirty: work != null && work.ok === true
-                ? work.staged.length + work.unstaged.length + work.untracked.length + work.unmerged.length
+              dirty: status != null && status.ok === true
+                ? status.staged.length + status.unstaged.length + status.untracked.length + status.unmerged.length
                 : 0,
               onDone: function () { setSwitchMode(null) },
               onClose: function () { setSwitchMode(null) },
@@ -747,7 +770,7 @@
         })
       } else if (tab === 'changes') {
         body = h(ChangesPane, {
-          work: work,
+          work: status,
           collapsed: collapsed,
           busy: busy,
           message: message,
@@ -772,7 +795,12 @@
             toolbar,
             promptRow,
             upstreamHint,
-            h(CommitList, { graph: graph, selected: selected, onPick: openCommit })),
+            h(CommitList, {
+              graph: graph,
+              selected: selected,
+              onPick: openCommit,
+              onLoadMore: function () { setMaxCount(maxCount + PAGE_COMMITS) },
+            })),
           h(CommitDetail, {
             detail: detail, collapsed: collapsed, selectedKey: selectedKey,
             onToggle: toggle, onSelect: function (key) { setSelectedKey(key) },
