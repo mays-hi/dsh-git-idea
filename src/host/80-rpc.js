@@ -48,6 +48,11 @@ onRpc('git/branches', function (input) { return branchesSnapshot(input) })
 
 onRpc('git/commit-detail', function (input) { return commitDetailSnapshot(input) })
 
+/* The one read the panel asks for by path rather than by repository: the patch
+   behind a row in the changes tree or in a commit's file list. Never cached —
+   it is the live text of a file the reader is looking at. */
+onRpc('git/diff', function (input) { return readFileDiff(input) })
+
 onRpc('git/stage', function (input) {
   const paths = panelPaths(input)
   if (paths.length === 0) return { ok: false, error: 'no paths given' }

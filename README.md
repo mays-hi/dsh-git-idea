@@ -14,7 +14,7 @@ host.js              构建产物：Host 半侧（被桥读取并求值）——
 client.js            构建产物：Client 半侧（被桥读取并求值）—— 不要直接改
 build.mjs            源码树 → 上面两个文件的按序拼接
 src/host/*.js        Host 源码片段（9 个）
-src/client/*.js      Client 源码片段（22 个）
+src/client/*.js      Client 源码片段（23 个）
 test/                断言套件 + 性能基准
 dsh-git-idea.json    （运行时生成）插件配置，默认 {initBranch:'main', cherryPickRecord:false}
 bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
@@ -29,11 +29,11 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（408 条断言）
+node test/run-all.mjs     # 全部套件（498 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
 node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）
-node test/build-suites.mjs# 改了 harness/body 之后重新拼出 gp37~gp41 与基准文件
+node test/build-suites.mjs# 改了 harness/body 之后重新拼出 gp37~gp42 与基准文件
 ```
 
 改了源码之后要让它生效：`node build.mjs`，然后把这个动态插件 **停止再运行**
@@ -51,9 +51,9 @@ Host（`src/host/`）：
 | `30-render` | 工具返回值的人类可读渲染、`status --porcelain=v2` 解析 |
 | `40-tools` | 8 个模型工具的 `define` |
 | `50-graph` | 历史图的泳道布局 |
-| `60-reads` | 每仓库读缓存、路径解析、panel/graph/refs/branches/commit-detail 的读与写 |
+| `60-reads` | 每仓库读缓存、路径解析、panel/graph/refs/branches/commit-detail 的读与写，以及一个文件的差异（`git/diff`，四种状态） |
 | `70-config` | 插件配置文件与 `init` |
-| `80-rpc` | 22 个 `onRpc(...)` 注册 |
+| `80-rpc` | 23 个 `onRpc(...)` 注册 |
 
 Client（`src/client/`）：
 
@@ -65,6 +65,7 @@ Client（`src/client/`）：
 | `20-prefs` | 两层偏好：本浏览器 / 跟随插件 |
 | `30-watch` | 仓库变更轮询（面板 3s，chip 15s；页面隐藏时不轮询，切回页面立刻对一次） |
 | `40-format` … `62-branchstate` | 日期、状态、图标、树、缓存等无状态辅助 |
+| `55-diff` | 一个文件的差异：patch → 带两列行号的行、两段（已暂存 / 未暂存）、窗口化 |
 | `70-branchpicker` | 分支切换器（含 IDEA 式子菜单） |
 | `80-panel` | 主面板 |
 | `90-settings` / `92-chip` / `94-popover` | 设置页、输入框 chip、浮层 |
@@ -124,6 +125,59 @@ Client（`src/client/`）：
 只有 `models` / `agent-presets` / `plugins` 有专属字形，其余（包括我们）都退回
 齿轮，而注册选项只有 `id` / `order` / `label`，没有图标这一项。**不绕路去改它** ——
 把外壳自己那棵树里的字形换掉不是插件该做的事；等外壳支持了再说。
+
+## 看一个文件的差异
+
+面板一直能说**哪个文件改了**：变更树是一棵树，提交详情下面是文件列表。但两处的行
+都到那里为止 —— 没有任何一次读取返回过 patch，所以一个文件可以被报告成「改了」，
+却永远看不到「改成什么样」。缺的不是一个列表，是一次读取和一块地方。
+
+现在：**变更树里点任何一个文件、提交详情里点任何一个文件，patch 就占住整块正文**，
+顶上一条是返回箭头、路径、增删数，右上角是 `⟳`（重读）和「暂存 / 取消暂存」。三处
+决定值得写下来：
+
+- **点一下就是看差异，不再是「只选中」**。IDEA 的提交工具窗就是这个手感：选中一个
+  文件，右边就是它的差异。一行只会高亮而没有任何后续，是这块地方一直不被发现的
+  原因。返回键回到列表，列表的选中状态还在。
+- **差异占正文，不挤成第三栏**。左中右三栏再加一栏，剩给 patch 的宽度就读不了代码
+  了。所以它是「钻进去 + 返回」，而不是一个常驻窗格。
+- **`变更` 页签上带未提交文件数**。面板打开时停在历史页，一个只写着「变更」的页签
+  没有任何迹象说明后面有东西等着看；数字让这件事在历史页就看得见。
+
+四种状态，正好是两个列表可能处在的状态：
+
+| mode | git 命令 | 用在哪 |
+|---|---|---|
+| `staged` | `diff --cached -- <path>` | 变更树里已在索引里的那一段 |
+| `worktree` | `diff -- <path>` | 变更树里还没进索引的那一段 |
+| `untracked` | `diff --no-index -- /dev/null <path>` | 变更树里的 `??`（没有 HEAD 那一侧） |
+| `commit` | `show --format= --patch -m --first-parent <hash> -- <path…>` | 提交详情里的文件 |
+
+一个文件**同时**有两段（已暂存、暂存后又改了）时，读两次、分两个小节显示，和 IDEA
+一样；只有一段时只要一次读取，因为变更树的每一行本来就知道自己哪一段是空的。
+
+几个不是装饰的参数：
+
+- `--no-ext-diff`：用户配的 diff driver 是给编辑器看的，不是给这里看的。
+- `core.quotePath=false`：中文文件名要按它本身到达。
+- `-m --first-parent`（commit）：不加 `-m`，合并提交给的是**组合差异**，一次干净的
+  合并结果是空的 —— 文件列表说改了，patch 说没改。
+- 重命名的**旧路径一起给** git：只给新路径时 git 会把这次改动报成「新增文件」，而
+  `git show --name-status` 明明说的是 `R100`。
+- `--no-index` 的退出码是 **1**（「有差异」），不是错误；只有它和别的模式不一样。
+- **路径必须留在仓库里**。前三种模式走 pathspec，git 自己就不会跑出工作区；第四种
+  不行：`git diff --no-index -- /dev/null /etc/hostname` 会**真的读出那个文件**（在
+  这条机器上量过）。所以绝对路径和 `..` 被直接拒掉，`test/gp34a` 里连着对照一起
+  断言：同一条 git 命令绕过守卫确实读得出仓库外的文件，守卫是承重的。
+- **不是文本的不当文本**。git 只在文件头 8000 字节里找 NUL，所以一个没有 NUL 的二
+  进制会被**原样印出来**（量过：400 个随机字节变成一行 524 字符的噪声）。带 NUL 的
+  和带控制字符的都只回一句「二进制」，正文丢掉。
+- **不缓存**。这是给正在看的那个人读的文本：改完再读就是新的（`test/gp34a` 里对着
+  真仓库验的就是这一条）。超长补丁截到 6000 行 / 400000 字符，并自报截断。
+
+`src/client/55-diff.js` 是那块地方：patch 直接按行读成「两列行号 + 记号 + 文本」，
+不引第三方 diff 库 —— 需要的东西都在文本里（`@@` 的计数决定两侧行号）。长 patch 用
+的是历史列表同一套窗口化，所以几千行也只有视口那几十行在画。
 
 ## 写操作跑在谁的沙箱里
 
@@ -315,6 +369,12 @@ chip 读到的还是缓存里的旧分支。面板开着时快车道 3 秒，只
 里有两条防线 —— 一条在真仓库上量 `.git/index` 的 mtime（裸 status 必须能把它推动，
 这是对照；插件的面板完整读取和 `git_status` 工具必须推不动），一条在源码里点名，任何
 一条读状态的调用少了标志就红。
+
+**差异读是同一套规矩，但要说清楚量到了什么**：`git diff` 不拿 index 锁。手按一个
+`.git/index.lock` 在那里，`git diff` 照样退出 0；一边 120 次 `git add`、一边 120 次
+`git diff` 对撞，两边都是 0 次失败（加不加 `--no-optional-locks` 都一样）。所以那条
+命令上的标志是**统一**，不是修好了一个量到的故障 —— `git/diff` 里就是这么写的，免得
+后来的人以为去掉它会复现什么。
 
 顺带清掉一个误导：**后台 auto-gc 不碰 `index.lock`**。fetch 触发的
 `git maintenance run --auto` 跑的是 `pack-objects --indexed-objects` ——

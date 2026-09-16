@@ -47,6 +47,12 @@
       const [armed, setArmed] = React.useState('')
       const [prompt, setPrompt] = React.useState(null)
       const [needsUpstream, setNeedsUpstream] = React.useState(false)
+      /* The file whose patch is on screen, and a counter the refresh button
+         bumps. Null means the list the reader came from is on screen — the two
+         lists that can open a diff (the changes tree, a commit's file list) both
+         end in this one view, which is why it lives here and not in either. */
+      const [diffTarget, setDiffTarget] = React.useState(null)
+      const [diffAt, setDiffAt] = React.useState(0)
 
       /* work is the only truth about whether this path is a usable repository.
          Everything that reads refs, history or the index is gated on it, so a
@@ -104,6 +110,7 @@
         setSelected(null)
         setSelectedKey(null)
         setDetail(null)
+        setDiffTarget(null)
       }
 
       const bump = bumpData
@@ -741,14 +748,36 @@
         needsSetup
           ? h('span', { className: 'dsh-git-hint' }, '未检测到仓库')
           : h('div', { className: 'dsh-git-tabs' },
+              /* The count on 变更 is what makes the changed files findable at
+                 all: the panel opens on the history, and a tab that only says
+                 "变更" gives no sign that anything is waiting behind it. */
               h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'changes' ? ' dsh-git-tab-on' : ''),
-                onClick: function () { setTab('changes') } }, '变更'),
+                title: changes.length > 0
+                  ? String(changes.length) + ' 个文件有未提交的改动，点开可以逐个看差异'
+                  : '未提交的改动',
+                onClick: function () { setTab('changes'); setDiffTarget(null) } },
+                '变更',
+                changes.length > 0 ? h('span', { key: 'n', className: 'dsh-git-tool-badge' }, String(changes.length)) : null),
               h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'log' ? ' dsh-git-tab-on' : ''),
-                onClick: function () { setTab('log') } }, '历史')),
+                title: '提交历史', onClick: function () { setTab('log'); setDiffTarget(null) } }, '历史')),
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
         switchCard)
+
+      /* What the diff on screen was read from. The file's own state as the last
+         workspace read reported it, so staging it (from here or from the tree)
+         re-reads the patch instead of leaving the old one up, plus the counter
+         the refresh button bumps. */
+      let diffSig = String(diffAt)
+      if (diffTarget !== null && diffTarget.kind === 'file' && status != null && status.ok === true) {
+        for (let i = 0; i < changes.length; i += 1) {
+          if (changes[i].path === diffTarget.path) {
+            diffSig += '|' + (changes[i].staged === true ? 'S' : '-') + text(changes[i].indexCode) + text(changes[i].workCode)
+            break
+          }
+        }
+      }
 
       let body
       if (work == null) {
@@ -768,6 +797,24 @@
             loadWork(next)
           },
         })
+      } else if (diffTarget !== null) {
+        /* The diff takes the body, whichever list opened it, and the way back is
+           the arrow in its own header — a drill-down rather than a third pane,
+           because a pane narrow enough to fit beside two other columns is not
+           wide enough to read a patch in. */
+        body = h(DiffView, {
+          key: 'diff',
+          target: diffTarget,
+          repo: appliedRepo,
+          sessionId: sessionId,
+          sig: diffSig,
+          busy: busy,
+          onBack: function () { setDiffTarget(null) },
+          onRefresh: function () { setDiffAt(diffAt + 1) },
+          onStage: diffTarget.kind === 'file'
+            ? function (staged) { setStaged([{ path: diffTarget.path }], staged) }
+            : undefined,
+        })
       } else if (tab === 'changes') {
         body = h(ChangesPane, {
           work: status,
@@ -782,6 +829,11 @@
           onSetStagedAll: setStagedAll,
           onMessage: setMessage,
           onCommit: commit,
+          /* One click on a file row, in either list, is what opens the patch —
+             selecting a row in IDEA's commit window and getting its diff on the
+             right is the same gesture, and a row that only highlights leaves the
+             reader with no way to the text at all. */
+          onOpenDiff: function (file) { setDiffTarget(changeDiffTarget(file)) },
         })
       } else {
         body = h('div', { className: 'dsh-git-body' },
@@ -814,6 +866,17 @@
           h(CommitDetail, {
             detail: detail, collapsed: collapsed, selectedKey: selectedKey,
             onToggle: toggle, onSelect: function (key) { setSelectedKey(key) },
+            /* A file in a commit is the commit's own read: same path, but the
+               two states are that commit and its first parent. */
+            onOpenDiff: function (file) {
+              setDiffTarget({
+                kind: 'commit',
+                path: text(file.path),
+                from: text(file.from),
+                ref: detail != null ? text(detail.hash) : '',
+                status: text(file.status),
+              })
+            },
           }))
       }
 

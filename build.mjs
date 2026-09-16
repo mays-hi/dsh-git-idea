@@ -46,6 +46,7 @@ export const TARGETS = [
       'src/client/50-log.js',
       'src/client/52-detail.js',
       'src/client/54-changes.js',
+      'src/client/55-diff.js',
       'src/client/56-setup.js',
       'src/client/58-branchinfo.js',
       'src/client/60-icons.js',

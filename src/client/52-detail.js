@@ -38,8 +38,11 @@
             className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: (node.depth * 12) + 'px' },
-            title: text(file.path),
-            onClick: function () { props.onSelect(node.id) },
+            title: text(file.path) + '（点开看差异）',
+            onClick: function () {
+              props.onSelect(node.id)
+              if (typeof props.onOpenDiff === 'function') props.onOpenDiff(file)
+            },
           },
             h('span', { className: 'dsh-git-tw' }),
             h('span', { className: 'dsh-git-st' + statusClass(file.status) }, statusLabel(file.status)),

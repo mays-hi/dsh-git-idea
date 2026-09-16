@@ -12,8 +12,13 @@ function runShell(spec) {
   })
 }
 const handlers = new Map()
+/* The service object is held by name because the Host half captures it once, at
+   apply time (`const shell = ctx.get('shell')`): swapping `ctx.get` later would
+   change nothing, so a test that wants to see the command line has to wrap this
+   very object's `run`. */
+const shellService = { resolve: r => r, run: runShell }
 const ctx = {
-  get: n => (n === 'shell' ? { resolve: r => r, run: runShell } : undefined),
+  get: n => (n === 'shell' ? shellService : undefined),
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
 const TOOLS = new Map()
@@ -373,6 +378,27 @@ const afterTool = await indexStamp()
 console.log('  git_status 工具:', toolRead.ok === true ? 'ok' : String(toolRead.error), ' index 有没被动:', beforeTool !== afterTool)
 check('模型工具 git_status 也没有写 index', toolRead.ok === true && beforeTool === afterTool)
 
+/* 差异读（`git/diff`）照同一套规矩。这里量到的是：不带标志它本来也不写 index ——
+   所以那个标志在 diff 上是**统一**，不是修好了一个量到的故障。写下来是为了让后来
+   的人不必重新怀疑一次。 */
+await sh('touch f', LOCK)
+const beforeDiff = await indexStamp()
+await H('git/diff')({ repo: LOCK, mode: 'worktree', path: 'f' })
+const afterDiff = await indexStamp()
+check('diff 读没有写 index（不带标志也一样，见下一条）', beforeDiff === afterDiff)
+
+/* argv 里确实带着那个标志，而且是在子命令前面（顶层选项的位置） */
+const seenCommands = []
+const realRun = shellService.run
+shellService.run = function (spec) { seenCommands.push(spec.command); return realRun(spec) }
+await H('git/diff')({ repo: LOCK, mode: 'worktree', path: 'f' })
+shellService.run = realRun
+const diffCommand = seenCommands.length > 0 ? seenCommands[seenCommands.length - 1] : ''
+console.log('  diff 的命令:', diffCommand)
+check('diff 的命令里 --no-optional-locks 在 diff 子命令前面',
+  diffCommand.indexOf("'--no-optional-locks'") >= 0
+  && diffCommand.indexOf("'--no-optional-locks'") < diffCommand.indexOf("'diff'"))
+
 /* 规矩写死在源码里：以后再加一条读状态的地方，忘了标志就红。
    只认真正的调用行（`git -C …` 的 shell 串，或 `git(args, […])` 的参数表），
    免得把工具描述里那句 "Reads git status --porcelain=v2" 也算进来。 */
@@ -482,6 +508,105 @@ const unborn = await H('git/panel')({ repo: UNBORN, quick: true })
 console.log('  未出生分支:', JSON.stringify({ branch: unborn.branch, detached: unborn.detached, ok: unborn.ok }))
 check('还没有提交的分支，身份读照样报名字（读的是 HEAD 文件本身）',
   unborn.ok === true && unborn.branch === 'trunk' && unborn.detached === false)
+
+/* ── 一个文件的差异 ──
+   面板能说「哪个文件改了」很久了，但没有任何一次读取返回过 patch，所以两处的
+   文件行都到那里为止。这一节盯的就是补上的那次读取：四种状态各自的形状。 */
+
+console.log('')
+console.log('=== 差异读：四种状态 ===')
+const D = '/tmp/gp42-diffrepo'
+await sh('rm -rf ' + D + ' && mkdir -p ' + D + ' && cd ' + D + ' && git init -q -b main .'
+  + " && git config user.email t@t && git config user.name T"
+  + " && printf 'one\\ntwo\\nthree\\n' > a.txt && git add -A && git commit -qm one", '/tmp')
+
+const rootHash = (await sh('git rev-parse HEAD', D)).out.trim()
+const rootDiff = await H('git/diff')({ repo: D, mode: 'commit', path: 'a.txt', ref: rootHash })
+check('根提交也读得出来（它没有父提交）',
+  rootDiff.ok === true && rootDiff.added === 3 && rootDiff.removed === 0 && rootDiff.text.indexOf('new file mode') > 0)
+
+await sh("printf 'one\\ntwo changed\\nthree\\n' > a.txt && git add a.txt"
+  + " && printf 'one\\ntwo changed\\nthree\\nfour\\n' > a.txt", D)
+const stagedDiff = await H('git/diff')({ repo: D, mode: 'staged', path: 'a.txt' })
+const worktreeDiff = await H('git/diff')({ repo: D, mode: 'worktree', path: 'a.txt' })
+check('已暂存那一段：+1 −1，数的是改动行不是文件头',
+  stagedDiff.ok === true && stagedDiff.added === 1 && stagedDiff.removed === 1
+  && stagedDiff.text.indexOf('+two changed') > 0 && stagedDiff.text.indexOf('+++ b/a.txt') > 0)
+check('未暂存那一段：+1 −0（同一个文件，两种状态）',
+  worktreeDiff.ok === true && worktreeDiff.added === 1 && worktreeDiff.removed === 0
+  && worktreeDiff.text.indexOf('+four') > 0)
+
+await sh("printf 'brand new\\n' > n.txt", D)
+const untrackedDiff = await H('git/diff')({ repo: D, mode: 'untracked', path: 'n.txt' })
+check('未跟踪：--no-index 的退出码是 1，但补丁本身是好的',
+  untrackedDiff.ok === true && untrackedDiff.added === 1 && untrackedDiff.text.indexOf('new file mode') > 0)
+
+console.log('')
+console.log('  — 守卫 —')
+const absPath = await H('git/diff')({ repo: D, mode: 'untracked', path: '/etc/hostname' })
+console.log('  绝对路径 ->', JSON.stringify(absPath))
+check('绝对路径被拒（--no-index 会真的去读仓库外的文件）',
+  absPath.ok === false && absPath.error === 'invalid-path')
+/* 对照：同一个命令绕过守卫，读的就是仓库外的文件 —— 守卫是承重的，不是装饰 */
+const rawEscape = await sh('cd ' + D + ' && git --no-optional-locks diff --no-color --no-index -- /dev/null /etc/hostname | head -1', '/tmp')
+check('（对照）同一条 git 命令绕过守卫确实会读出 /etc/hostname',
+  rawEscape.out.indexOf('/etc/hostname') >= 0)
+check('.. 被拒', (await H('git/diff')({ repo: D, mode: 'worktree', path: '../x' })).error === 'invalid-path')
+check('未知 mode 被拒', (await H('git/diff')({ repo: D, mode: 'nope', path: 'a.txt' })).error === 'unknown-mode')
+check('commit 模式必须给哈希（选项串也过不去）',
+  (await H('git/diff')({ repo: D, mode: 'commit', path: 'a.txt', ref: '--output=/tmp/x' })).error === 'invalid-ref')
+
+console.log('')
+console.log('  — 不是文本的，不作文本 —')
+await sh("printf 'a\\000b' > c.bin && git add c.bin", D)
+const nulBinary = await H('git/diff')({ repo: D, mode: 'staged', path: 'c.bin' })
+check('带 NUL 的二进制：只说二进制，不给正文',
+  nulBinary.ok === true && nulBinary.binary === true && nulBinary.text.length === 0)
+/* git 只在头 8000 字节里找 NUL，所以没有 NUL 的二进制会被当成文本印出来 */
+await sh("head -c 400 /dev/urandom | tr -d '\\000' > r.bin", D)
+const noisyBinary = await H('git/diff')({ repo: D, mode: 'untracked', path: 'r.bin' })
+check('没有 NUL 的二进制也不当文本（否则面板里是一屏噪声）',
+  noisyBinary.ok === true && noisyBinary.binary === true && noisyBinary.text.length === 0)
+
+const cleanDiff = await H('git/diff')({ repo: D, mode: 'worktree', path: 'c.bin' })
+check('没有差异时是空补丁，不是错误', cleanDiff.ok === true && cleanDiff.empty === true && cleanDiff.text === '')
+
+await sh('for i in $(seq 1 7000); do echo "l$i" >> big.txt; done', D)
+const bigDiff = await H('git/diff')({ repo: D, mode: 'untracked', path: 'big.txt' })
+console.log('  超长补丁:', JSON.stringify({ truncated: bigDiff.truncated, lines: bigDiff.text.split('\n').length }))
+check('超长补丁截断并自报截断', bigDiff.ok === true && bigDiff.truncated === true && bigDiff.text.split('\n').length <= 6000)
+
+await sh("printf 'x\\n' > ./-dash.txt", D)
+const dashDiff = await H('git/diff')({ repo: D, mode: 'untracked', path: '-dash.txt' })
+check('以 - 开头的文件名照样当路径（-- 之后都是路径）', dashDiff.ok === true && dashDiff.added === 1)
+
+console.log('')
+console.log('  — 提交：重命名与合并 —')
+await sh('git add -A && git commit -qm two && git mv a.txt renamed.txt && git commit -qm rename', D)
+const renameHash = (await sh('git rev-parse HEAD', D)).out.trim()
+const renamed = await H('git/diff')({ repo: D, mode: 'commit', path: 'renamed.txt', from: 'a.txt', ref: renameHash })
+const renamedOnly = await H('git/diff')({ repo: D, mode: 'commit', path: 'renamed.txt', ref: renameHash })
+check('带上旧路径才认得出是一次重命名', renamed.ok === true && renamed.text.indexOf('rename from a.txt') > 0)
+check('（对照）只给新路径，git 报成新增', renamedOnly.text.indexOf('new file mode') > 0 && renamedOnly.text.indexOf('rename from') < 0)
+
+await sh('git checkout -q -b side HEAD~1 && echo s > s.txt && git add s.txt && git commit -qm side'
+  + ' && git checkout -q main && git merge -q --no-edit side', D)
+const mergeHash = (await sh('git rev-parse HEAD', D)).out.trim()
+const parentFields = (await sh('git rev-list --parents -n1 ' + mergeHash + ' | wc -w', D)).out.trim()
+const mergedDiff = await H('git/diff')({ repo: D, mode: 'commit', path: 's.txt', ref: mergeHash })
+console.log('  合并提交:', JSON.stringify({ parents: parentFields, added: mergedDiff.added, empty: mergedDiff.empty }))
+check('这确实是合并提交（三个字段：自己 + 两个父）', parentFields === '3')
+check('合并读的是第一父提交的差异（不加 -m 的话组合差异是空的）',
+  mergedDiff.ok === true && mergedDiff.added === 1 && mergedDiff.text.indexOf('+s') > 0)
+
+console.log('')
+console.log('  — 差异不缓存 —')
+await H('git/flush')({ repo: D })
+const beforeEdit = await H('git/diff')({ repo: D, mode: 'worktree', path: 's.txt' })
+await sh("printf 's\\nchanged\\n' > s.txt", D)
+const afterEdit = await H('git/diff')({ repo: D, mode: 'worktree', path: 's.txt' })
+check('改完再读就是新的（这是给正在看的那个人读的文本）',
+  beforeEdit.empty === true && afterEdit.added === 1 && afterEdit.text.indexOf('+changed') > 0)
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {

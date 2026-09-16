@@ -267,6 +267,33 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-check{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dsh-git-bs-rescue{align-self:flex-start;padding:3px 10px;border-radius:6px;border:1px solid var(--dsw-alias-state-warn-primary);background:transparent;color:var(--dsw-alias-state-warn-primary);font:inherit;font-size:11px;cursor:pointer}
 .dsh-git-warn{color:var(--dsw-alias-state-warn-primary)}
+/* ── 一个文件的差异 ──
+   等宽字体、两列行号、三个记号（+ - 空格），和 IDEA 的 diff 一个读法。加/删的
+   底色用固定 rgba 而不是主题令牌：主题里没有「淡绿的一块」这种令牌，而 14% 的
+   透明色在浅色和深色底上都读得出来（取自 LANE_COLORS 里的 #22a06b / #d64545）。 */
+.dsh-git-diffview{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0}
+.dsh-git-diffhead{display:flex;align-items:center;gap:6px;flex:none;padding:5px 8px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
+.dsh-git-diffpath{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.dsh-git-diffcount{flex:none;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.dsh-git-diffadd{color:var(--dsw-alias-state-success-primary)}
+.dsh-git-diffdel{color:var(--dsw-alias-state-error-primary)}
+.dsh-git-diffwarn{flex:none;padding:3px 10px;font-size:11px;color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-bg-layer-2);border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-diffbody{flex:1;display:flex;flex-direction:column;min-height:0}
+.dsh-git-diffsec-wrap{flex:1;display:flex;flex-direction:column;min-height:0}
+.dsh-git-diffsec{display:flex;align-items:center;gap:8px;flex:none;padding:3px 8px;font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-diff{flex:1;min-height:0;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:18px}
+.dsh-git-diffwrap{min-width:100%;width:max-content}
+.dsh-git-dline{display:flex;height:18px;box-sizing:border-box;white-space:pre}
+.dsh-git-dno{flex:none;width:44px;padding-right:8px;text-align:right;color:var(--dsw-alias-label-secondary);opacity:.6;-webkit-user-select:none;user-select:none}
+.dsh-git-dsign{flex:none;width:12px;color:var(--dsw-alias-label-secondary);-webkit-user-select:none;user-select:none}
+.dsh-git-dtext{flex:1;padding-right:10px}
+.dsh-git-dl-add{background:rgba(34,160,107,.14)}
+.dsh-git-dl-add .dsh-git-dsign{color:var(--dsw-alias-state-success-primary)}
+.dsh-git-dl-del{background:rgba(214,69,69,.14)}
+.dsh-git-dl-del .dsh-git-dsign{color:var(--dsw-alias-state-error-primary)}
+.dsh-git-dl-hunk{color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}
+.dsh-git-dl-meta{color:var(--dsw-alias-label-secondary)}
+.dsh-git-dl-note{color:var(--dsw-alias-label-secondary)}
 `)
     }, 'dsh-git-idea panel styles')
 
