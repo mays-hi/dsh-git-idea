@@ -282,7 +282,10 @@ const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + 
    2. 一个文件同时有已暂存和未暂存两段时，两次读取分别落在两个小节里
    3. 行号来自 @@ 的计数，删除行只出现在旧文件一侧
    4. 未跟踪的二进制文件不当作文本显示；只有一次读取
-   5. 提交下的文件读的是那次提交（重命名的旧路径一起带上） */
+   5. 提交下的文件读的是那次提交（重命名的旧路径一起带上）
+   6. 勾选框在固定的一列；git 折叠掉的未跟踪目录也有行
+   7. 点一下勾选框：立刻画出来，不会被迟到的读抹掉
+   8. 树行的手势：单击只选中，双击或点三角才展开 */
 
 const L = function () {
   let out = ''
@@ -703,3 +706,113 @@ ok('git 拒绝了：框退回原样', glyphOf(changeRow(tree, 'tmp.bin')) === '�
 ok('并且把 git 的话显示出来', byClass(tree, 'dsh-git-error').length > 0 && textOf(tree).indexOf('pathspec did not match') >= 0)
 host.call = failBefore
 await settle()
+
+/* ── 8. 树行的手势：单击只选中，双击或点三角才展开 ──
+
+   这是 IDEA 的项目树手势，也是读者点名要的那一条：行的第一次点击只是把这一行选中，
+   树的形状一点不动；展开/折叠要么双击整行，要么点它左边那个三角。
+
+   对它较真的是未跟踪目录：展开它要读一次目录内容（一次读取），而单击不该顺手把它
+   带走 —— 单击就展开的话，想「只选中这一行」的人每次都要多一次目录读。这一节把
+   手势逐条钉住，顺带钉住唯一不在这条规矩上的那种行：文件行仍然是单击就看差异，
+   那是 IDEA 提交窗口自己的手势（竖着排的列表旁边就是差异，选中即预览）。 */
+
+console.log('')
+console.log('== 单击只选中，双击或三角才展开 ==')
+
+const selectedRows = function (t) {
+  return byClass(t, 'dsh-git-trow').filter(function (r) {
+    return String(r.props.className).split(' ').indexOf('dsh-git-trow-sel') >= 0
+  })
+}
+const isSelected = function (t, label) {
+  const row = changeRow(t, label)
+  return row !== undefined && String(row.props.className).split(' ').indexOf('dsh-git-trow-sel') >= 0
+}
+/* 未跟踪目录的展开是一次 git/untracked；这一节数的就是它 */
+const dirReads = function () { return untrackedCalls.length }
+
+/* 8a. 已跟踪的目录行：单击只是选中 */
+const srcRow = changeRow(tree, 'src')
+ok('目录行有它自己的三角（展开是这一个控件的事）',
+  srcRow !== undefined && byClass(srcRow, 'dsh-git-tw').length === 1)
+const beforeDirClick = calls.length
+srcRow.props.onClick()
+await wait(10)
+tree = await settle()
+ok('单击目录行：子行还在（树没有动）', changeRow(tree, 'app.js') !== undefined)
+ok('单击目录行：没有发出任何读取', calls.length === beforeDirClick)
+ok('单击目录行：这一行变成选中', isSelected(tree, 'src') && selectedRows(tree).length === 1)
+
+/* 8b. 双击同一个目录行：这才收起来 */
+/* 手势要是退回「单击就展开」，这一节该报一排 ✗ 而不是抛栈：抛出去会把后面
+   所有段落一起带走。 */
+const srcAgain = changeRow(tree, 'src')
+if (typeof srcAgain.props.onDoubleClick === 'function') srcAgain.props.onDoubleClick()
+await wait(10)
+tree = await settle()
+ok('双击目录行：子行收起来了', changeRow(tree, 'app.js') === undefined)
+ok('双击也只是折叠，没有触发别的读取', calls.length === beforeDirClick)
+ok('双击之后选中的还是这一行', isSelected(tree, 'src'))
+
+/* 8c. 三角：展开它，并且不把选中改到别的行上去 */
+let twistyStopped = false
+byClass(changeRow(tree, 'src'), 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () { twistyStopped = true } })
+await wait(10)
+tree = await settle()
+ok('点三角会拦住冒泡（所以它顺手改不了选中）', twistyStopped)
+ok('点三角：子行回来了', changeRow(tree, 'app.js') !== undefined)
+ok('点三角：选中的还是原来那一行', isSelected(tree, 'src') && selectedRows(tree).length === 1)
+
+/* 8d. 未跟踪目录：先收起来（它是第 6 节展开的） */
+const newdirRow = function (t) { return changeRow(t, 'newdir/') }
+ok('未跟踪目录行还在（子行也还在）', newdirRow(tree) !== undefined && changeRow(tree, 'a.txt') !== undefined)
+const beforeCollapse = dirReads()
+byClass(newdirRow(tree), 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+tree = await settle()
+ok('收起未跟踪目录：不读任何东西（列表只是藏起来）', dirReads() === beforeCollapse)
+ok('收起之后子行不见了', changeRow(tree, 'a.txt') === undefined)
+
+/* 8e. 折叠着的未跟踪目录上单击：只选中 */
+const beforeSingle = calls.length
+newdirRow(tree).props.onClick()
+await wait(10)
+tree = await settle()
+ok('单击未跟踪目录：只选中，没有去读目录里的文件',
+  isSelected(tree, 'newdir/') && dirReads() === beforeCollapse && calls.length === beforeSingle)
+ok('单击未跟踪目录：树还是折着的', changeRow(tree, 'a.txt') === undefined)
+
+/* 8f. 双击（真实的双击会先来两次单击，再来 onDoubleClick）：只读一次 */
+const beforeDouble = dirReads()
+const doubleRow = newdirRow(tree)
+doubleRow.props.onClick()
+doubleRow.props.onClick()
+if (typeof doubleRow.props.onDoubleClick === 'function') doubleRow.props.onDoubleClick()
+await wait(10)
+tree = await settle()
+ok('双击未跟踪目录：这才读一次目录内容', dirReads() - beforeDouble === 1)
+ok('双击未跟踪目录：文件列出来了', changeRow(tree, 'a.txt') !== undefined && changeRow(tree, 'deep/b.txt') !== undefined)
+
+/* 8g. 再展开一次会重新读：暂存/提交之后那份列表就是会变的东西 */
+byClass(newdirRow(tree), 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+tree = await settle()
+const beforeReopen = dirReads()
+byClass(newdirRow(tree), 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+tree = await settle()
+ok('再展开一次重新读一次（不拿上一次的旧列表凑数）', dirReads() - beforeReopen === 1)
+
+/* 8h. 唯一不在这条规矩上的行：文件行的单击就是「看差异」 */
+const beforeFileClick = diffCalls.length
+changeRow(tree, 'notes.md').props.onClick()
+await wait(10)
+tree = await settle()
+ok('文件行仍是「单击就看差异」（提交窗口里选中即预览的那个手势）',
+  diffCalls.length - beforeFileClick === 1 && diffCalls[diffCalls.length - 1].path === 'notes.md')
+toolByTitle(tree, '返回文件列表').props.onClick()
+await wait(10)
+tree = await settle()
+ok('返回后还是那棵树，目录的展开状态也还在',
+  changeRow(tree, 'app.js') !== undefined && changeRow(tree, 'a.txt') !== undefined)
