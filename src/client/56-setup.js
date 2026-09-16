@@ -34,16 +34,11 @@
         setProblem(null)
         const request = { sessionId: props.sessionId, repo: target }
         if (plugin.initBranch.length > 0) request.branch = plugin.initBranch
-        host.call('git/init', request).then(function (result) {
+        rpc('git/init', request, '初始化失败').then(function () {
           setBusy(false)
           setArmed(false)
-          if (result == null || result.ok !== true) {
-            const detail = text(result != null ? result.stderr : '')
-            setProblem(detail.length > 0 ? detail : '初始化失败')
-            return
-          }
           props.onOpen(target)
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setArmed(false)
           setProblem(failureText(failure))

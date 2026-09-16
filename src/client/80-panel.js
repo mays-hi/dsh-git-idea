@@ -116,19 +116,14 @@
         setNeedsUpstream(false)
         const request = base(appliedRepo)
         if (payload != null) Object.assign(request, payload)
-        host.call(method, request).then(function (result) {
+        rpc(method, request).then(function () {
           setBusy(false)
-          if (result == null || result.ok !== true) {
-            const detail = text(result != null ? result.stderr : '') || text(result != null ? result.error : '')
-            setError(detail.length > 0 ? detail.replace(/\s+$/, '').slice(0, 400) : '操作失败')
-            if (method === 'git/push' && detail.indexOf('upstream') >= 0) setNeedsUpstream(true)
-            bump()
-            return
-          }
           bump()
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
+          if (method === 'git/push' && failureText(failure).indexOf('upstream') >= 0) setNeedsUpstream(true)
+          bump()
         })
       }
 
@@ -313,15 +308,11 @@
         setBusy(true)
         const request = base(appliedRepo)
         request.paths = paths
-        host.call(staged ? 'git/stage' : 'git/unstage', request).then(function (result) {
+        rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
           setBusy(false)
-          if (result != null && result.ok === false) {
-            setError(text(result.stderr).length > 0 ? text(result.stderr) : text(result.error))
-            return
-          }
           setError(null)
           loadWork(appliedRepo)
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
         })
@@ -340,17 +331,12 @@
         const request = base(appliedRepo)
         request.message = message.trim()
         if (stagedCount === 0) request.stageAll = true
-        host.call('git/commit', request).then(function (result) {
+        rpc('git/commit', request, '提交失败').then(function () {
           setBusy(false)
-          if (result != null && result.ok === false) {
-            const detailText = text(result.stderr).length > 0 ? text(result.stderr) : text(result.error)
-            setError(detailText.length > 0 ? detailText : '提交失败')
-            return
-          }
           setError(null)
           setMessage('')
           loadWork(appliedRepo)
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
         })

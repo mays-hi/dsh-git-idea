@@ -21,6 +21,34 @@ return {
       return String(failure != null && failure.message !== undefined ? failure.message : failure)
     }
 
+    /* ── asking the Host ──
+
+       A command that ran and failed is not a transport error: the Host answers
+       `{ok:false, stderr}` because git's own sentence is what the reader needs to
+       see. So every operation had two failure paths to write — the `ok !== true`
+       branch and the `catch` — and they forget different things (a busy flag, a
+       reload, the armed-delete row). This collapses them: the failure arrives at
+       one handler, carrying git's words as the Error message.
+
+       The whole reply stays reachable as `failure.reply` for the callers that
+       have to look further — `stashed`, `popConflict`, `error`. A transport
+       failure has no `reply`, which is how `undefined` here came to mean "the
+       Host never answered". (`commandDetail` is defined further down; the two are
+       both function declarations in this one scope, so order does not matter.) */
+    function rpc(method, payload, fallback) {
+      return host.call(method, payload).then(function (result) {
+        if (result != null && result.ok === true) return result
+        const failure = new Error(commandDetail(result) || fallback || '操作失败')
+        failure.reply = result
+        failure.method = method
+        throw failure
+      }, function (transport) {
+        const failure = new Error(failureText(transport))
+        failure.method = method
+        throw failure
+      })
+    }
+
     /* ── one signal, seven of them ──
 
        Every piece of state that two surfaces have to agree on is the same three
@@ -722,7 +750,6 @@ return {
 .gitops-btn:disabled{opacity:.45;cursor:default}
 .gitops-primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
 .gitops-clearable{position:relative;display:inline-flex;align-items:center;min-width:0;flex:1 1 auto}
-.gitops-clearable-fixed{flex:0 0 auto}
 .gitops-clearable-set{flex:1 1 160px;max-width:260px}
 .gitops-clearable-path{flex:1 1 140px;min-width:110px}
 .gitops-clearable-area{flex:0 0 auto;align-items:flex-start}
@@ -753,7 +780,6 @@ textarea.gitops-input{resize:vertical}
 .gitops-tool-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l1)}
 .gitops-tool-ico{justify-content:center;width:26px;height:26px;padding:0}
 .gitops-tool-badge{display:inline-grid;place-items:center;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:9px;line-height:1}
-.gitops-sep{width:1px;height:16px;background:var(--dsw-alias-border-l1);flex:none;margin:0 3px}
 .gitops-grow{flex:1;min-width:8px}
 .gitops-banner{flex:none;display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--dsw-alias-bg-layer-2);border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
 .gitops-banner-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-state-warn-primary)}
@@ -794,7 +820,6 @@ textarea.gitops-input{resize:vertical}
    above the composer when the chip is hovered. The layer wrapper generates no
    box, so the panel still positions itself against the slot's own container. */
 .gitops-layer{display:contents}
-.gitops-branch-wrap{position:relative;display:inline-flex;flex:none;max-width:220px}
 .gitops-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px;cursor:pointer;font-family:inherit}
 .gitops-branch-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .gitops-branch-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
@@ -857,7 +882,6 @@ textarea.gitops-input{resize:vertical}
 .gitops-bs-fly-item:disabled{opacity:.45;cursor:default}
 .gitops-bs-fly-danger{color:var(--dsw-alias-state-error-primary)}
 .gitops-bs-fly-ico{display:inline-flex;flex:none;width:14px;color:var(--dsw-alias-label-secondary)}
-.gitops-bs-fly-key{flex:none;margin-left:auto;font-size:10px;color:var(--dsw-alias-label-secondary)}
 .gitops-bs-empty{padding:8px 10px;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .gitops-bs-foot{display:flex;flex-direction:column;gap:6px;padding:6px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
 .gitops-bs-create{display:flex;align-items:center;gap:6px;padding:7px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
@@ -1267,16 +1291,11 @@ textarea.gitops-input{resize:vertical}
         setProblem(null)
         const request = { sessionId: props.sessionId, repo: target }
         if (plugin.initBranch.length > 0) request.branch = plugin.initBranch
-        host.call('git/init', request).then(function (result) {
+        rpc('git/init', request, '初始化失败').then(function () {
           setBusy(false)
           setArmed(false)
-          if (result == null || result.ok !== true) {
-            const detail = text(result != null ? result.stderr : '')
-            setProblem(detail.length > 0 ? detail : '初始化失败')
-            return
-          }
           props.onOpen(target)
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setArmed(false)
           setProblem(failureText(failure))
@@ -1641,18 +1660,15 @@ textarea.gitops-input{resize:vertical}
 
       React.useEffect(function () {
         let alive = true
-        host.call('git/branches', request(null)).then(function (result) {
+        rpc('git/branches', request(null), '读不到分支列表').then(function (result) {
           if (!alive) return
-          if (result == null || result.ok !== true) {
-            setData({ ok: false })
-            setError('读不到分支列表：' + commandDetail(result))
-            return
-          }
           rememberBranches(props.repo, result)
           setData(result)
           setIndex(0)
-        }).catch(function (failure) {
-          if (alive) setError(failureText(failure))
+        }, function (failure) {
+          if (!alive) return
+          if (failure.reply !== undefined) setData({ ok: false })
+          setError('读不到分支列表：' + failureText(failure))
         })
         return function () { alive = false }
       }, [props.repo, props.sessionId, version])
@@ -1665,25 +1681,8 @@ textarea.gitops-input{resize:vertical}
         setNote(null)
         setPending('')
         setFly(null)
-        host.call('git/checkout', request({ name: name, stash: useStash === true })).then(function (result) {
+        rpc('git/checkout', request({ name: name, stash: useStash === true }), '切换失败').then(function (result) {
           setBusy(false)
-          if (result == null || result.ok !== true) {
-            const detail = commandDetail(result)
-            if (result != null && result.stashed === true && result.restored === true) {
-              setError('切到 ' + name + ' 失败，你的改动已经放回工作区。' + (detail.length > 0 ? ' ' + detail : ''))
-            } else if (result != null && result.stashed === true) {
-              setError('切到 ' + name + ' 失败，而且改动没能放回工作区 —— 它们在 stash 里，用 git stash list 找回。')
-            } else if (result != null && result.error === 'stash-failed') {
-              setError('暂存改动失败：' + (detail.length > 0 ? detail : 'git stash 没能执行'))
-            } else {
-              setError(detail.length > 0 ? detail : '切换失败')
-              /* Not necessarily a dirty tree — but that is the one cause the user
-                 can fix from here, and the button explains itself if it does not. */
-              setPending(name)
-            }
-            bumpData()
-            return
-          }
           bumpData()
           rememberBranch(name)
           if (result.popConflict === true) {
@@ -1691,9 +1690,22 @@ textarea.gitops-input{resize:vertical}
             return
           }
           props.onDone()
-        }).catch(function (failure) {
+        }, function (failure) {
+          const reply = failure.reply
+          const detail = failureText(failure)
           setBusy(false)
-          setError(failureText(failure))
+          if (reply != null && reply.stashed === true && reply.restored === true) {
+            setError('切到 ' + name + ' 失败，你的改动已经放回工作区。' + (detail.length > 0 ? ' ' + detail : ''))
+          } else if (reply != null && reply.stashed === true) {
+            setError('切到 ' + name + ' 失败，而且改动没能放回工作区 —— 它们在 stash 里，用 git stash list 找回。')
+          } else if (reply != null && reply.error === 'stash-failed') {
+            setError('暂存改动失败：' + (detail.length > 0 ? detail : 'git stash 没能执行'))
+          } else {
+            setError(detail.length > 0 ? detail : '切换失败')
+            /* Not necessarily a dirty tree — but that is the one cause the user
+               can fix from here, and the button explains itself if it does not. */
+            setPending(name)
+          }
           bumpData()
         })
       }
@@ -1707,16 +1719,13 @@ textarea.gitops-input{resize:vertical}
         setBusy(true)
         setError(null)
         setNote(null)
-        host.call(method, request(payload)).then(function (result) {
+        rpc(method, request(payload), label + ' 失败').then(function () {
           setBusy(false)
           bumpData()
-          if (result == null || result.ok !== true) {
-            setError(commandDetail(result) || (label + ' 失败'))
-            return
-          }
           setNote(label + ' 完成')
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
+          if (failure.reply !== undefined) bumpData()
           setError(failureText(failure))
         })
       }
@@ -1731,17 +1740,14 @@ textarea.gitops-input{resize:vertical}
         setNote(null)
         const payload = { name: name }
         if (at.length > 0) payload.at = at
-        host.call('git/branch-create', request(payload)).then(function (result) {
+        rpc('git/branch-create', request(payload), '新建分支失败').then(function () {
           setBusy(false)
           bumpData()
-          if (result == null || result.ok !== true) {
-            setError(commandDetail(result) || '新建分支失败')
-            return
-          }
           rememberBranch(name)
           props.onDone()
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
+          if (failure.reply !== undefined) bumpData()
           setError(failureText(failure))
         })
       }
@@ -1751,26 +1757,23 @@ textarea.gitops-input{resize:vertical}
         setBusy(true)
         setError(null)
         setNote(null)
-        host.call('git/branch-delete', request({ name: name, force: force === true })).then(function (result) {
+        rpc('git/branch-delete', request({ name: name, force: force === true }), '删除分支失败').then(function () {
           setBusy(false)
           bumpData()
-          if (result == null || result.ok !== true) {
-            const detail = commandDetail(result)
-            if (force !== true && detail.indexOf('not fully merged') >= 0) {
-              /* -d refused because the commits are not merged anywhere else; the
-                 row grows a force button rather than hiding the reason. */
-              setArmedDelete(name)
-              setError('git 拒绝安全删除 ' + name + '：它的提交还没有合并到别处。')
-              return
-            }
-            setError(detail || '删除分支失败')
-            return
-          }
           setArmedDelete('')
           setNote('已删除分支 ' + name)
-        }).catch(function (failure) {
+        }, function (failure) {
+          const detail = failureText(failure)
           setBusy(false)
-          setError(failureText(failure))
+          bumpData()
+          if (force !== true && detail.indexOf('not fully merged') >= 0) {
+            /* -d refused because the commits are not merged anywhere else; the
+               row grows a force button rather than hiding the reason. */
+            setArmedDelete(name)
+            setError('git 拒绝安全删除 ' + name + '：它的提交还没有合并到别处。')
+            return
+          }
+          setError(detail)
         })
       }
 
@@ -2236,19 +2239,14 @@ textarea.gitops-input{resize:vertical}
         setNeedsUpstream(false)
         const request = base(appliedRepo)
         if (payload != null) Object.assign(request, payload)
-        host.call(method, request).then(function (result) {
+        rpc(method, request).then(function () {
           setBusy(false)
-          if (result == null || result.ok !== true) {
-            const detail = text(result != null ? result.stderr : '') || text(result != null ? result.error : '')
-            setError(detail.length > 0 ? detail.replace(/\s+$/, '').slice(0, 400) : '操作失败')
-            if (method === 'git/push' && detail.indexOf('upstream') >= 0) setNeedsUpstream(true)
-            bump()
-            return
-          }
           bump()
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
+          if (method === 'git/push' && failureText(failure).indexOf('upstream') >= 0) setNeedsUpstream(true)
+          bump()
         })
       }
 
@@ -2433,15 +2431,11 @@ textarea.gitops-input{resize:vertical}
         setBusy(true)
         const request = base(appliedRepo)
         request.paths = paths
-        host.call(staged ? 'git/stage' : 'git/unstage', request).then(function (result) {
+        rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
           setBusy(false)
-          if (result != null && result.ok === false) {
-            setError(text(result.stderr).length > 0 ? text(result.stderr) : text(result.error))
-            return
-          }
           setError(null)
           loadWork(appliedRepo)
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
         })
@@ -2460,17 +2454,12 @@ textarea.gitops-input{resize:vertical}
         const request = base(appliedRepo)
         request.message = message.trim()
         if (stagedCount === 0) request.stageAll = true
-        host.call('git/commit', request).then(function (result) {
+        rpc('git/commit', request, '提交失败').then(function () {
           setBusy(false)
-          if (result != null && result.ok === false) {
-            const detailText = text(result.stderr).length > 0 ? text(result.stderr) : text(result.error)
-            setError(detailText.length > 0 ? detailText : '提交失败')
-            return
-          }
           setError(null)
           setMessage('')
           loadWork(appliedRepo)
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
         })

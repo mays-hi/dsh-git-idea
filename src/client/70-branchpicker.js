@@ -77,18 +77,15 @@
 
       React.useEffect(function () {
         let alive = true
-        host.call('git/branches', request(null)).then(function (result) {
+        rpc('git/branches', request(null), '读不到分支列表').then(function (result) {
           if (!alive) return
-          if (result == null || result.ok !== true) {
-            setData({ ok: false })
-            setError('读不到分支列表：' + commandDetail(result))
-            return
-          }
           rememberBranches(props.repo, result)
           setData(result)
           setIndex(0)
-        }).catch(function (failure) {
-          if (alive) setError(failureText(failure))
+        }, function (failure) {
+          if (!alive) return
+          if (failure.reply !== undefined) setData({ ok: false })
+          setError('读不到分支列表：' + failureText(failure))
         })
         return function () { alive = false }
       }, [props.repo, props.sessionId, version])
@@ -101,25 +98,8 @@
         setNote(null)
         setPending('')
         setFly(null)
-        host.call('git/checkout', request({ name: name, stash: useStash === true })).then(function (result) {
+        rpc('git/checkout', request({ name: name, stash: useStash === true }), '切换失败').then(function (result) {
           setBusy(false)
-          if (result == null || result.ok !== true) {
-            const detail = commandDetail(result)
-            if (result != null && result.stashed === true && result.restored === true) {
-              setError('切到 ' + name + ' 失败，你的改动已经放回工作区。' + (detail.length > 0 ? ' ' + detail : ''))
-            } else if (result != null && result.stashed === true) {
-              setError('切到 ' + name + ' 失败，而且改动没能放回工作区 —— 它们在 stash 里，用 git stash list 找回。')
-            } else if (result != null && result.error === 'stash-failed') {
-              setError('暂存改动失败：' + (detail.length > 0 ? detail : 'git stash 没能执行'))
-            } else {
-              setError(detail.length > 0 ? detail : '切换失败')
-              /* Not necessarily a dirty tree — but that is the one cause the user
-                 can fix from here, and the button explains itself if it does not. */
-              setPending(name)
-            }
-            bumpData()
-            return
-          }
           bumpData()
           rememberBranch(name)
           if (result.popConflict === true) {
@@ -127,9 +107,22 @@
             return
           }
           props.onDone()
-        }).catch(function (failure) {
+        }, function (failure) {
+          const reply = failure.reply
+          const detail = failureText(failure)
           setBusy(false)
-          setError(failureText(failure))
+          if (reply != null && reply.stashed === true && reply.restored === true) {
+            setError('切到 ' + name + ' 失败，你的改动已经放回工作区。' + (detail.length > 0 ? ' ' + detail : ''))
+          } else if (reply != null && reply.stashed === true) {
+            setError('切到 ' + name + ' 失败，而且改动没能放回工作区 —— 它们在 stash 里，用 git stash list 找回。')
+          } else if (reply != null && reply.error === 'stash-failed') {
+            setError('暂存改动失败：' + (detail.length > 0 ? detail : 'git stash 没能执行'))
+          } else {
+            setError(detail.length > 0 ? detail : '切换失败')
+            /* Not necessarily a dirty tree — but that is the one cause the user
+               can fix from here, and the button explains itself if it does not. */
+            setPending(name)
+          }
           bumpData()
         })
       }
@@ -143,16 +136,13 @@
         setBusy(true)
         setError(null)
         setNote(null)
-        host.call(method, request(payload)).then(function (result) {
+        rpc(method, request(payload), label + ' 失败').then(function () {
           setBusy(false)
           bumpData()
-          if (result == null || result.ok !== true) {
-            setError(commandDetail(result) || (label + ' 失败'))
-            return
-          }
           setNote(label + ' 完成')
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
+          if (failure.reply !== undefined) bumpData()
           setError(failureText(failure))
         })
       }
@@ -167,17 +157,14 @@
         setNote(null)
         const payload = { name: name }
         if (at.length > 0) payload.at = at
-        host.call('git/branch-create', request(payload)).then(function (result) {
+        rpc('git/branch-create', request(payload), '新建分支失败').then(function () {
           setBusy(false)
           bumpData()
-          if (result == null || result.ok !== true) {
-            setError(commandDetail(result) || '新建分支失败')
-            return
-          }
           rememberBranch(name)
           props.onDone()
-        }).catch(function (failure) {
+        }, function (failure) {
           setBusy(false)
+          if (failure.reply !== undefined) bumpData()
           setError(failureText(failure))
         })
       }
@@ -187,26 +174,23 @@
         setBusy(true)
         setError(null)
         setNote(null)
-        host.call('git/branch-delete', request({ name: name, force: force === true })).then(function (result) {
+        rpc('git/branch-delete', request({ name: name, force: force === true }), '删除分支失败').then(function () {
           setBusy(false)
           bumpData()
-          if (result == null || result.ok !== true) {
-            const detail = commandDetail(result)
-            if (force !== true && detail.indexOf('not fully merged') >= 0) {
-              /* -d refused because the commits are not merged anywhere else; the
-                 row grows a force button rather than hiding the reason. */
-              setArmedDelete(name)
-              setError('git 拒绝安全删除 ' + name + '：它的提交还没有合并到别处。')
-              return
-            }
-            setError(detail || '删除分支失败')
-            return
-          }
           setArmedDelete('')
           setNote('已删除分支 ' + name)
-        }).catch(function (failure) {
+        }, function (failure) {
+          const detail = failureText(failure)
           setBusy(false)
-          setError(failureText(failure))
+          bumpData()
+          if (force !== true && detail.indexOf('not fully merged') >= 0) {
+            /* -d refused because the commits are not merged anywhere else; the
+               row grows a force button rather than hiding the reason. */
+            setArmedDelete(name)
+            setError('git 拒绝安全删除 ' + name + '：它的提交还没有合并到别处。')
+            return
+          }
+          setError(detail)
         })
       }
 

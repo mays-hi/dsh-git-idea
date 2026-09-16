@@ -104,11 +104,6 @@ async function pathKind(input, target) {
   return kind === 'dir' || kind === 'file' ? kind : 'none'
 }
 
-async function isEmptyDir(input, target) {
-  const probe = await probeShell(input, 'ls -A ' + shq(target) + ' 2>/dev/null | head -n 1')
-  return probe.exitCode === 0 && probe.stdout.trim().length === 0
-}
-
 /* One shell process answers everything the setup page needs: whether the path
    exists, what it is, git's own status with its exit code carried out
    explicitly, whether an operation is caught half-done, and whether the

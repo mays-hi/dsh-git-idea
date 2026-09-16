@@ -10,6 +10,34 @@
       return String(failure != null && failure.message !== undefined ? failure.message : failure)
     }
 
+    /* ── asking the Host ──
+
+       A command that ran and failed is not a transport error: the Host answers
+       `{ok:false, stderr}` because git's own sentence is what the reader needs to
+       see. So every operation had two failure paths to write — the `ok !== true`
+       branch and the `catch` — and they forget different things (a busy flag, a
+       reload, the armed-delete row). This collapses them: the failure arrives at
+       one handler, carrying git's words as the Error message.
+
+       The whole reply stays reachable as `failure.reply` for the callers that
+       have to look further — `stashed`, `popConflict`, `error`. A transport
+       failure has no `reply`, which is how `undefined` here came to mean "the
+       Host never answered". (`commandDetail` is defined further down; the two are
+       both function declarations in this one scope, so order does not matter.) */
+    function rpc(method, payload, fallback) {
+      return host.call(method, payload).then(function (result) {
+        if (result != null && result.ok === true) return result
+        const failure = new Error(commandDetail(result) || fallback || '操作失败')
+        failure.reply = result
+        failure.method = method
+        throw failure
+      }, function (transport) {
+        const failure = new Error(failureText(transport))
+        failure.method = method
+        throw failure
+      })
+    }
+
     /* ── one signal, seven of them ──
 
        Every piece of state that two surfaces have to agree on is the same three

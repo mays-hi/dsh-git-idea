@@ -86,7 +86,6 @@
 .gitops-btn:disabled{opacity:.45;cursor:default}
 .gitops-primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
 .gitops-clearable{position:relative;display:inline-flex;align-items:center;min-width:0;flex:1 1 auto}
-.gitops-clearable-fixed{flex:0 0 auto}
 .gitops-clearable-set{flex:1 1 160px;max-width:260px}
 .gitops-clearable-path{flex:1 1 140px;min-width:110px}
 .gitops-clearable-area{flex:0 0 auto;align-items:flex-start}
@@ -117,7 +116,6 @@ textarea.gitops-input{resize:vertical}
 .gitops-tool-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l1)}
 .gitops-tool-ico{justify-content:center;width:26px;height:26px;padding:0}
 .gitops-tool-badge{display:inline-grid;place-items:center;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:9px;line-height:1}
-.gitops-sep{width:1px;height:16px;background:var(--dsw-alias-border-l1);flex:none;margin:0 3px}
 .gitops-grow{flex:1;min-width:8px}
 .gitops-banner{flex:none;display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--dsw-alias-bg-layer-2);border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
 .gitops-banner-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-state-warn-primary)}
@@ -158,7 +156,6 @@ textarea.gitops-input{resize:vertical}
    above the composer when the chip is hovered. The layer wrapper generates no
    box, so the panel still positions itself against the slot's own container. */
 .gitops-layer{display:contents}
-.gitops-branch-wrap{position:relative;display:inline-flex;flex:none;max-width:220px}
 .gitops-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px;cursor:pointer;font-family:inherit}
 .gitops-branch-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .gitops-branch-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
@@ -221,7 +218,6 @@ textarea.gitops-input{resize:vertical}
 .gitops-bs-fly-item:disabled{opacity:.45;cursor:default}
 .gitops-bs-fly-danger{color:var(--dsw-alias-state-error-primary)}
 .gitops-bs-fly-ico{display:inline-flex;flex:none;width:14px;color:var(--dsw-alias-label-secondary)}
-.gitops-bs-fly-key{flex:none;margin-left:auto;font-size:10px;color:var(--dsw-alias-label-secondary)}
 .gitops-bs-empty{padding:8px 10px;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .gitops-bs-foot{display:flex;flex-direction:column;gap:6px;padding:6px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
 .gitops-bs-create{display:flex;align-items:center;gap:6px;padding:7px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
