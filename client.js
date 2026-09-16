@@ -768,6 +768,8 @@ return {
 .dsh-git-side{width:200px;flex:none;overflow:auto;padding:4px 0;border-right:1px solid var(--dsw-alias-border-l1)}
 .dsh-git-main{flex:1;min-width:0;display:flex;flex-direction:column}
 .dsh-git-detail{width:280px;flex:none;overflow:auto;padding:6px 8px;border-left:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}
+.dsh-git-detail-foot{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:11px}
 /* IDEA's log toolbar: a bordered search box, then the filters as inline
    "name: value" triggers that each clear themselves. Nothing else is a box, and
    there is no second filter row, so the graph keeps that height. */
@@ -790,6 +792,9 @@ return {
 .dsh-git-lf-input::placeholder{color:var(--dsw-alias-label-secondary)}
 .dsh-git-lf-x{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px;height:14px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:12px;line-height:1}
 .dsh-git-lf-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-git-lf-flag{flex:none;padding:1px 5px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:18px;cursor:pointer}
+.dsh-git-lf-flag:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-lf-flag.dsh-git-lf-on{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-weight:600}
 .dsh-git-lclear{flex:none;padding:1px 6px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer}
 .dsh-git-lclear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dsh-git-count{position:absolute;right:8px;top:5px;flex:none;font-size:11px;line-height:26px}
@@ -858,7 +863,7 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-setup-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dsh-git-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
 .dsh-git-danger{color:var(--dsw-alias-state-error-primary)}
-.dsh-git-tools{position:relative;flex:none;display:flex;align-items:center;gap:3px;flex-wrap:wrap;padding:5px 80px 5px 7px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-tools{position:relative;flex:none;display:flex;align-items:center;gap:3px;flex-wrap:wrap;padding:5px 80px 5px 7px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
 .dsh-git-tool{display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:0 0;color:var(--dsw-alias-label-primary);border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit;cursor:pointer;flex:none;line-height:16px}
 .dsh-git-tool:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-tool:disabled{opacity:.4;cursor:default}
@@ -868,7 +873,13 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-grow{flex:1;min-width:8px}
 .dsh-git-banner{flex:none;display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--dsw-alias-bg-layer-2);border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
 .dsh-git-banner-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-state-warn-primary)}
-.dsh-git-left{width:200px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-left{width:208px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-sidewrap{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}
+.dsh-git-sidehead{display:flex;align-items:center;gap:4px;flex:none;padding:4px 6px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
+.dsh-git-sidehead-ico{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
+.dsh-git-sidehead-input{flex:1;min-width:0;border:0;background:0 0;font-family:inherit;font-size:11px;color:var(--dsw-alias-label-primary);outline:none}
+.dsh-git-sidehead-x{flex:none;border:0;background:0 0;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:14px;padding:0 2px;border-radius:4px;cursor:pointer}
+.dsh-git-sidehead-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dsh-git-left .dsh-git-side{width:auto;flex:1;min-height:0;border-right:0}
 .dsh-git-prompt{flex:none;display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .dsh-git-prompt .dsh-git-input{flex:1 1 auto;width:auto}
@@ -1101,21 +1112,44 @@ textarea.dsh-git-input{resize:vertical}
             padBottom > 0 ? h('div', { key: 'pad-bottom', style: { height: padBottom + 'px' } }) : null)))
     }
 
+    const NO_COLLAPSE = {}
+
     function RefTree(props) {
+      /* The search box above the tree, where IDEA keeps it. A repository with
+         more branches than the pane has rows is the normal case, and without it
+         the only way to a branch is the scrollbar. */
+      const [query, setQuery] = React.useState('')
       const refs = props.refs
       if (refs == null || refs.ok !== true) return h('div', { className: 'dsh-git-side dsh-git-dim' }, '无法读取分支')
+
+      const needle = query.trim().toLowerCase()
+      /* A branch matches on the name its row shows. While a filter is on, the
+         tree is forced open: a match hidden inside a folded group is not a
+         match, and nobody wants to unfold four groups to find it. */
+      const collapsed = needle.length === 0 ? props.collapsed : NO_COLLAPSE
+      const matching = function (entries) {
+        if (needle.length === 0) return entries
+        const out = []
+        for (let i = 0; i < entries.length; i += 1) {
+          const name = text(entries[i].data)
+          if (name.toLowerCase().indexOf(needle) >= 0) out.push(entries[i])
+        }
+        return out
+      }
       const rows = []
 
       rows.push(h('div', { className: 'dsh-git-trow', key: 'head-title', style: { paddingLeft: '6px' },
         onClick: function () { props.onToggle('@head') } },
-        h('span', { className: 'dsh-git-tw' }, props.collapsed['@head'] === true ? '▶' : '▼'),
+        h('span', { className: 'dsh-git-tw' }, collapsed['@head'] === true ? '▶' : '▼'),
         h('span', { className: 'dsh-git-tname dsh-git-dim' }, 'HEAD（当前分支）')))
-      if (props.collapsed['@head'] !== true) {
-        if (refs.current.length === 0) {
-          rows.push(h('div', { className: 'dsh-git-trow dsh-git-dim', key: 'head-none', style: { paddingLeft: '18px' } }, '(游离 HEAD)'))
+      const headNames = matching(refs.current.map(function (name) { return { data: name } })).map(function (entry) { return entry.data })
+      if (collapsed['@head'] !== true) {
+        if (headNames.length === 0) {
+          rows.push(h('div', { className: 'dsh-git-trow dsh-git-dim', key: 'head-none', style: { paddingLeft: '18px' } },
+            refs.current.length === 0 ? '(游离 HEAD)' : '没有匹配的分支'))
         } else {
-          for (let i = 0; i < refs.current.length; i += 1) {
-            const name = refs.current[i]
+          for (let i = 0; i < headNames.length; i += 1) {
+            const name = headNames[i]
             rows.push(h('div', {
               className: 'dsh-git-trow'
                 + (props.selectedKey === name ? ' dsh-git-trow-sel' : '')
@@ -1136,14 +1170,15 @@ textarea.dsh-git-input{resize:vertical}
       }
 
       const section = function (title, key, entries) {
+        const shown = matching(entries)
         rows.push(h('div', { className: 'dsh-git-trow', key: key + ':title', style: { paddingLeft: '6px' },
           onClick: function () { props.onToggle(key) } },
-          h('span', { className: 'dsh-git-tw' }, props.collapsed[key] === true ? '▶' : '▼'),
+          h('span', { className: 'dsh-git-tw' }, collapsed[key] === true ? '▶' : '▼'),
           h('span', { className: 'dsh-git-tname dsh-git-dim' }, title),
-          h('span', { className: 'dsh-git-tdim' }, String(entries.length))))
-        if (props.collapsed[key] === true) return
-        const tree = buildTree(entries)
-        const flat = flattenTree(tree, 2, key, props.collapsed, [], key)
+          h('span', { className: 'dsh-git-tdim' }, needle.length === 0 ? String(entries.length) : String(shown.length))))
+        if (collapsed[key] === true) return
+        const tree = buildTree(shown)
+        const flat = flattenTree(tree, 2, key, collapsed, [], key)
         for (let i = 0; i < flat.length; i += 1) {
           const node = flat[i]
           if (node.kind === 'dir') {
@@ -1180,12 +1215,30 @@ textarea.dsh-git-input{resize:vertical}
       for (let i = 0; i < refs.remote.length; i += 1) {
         section('远程 · ' + refs.remote[i].name, '@remote:' + refs.remote[i].name, refs.remote[i].refs)
       }
-      return h('div', { className: 'dsh-git-side' }, rows)
+
+      return h('div', { className: 'dsh-git-sidewrap' },
+        h('div', { className: 'dsh-git-sidehead' },
+          h('span', { key: 'i', className: 'dsh-git-sidehead-ico' }, h(Icon, { name: 'search', size: 12 })),
+          h('input', {
+            key: 'q', className: 'dsh-git-sidehead-input', placeholder: '搜索分支', value: query,
+            onChange: function (event) { setQuery(event.target.value) },
+          }),
+          query.length > 0 ? h('button', {
+            key: 'x', type: 'button', className: 'dsh-git-sidehead-x', title: '清空搜索',
+            onClick: function () { setQuery('') },
+          }, '×') : null),
+        h('div', { className: 'dsh-git-side' }, rows))
     }
 
     function CommitDetail(props) {
       const detail = props.detail
-      if (detail == null) return h('div', { className: 'dsh-git-detail dsh-git-dim' }, '选择一个提交')
+      /* IDEA's empty right pane: the hint in the middle, and the state of the
+         selection along the bottom. */
+      if (detail == null) {
+        return h('div', { className: 'dsh-git-detail dsh-git-detail-empty' },
+          h('div', { key: 'w', className: 'dsh-git-dim' }, '选择一个提交'),
+          h('div', { key: 'f', className: 'dsh-git-detail-foot dsh-git-dim' }, '未选择提交'))
+      }
       if (detail.ok !== true) return h('div', { className: 'dsh-git-detail dsh-git-error' }, '无法读取提交详情')
 
       const entries = []
@@ -2330,6 +2383,12 @@ textarea.dsh-git-input{resize:vertical}
       const [allRefs, setAllRefs] = React.useState(false)
       const [searchDraft, setSearchDraft] = React.useState('')
       const [search, setSearch] = React.useState('')
+      /* IDEA's two switches beside the log search: `.*` reads the text as a
+         regular expression, `Cc` makes it case sensitive. Both are off by
+         default, which is exactly the search this panel had before they
+         existed — literal text, ignoring case. */
+      const [regexSearch, setRegexSearch] = React.useState(false)
+      const [caseSensitive, setCaseSensitive] = React.useState(false)
       const [author, setAuthor] = React.useState('')
       const [datePreset, setDatePreset] = React.useState('all')
       const [pathDraft, setPathDraft] = React.useState('')
@@ -2372,6 +2431,8 @@ textarea.dsh-git-input{resize:vertical}
         setAllRefs(false)
         setSearch('')
         setSearchDraft('')
+        setRegexSearch(false)
+        setCaseSensitive(false)
         setAuthor('')
         setDatePreset('all')
         setPathDraft('')
@@ -2535,7 +2596,11 @@ textarea.dsh-git-input{resize:vertical}
         request.maxCount = 200
         if (allRefs) request.allRefs = true
         else if (activeRef.length > 0) request.ref = activeRef
-        if (search.length > 0) request.search = search
+        if (search.length > 0) {
+          request.search = search
+          if (regexSearch === true) request.regex = true
+          if (caseSensitive === true) request.caseSensitive = true
+        }
         if (author.length > 0) request.author = author
         const since = dateSince(datePreset)
         if (since.length > 0) request.since = since
@@ -2566,7 +2631,7 @@ textarea.dsh-git-input{resize:vertical}
           if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
-      }, [appliedRepo, activeRef, allRefs, search, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
+      }, [appliedRepo, activeRef, allRefs, search, regexSearch, caseSensitive, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
 
       /* The panel node exists by the time effects run, so its document is the
          first place a remembered size or preference can be read from. */
@@ -2905,7 +2970,30 @@ textarea.dsh-git-input{resize:vertical}
         }),
         pathOn ? lfClear('x', '路径', function () { setPathDraft(''); setPathFilter('') }) : null)
 
+      /* IDEA's arrangement of this strip: what you filter with on the left,
+         what you do with the result on the right. */
       const toolbar = h('div', { className: 'dsh-git-tools' },
+        searchBox,
+        h('button', {
+          key: 're', type: 'button', className: 'dsh-git-lf-flag' + (regexSearch === true ? ' dsh-git-lf-on' : ''),
+          title: '正则表达式：把搜索词按正则解释（默认按字面匹配）',
+          onClick: function () { setRegexSearch(regexSearch !== true) },
+        }, '.*'),
+        h('button', {
+          key: 'cs', type: 'button', className: 'dsh-git-lf-flag' + (caseSensitive === true ? ' dsh-git-lf-on' : ''),
+          title: '区分大小写（默认忽略大小写）',
+          onClick: function () { setCaseSensitive(caseSensitive !== true) },
+        }, 'Cc'),
+        branchFilter,
+        authorFilter,
+        dateFilter,
+        pathFilterNode,
+        filterCount >= 2 ? h('button', {
+          key: 'clear', type: 'button', className: 'dsh-git-lclear', title: '清除全部筛选',
+          onClick: function () { resetFilters() },
+        }, '全部清除') : null,
+        h('span', { key: 'grow', className: 'dsh-git-grow' }),
+        h('span', { key: 'sep', className: 'dsh-git-tsep' }),
         tool('pick', h(Icon, { name: 'pick', size: 15 }), '拣选：cherry-pick，把这个提交应用到当前分支',
           function () {
             runOp('git/sequence', {
@@ -2923,16 +3011,6 @@ textarea.dsh-git-input{resize:vertical}
         tool('branch', h(BranchIcon, { size: 15 }), '分支：从这个提交新建分支并切过去',
           function () { setArmed(''); setPrompt({ kind: 'branch', value: '' }) },
           { disabled: !canAct, ico: true }),
-        h('span', { key: 'sep', className: 'dsh-git-tsep' }),
-        searchBox,
-        branchFilter,
-        authorFilter,
-        dateFilter,
-        pathFilterNode,
-        filterCount >= 2 ? h('button', {
-          key: 'clear', type: 'button', className: 'dsh-git-lclear', title: '清除全部筛选',
-          onClick: function () { resetFilters() },
-        }, '全部清除') : null,
         h('span', { key: 'count', className: 'dsh-git-count dsh-git-dim' },
           String(commitCount) + (hasFilter ? ' 条匹配' : ' 条')))
 

@@ -99,3 +99,30 @@ console.log('  同一台机器上 git 的原话:', JSON.stringify(r2.trim().spli
 await H('git/flush')({ repo: R })
 const r3 = await H('git/branches')({ repo: R })
 console.log('  固定 locale 后仍然 ahead=1:', r3.branches.find(b => b.name === 'ahead-one').ahead === 1, ' behind=1:', r3.branches.find(b => b.name === 'behind-one').behind === 1)
+
+console.log('')
+console.log('=== 搜索：字面量 / 正则 / 大小写 ===')
+const S = '/tmp/gp40-search'
+await sh('rm -rf ' + S + ' && mkdir -p ' + S, '/tmp')
+await sh('git init -q . && git config user.email t@t && git config user.name t', S)
+const MSGS = ['Fix the parser', 'fix the lexer', 'REFACTOR: parser', 'unrelated']
+for (const m of MSGS) {
+  await sh('echo x >> f.txt && git add -A', S)
+  await sh('git commit -qm ' + JSON.stringify(m), S)
+}
+const graph = async (args) => { await H('git/flush')({ repo: S }); return await H('git/graph')(Object.assign({ repo: S }, args)) }
+const literal = await graph({ search: 'parser' })
+const caret = await graph({ search: '^fix' })
+const reAny = await graph({ search: '^fix', regex: true })
+const reCase = await graph({ search: '^fix', regex: true, caseSensitive: true })
+const msgsOf = (g) => g.commits.map((c) => c.subject).join(' | ')
+console.log('  字面量 parser        →', literal.commits.length, msgsOf(literal))
+console.log('  字面量 ^fix（原样）  →', caret.commits.length, msgsOf(caret))
+console.log('  正则 ^fix 忽略大小写 →', reAny.commits.length, msgsOf(reAny))
+console.log('  正则 ^fix 区分大小写 →', reCase.commits.length, msgsOf(reCase))
+let searchOk = true
+const check = (label, value) => { if (value !== true) searchOk = false; console.log('  ' + (value ? '✓' : '✗') + ' ' + label) }
+check('默认仍是字面量 + 忽略大小写', literal.commits.length === 2 && caret.commits.length === 0)
+check('正则开关生效', reAny.commits.length === 2)
+check('大小写开关生效', reCase.commits.length === 1 && reCase.commits[0].subject === 'fix the lexer')
+if (searchOk !== true) process.exit(1)

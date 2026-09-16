@@ -1,6 +1,12 @@
     function CommitDetail(props) {
       const detail = props.detail
-      if (detail == null) return h('div', { className: 'dsh-git-detail dsh-git-dim' }, '选择一个提交')
+      /* IDEA's empty right pane: the hint in the middle, and the state of the
+         selection along the bottom. */
+      if (detail == null) {
+        return h('div', { className: 'dsh-git-detail dsh-git-detail-empty' },
+          h('div', { key: 'w', className: 'dsh-git-dim' }, '选择一个提交'),
+          h('div', { key: 'f', className: 'dsh-git-detail-foot dsh-git-dim' }, '未选择提交'))
+      }
       if (detail.ok !== true) return h('div', { className: 'dsh-git-detail dsh-git-error' }, '无法读取提交详情')
 
       const entries = []

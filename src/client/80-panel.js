@@ -17,6 +17,12 @@
       const [allRefs, setAllRefs] = React.useState(false)
       const [searchDraft, setSearchDraft] = React.useState('')
       const [search, setSearch] = React.useState('')
+      /* IDEA's two switches beside the log search: `.*` reads the text as a
+         regular expression, `Cc` makes it case sensitive. Both are off by
+         default, which is exactly the search this panel had before they
+         existed — literal text, ignoring case. */
+      const [regexSearch, setRegexSearch] = React.useState(false)
+      const [caseSensitive, setCaseSensitive] = React.useState(false)
       const [author, setAuthor] = React.useState('')
       const [datePreset, setDatePreset] = React.useState('all')
       const [pathDraft, setPathDraft] = React.useState('')
@@ -59,6 +65,8 @@
         setAllRefs(false)
         setSearch('')
         setSearchDraft('')
+        setRegexSearch(false)
+        setCaseSensitive(false)
         setAuthor('')
         setDatePreset('all')
         setPathDraft('')
@@ -222,7 +230,11 @@
         request.maxCount = 200
         if (allRefs) request.allRefs = true
         else if (activeRef.length > 0) request.ref = activeRef
-        if (search.length > 0) request.search = search
+        if (search.length > 0) {
+          request.search = search
+          if (regexSearch === true) request.regex = true
+          if (caseSensitive === true) request.caseSensitive = true
+        }
         if (author.length > 0) request.author = author
         const since = dateSince(datePreset)
         if (since.length > 0) request.since = since
@@ -253,7 +265,7 @@
           if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
-      }, [appliedRepo, activeRef, allRefs, search, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
+      }, [appliedRepo, activeRef, allRefs, search, regexSearch, caseSensitive, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
 
       /* The panel node exists by the time effects run, so its document is the
          first place a remembered size or preference can be read from. */
@@ -592,7 +604,30 @@
         }),
         pathOn ? lfClear('x', '路径', function () { setPathDraft(''); setPathFilter('') }) : null)
 
+      /* IDEA's arrangement of this strip: what you filter with on the left,
+         what you do with the result on the right. */
       const toolbar = h('div', { className: 'dsh-git-tools' },
+        searchBox,
+        h('button', {
+          key: 're', type: 'button', className: 'dsh-git-lf-flag' + (regexSearch === true ? ' dsh-git-lf-on' : ''),
+          title: '正则表达式：把搜索词按正则解释（默认按字面匹配）',
+          onClick: function () { setRegexSearch(regexSearch !== true) },
+        }, '.*'),
+        h('button', {
+          key: 'cs', type: 'button', className: 'dsh-git-lf-flag' + (caseSensitive === true ? ' dsh-git-lf-on' : ''),
+          title: '区分大小写（默认忽略大小写）',
+          onClick: function () { setCaseSensitive(caseSensitive !== true) },
+        }, 'Cc'),
+        branchFilter,
+        authorFilter,
+        dateFilter,
+        pathFilterNode,
+        filterCount >= 2 ? h('button', {
+          key: 'clear', type: 'button', className: 'dsh-git-lclear', title: '清除全部筛选',
+          onClick: function () { resetFilters() },
+        }, '全部清除') : null,
+        h('span', { key: 'grow', className: 'dsh-git-grow' }),
+        h('span', { key: 'sep', className: 'dsh-git-tsep' }),
         tool('pick', h(Icon, { name: 'pick', size: 15 }), '拣选：cherry-pick，把这个提交应用到当前分支',
           function () {
             runOp('git/sequence', {
@@ -610,16 +645,6 @@
         tool('branch', h(BranchIcon, { size: 15 }), '分支：从这个提交新建分支并切过去',
           function () { setArmed(''); setPrompt({ kind: 'branch', value: '' }) },
           { disabled: !canAct, ico: true }),
-        h('span', { key: 'sep', className: 'dsh-git-tsep' }),
-        searchBox,
-        branchFilter,
-        authorFilter,
-        dateFilter,
-        pathFilterNode,
-        filterCount >= 2 ? h('button', {
-          key: 'clear', type: 'button', className: 'dsh-git-lclear', title: '清除全部筛选',
-          onClick: function () { resetFilters() },
-        }, '全部清除') : null,
         h('span', { key: 'count', className: 'dsh-git-count dsh-git-dim' },
           String(commitCount) + (hasFilter ? ' 条匹配' : ' 条')))
 

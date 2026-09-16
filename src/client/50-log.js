@@ -122,21 +122,44 @@
             padBottom > 0 ? h('div', { key: 'pad-bottom', style: { height: padBottom + 'px' } }) : null)))
     }
 
+    const NO_COLLAPSE = {}
+
     function RefTree(props) {
+      /* The search box above the tree, where IDEA keeps it. A repository with
+         more branches than the pane has rows is the normal case, and without it
+         the only way to a branch is the scrollbar. */
+      const [query, setQuery] = React.useState('')
       const refs = props.refs
       if (refs == null || refs.ok !== true) return h('div', { className: 'dsh-git-side dsh-git-dim' }, '无法读取分支')
+
+      const needle = query.trim().toLowerCase()
+      /* A branch matches on the name its row shows. While a filter is on, the
+         tree is forced open: a match hidden inside a folded group is not a
+         match, and nobody wants to unfold four groups to find it. */
+      const collapsed = needle.length === 0 ? props.collapsed : NO_COLLAPSE
+      const matching = function (entries) {
+        if (needle.length === 0) return entries
+        const out = []
+        for (let i = 0; i < entries.length; i += 1) {
+          const name = text(entries[i].data)
+          if (name.toLowerCase().indexOf(needle) >= 0) out.push(entries[i])
+        }
+        return out
+      }
       const rows = []
 
       rows.push(h('div', { className: 'dsh-git-trow', key: 'head-title', style: { paddingLeft: '6px' },
         onClick: function () { props.onToggle('@head') } },
-        h('span', { className: 'dsh-git-tw' }, props.collapsed['@head'] === true ? '▶' : '▼'),
+        h('span', { className: 'dsh-git-tw' }, collapsed['@head'] === true ? '▶' : '▼'),
         h('span', { className: 'dsh-git-tname dsh-git-dim' }, 'HEAD（当前分支）')))
-      if (props.collapsed['@head'] !== true) {
-        if (refs.current.length === 0) {
-          rows.push(h('div', { className: 'dsh-git-trow dsh-git-dim', key: 'head-none', style: { paddingLeft: '18px' } }, '(游离 HEAD)'))
+      const headNames = matching(refs.current.map(function (name) { return { data: name } })).map(function (entry) { return entry.data })
+      if (collapsed['@head'] !== true) {
+        if (headNames.length === 0) {
+          rows.push(h('div', { className: 'dsh-git-trow dsh-git-dim', key: 'head-none', style: { paddingLeft: '18px' } },
+            refs.current.length === 0 ? '(游离 HEAD)' : '没有匹配的分支'))
         } else {
-          for (let i = 0; i < refs.current.length; i += 1) {
-            const name = refs.current[i]
+          for (let i = 0; i < headNames.length; i += 1) {
+            const name = headNames[i]
             rows.push(h('div', {
               className: 'dsh-git-trow'
                 + (props.selectedKey === name ? ' dsh-git-trow-sel' : '')
@@ -157,14 +180,15 @@
       }
 
       const section = function (title, key, entries) {
+        const shown = matching(entries)
         rows.push(h('div', { className: 'dsh-git-trow', key: key + ':title', style: { paddingLeft: '6px' },
           onClick: function () { props.onToggle(key) } },
-          h('span', { className: 'dsh-git-tw' }, props.collapsed[key] === true ? '▶' : '▼'),
+          h('span', { className: 'dsh-git-tw' }, collapsed[key] === true ? '▶' : '▼'),
           h('span', { className: 'dsh-git-tname dsh-git-dim' }, title),
-          h('span', { className: 'dsh-git-tdim' }, String(entries.length))))
-        if (props.collapsed[key] === true) return
-        const tree = buildTree(entries)
-        const flat = flattenTree(tree, 2, key, props.collapsed, [], key)
+          h('span', { className: 'dsh-git-tdim' }, needle.length === 0 ? String(entries.length) : String(shown.length))))
+        if (collapsed[key] === true) return
+        const tree = buildTree(shown)
+        const flat = flattenTree(tree, 2, key, collapsed, [], key)
         for (let i = 0; i < flat.length; i += 1) {
           const node = flat[i]
           if (node.kind === 'dir') {
@@ -201,6 +225,18 @@
       for (let i = 0; i < refs.remote.length; i += 1) {
         section('远程 · ' + refs.remote[i].name, '@remote:' + refs.remote[i].name, refs.remote[i].refs)
       }
-      return h('div', { className: 'dsh-git-side' }, rows)
+
+      return h('div', { className: 'dsh-git-sidewrap' },
+        h('div', { className: 'dsh-git-sidehead' },
+          h('span', { key: 'i', className: 'dsh-git-sidehead-ico' }, h(Icon, { name: 'search', size: 12 })),
+          h('input', {
+            key: 'q', className: 'dsh-git-sidehead-input', placeholder: '搜索分支', value: query,
+            onChange: function (event) { setQuery(event.target.value) },
+          }),
+          query.length > 0 ? h('button', {
+            key: 'x', type: 'button', className: 'dsh-git-sidehead-x', title: '清空搜索',
+            onClick: function () { setQuery('') },
+          }, '×') : null),
+        h('div', { className: 'dsh-git-side' }, rows))
     }
 

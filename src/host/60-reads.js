@@ -232,10 +232,20 @@ async function readGraph(input, repo) {
   const until = input != null && isStr(input.until) ? input.until.trim() : ''
   const path = input != null && isStr(input.path) ? input.path.trim() : ''
 
+  /* The two switches the log's search box carries, both off by default so the
+     plain search is unchanged: `regex` hands the text to extended regexp
+     instead of matching it literally, and `caseSensitive` drops git's `-i`. */
+  const regex = input != null && input.regex === true
+  const caseSensitive = input != null && input.caseSensitive === true
+
   const argv = ['-c', 'core.quotePath=false', 'log', '--max-count=' + String(maxCount), '--date-order',
     '--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x1f%P%x1e']
-  if (search.length > 0 || author.length > 0) argv.push('--fixed-strings')
-  if (search.length > 0) { argv.push('--grep=' + search); argv.push('-i') }
+  if ((search.length > 0 && regex !== true) || author.length > 0) argv.push('--fixed-strings')
+  if (search.length > 0) {
+    argv.push('--grep=' + search)
+    if (regex === true) argv.push('--extended-regexp')
+    if (caseSensitive !== true) argv.push('-i')
+  }
   if (author.length > 0) argv.push('--author=' + author)
   if (since.length > 0) argv.push('--since=' + since)
   if (until.length > 0) argv.push('--until=' + until)
@@ -261,6 +271,8 @@ function graphTag(input) {
     input != null && input.allRefs === true ? '1' : '0',
     part(input != null ? input.ref : null),
     part(input != null ? input.search : null),
+    input != null && input.regex === true ? 're' : '',
+    input != null && input.caseSensitive === true ? 'cs' : '',
     part(input != null ? input.author : null),
     part(input != null ? input.since : null),
     part(input != null ? input.until : null),

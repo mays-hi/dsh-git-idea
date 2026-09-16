@@ -506,3 +506,79 @@ await wait(30)
 await settle()
 ok('普通错误一次就结束，不会反复重试', hardFailures === 1)
 host.call = plainCall3
+
+/* ── 6. IDEA 式布局 ── */
+
+console.log('')
+console.log('== IDEA 式布局 ==')
+
+/* 回到干净状态：200 个提交、没有筛选 */
+host.call = plainCall2
+byClass(await settle(), 'dsh-git-lf-select')[1].props.onChange({ target: { value: '' } })
+await wait(20)
+let idea = await settle()
+
+const pick = (tree, cls) => collect(tree).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(cls) >= 0)
+const sideSearch = inputs(idea).find((n) => String(n.props.className).indexOf('dsh-git-sidehead-input') >= 0)
+ok('左栏顶上多了一个搜索框', sideSearch !== undefined && sideSearch.props.placeholder === '搜索分支')
+ok('左栏默认列出全部分支', pick(idea, 'dsh-git-tname').map(textOf).join(',').indexOf('feature') >= 0)
+
+sideSearch.props.onChange({ target: { value: 'fea' } })
+await wait(10)
+const filteredTree = await settle()
+const namesNow = pick(filteredTree, 'dsh-git-tname').map(textOf)
+ok('搜分支后只剩匹配的行', namesNow.join(',').indexOf('feature') >= 0 && namesNow.join(',').indexOf('stable') < 0)
+ok('分组标题仍然在，条数是过滤后的', pick(filteredTree, 'dsh-git-tdim').map(textOf).indexOf('1') >= 0)
+
+const sideClear = buttons(filteredTree).find((b) => String(b.props.className).indexOf('dsh-git-sidehead-x') >= 0)
+ok('搜索框带清除按钮', sideClear !== undefined)
+sideClear.props.onClick()
+await wait(10)
+const cleared = await settle()
+ok('清除后分支又都回来了', pick(cleared, 'dsh-git-tname').map(textOf).join(',').indexOf('stable') >= 0)
+
+/* 工具栏：筛选在左、提交操作在右，中间夹着 IDEA 的 .* 和 Cc */
+const bar = byClass(cleared, 'dsh-git-tools')[0]
+const nodes = collect(bar)
+const indexOfClass = (cls) => nodes.findIndex((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(cls) >= 0)
+ok('搜索框在最前，提交操作最后（IDEA 的顺序）', indexOfClass('dsh-git-logsearch') < indexOfClass('dsh-git-lf') && indexOfClass('dsh-git-lf') < indexOfClass('dsh-git-tool-ico'))
+const flags = pick(bar, 'dsh-git-lf-flag')
+const flagOn = (b) => String(b.props.className).indexOf('dsh-git-lf-on') >= 0
+ok('搜索框旁边是 .* 和 Cc 两个开关', flags.length === 2 && textOf(flags[0]) === '.*' && textOf(flags[1]) === 'Cc')
+ok('两个开关默认都是关的（搜索行为不变）', flagOn(flags[0]) === false && flagOn(flags[1]) === false)
+
+/* 先给搜索框一个词：没有搜索词的时候这两个开关没有意义，请求里也就不带 */
+inputs(cleared).find((n) => String(n.props.className).indexOf('dsh-git-logsearch-input') >= 0)
+  .props.onKeyDown({ key: 'Enter', preventDefault() {} })
+await wait(10)
+byClass(await settle(), 'dsh-git-logsearch-input')[0].props.onChange({ target: { value: 'tip' } })
+byClass(await settle(), 'dsh-git-logsearch-input')[0].props.onKeyDown({ key: 'Enter', preventDefault() {} })
+await wait(20)
+const searched = await settle()
+
+const graphCalls = () => calls.filter((c) => c.method === 'git/graph')
+calls.length = 0
+pick(searched, 'dsh-git-lf-flag')[0].props.onClick()
+await wait(20)
+const withRegex = await settle()
+const lastAsk = graphCalls().pop()
+ok('打开 .* 之后请求带上 regex，而且搜索词还在', lastAsk !== undefined && lastAsk.args.regex === true && lastAsk.args.search === 'tip' && lastAsk.args.caseSensitive === undefined)
+
+calls.length = 0
+pick(withRegex, 'dsh-git-lf-flag')[1].props.onClick()
+await wait(20)
+await settle()
+const lastAsk2 = graphCalls().pop()
+ok('再打开 Cc 之后请求带上 caseSensitive', lastAsk2 !== undefined && lastAsk2.args.caseSensitive === true && lastAsk2.args.regex === true)
+
+/* 选中那个提交在新的一份历史里不存在：重读之后选中被清掉，右栏回到空态 */
+graphCommits = many.slice(0, 3)
+pick(await settle(), 'dsh-git-lf-flag')[0].props.onClick()
+await wait(20)
+const noSelection = await settle()
+const emptyPane = byClass(noSelection, 'dsh-git-detail-empty')
+ok('右栏空态有自己的版式', emptyPane.length === 1 && textOf(emptyPane[0]).indexOf('选择一个提交') >= 0 && textOf(emptyPane[0]).indexOf('未选择提交') >= 0)
+
+/* 右栏空态：中间一句，底下再一句 */
+const empty = byClass(await settle(), 'dsh-git-detail-empty')
+ok('右栏空态有自己的版式', empty.length === 1 && textOf(empty[0]).indexOf('选择一个提交') >= 0 && textOf(empty[0]).indexOf('未选择提交') >= 0)
