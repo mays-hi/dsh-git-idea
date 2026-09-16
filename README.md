@@ -213,6 +213,33 @@ chip 读到的还是缓存里的旧分支。面板开着时快车道 3 秒，只
 自己切的这一路和外面切的那一路，最后都汇到同一个 `dataVersion` 计数器上，
 所以 chip 和面板不会各说各的分支。
 
+## 读操作不抢 index.lock
+
+一条容易踩的 Git 事实：**`git status` 会写 `.git/index`** —— 它会顺手把 stat 缓存
+刷新回去，也就意味着它会去拿 `.git/index.lock`。一个每 3 秒轮询一次的插件如果不加
+约束，就会持续地和用户自己的 `git add` 抢这把锁，而且输的通常是用户那条命令：
+`fatal: Unable to create '…/.git/index.lock': File exists.`
+
+所以插件里**每一条读状态的调用都带 `--no-optional-locks`**（它必须写在子命令前面）：
+读就只是读，不写盘，也不拿锁。受控复现（`/tmp` 的干净仓库，一边 `git add` 跑 150 次，
+一边同目录 `git status` 跑 150 次）：
+
+| 竞争方 | `git add` 失败 |
+|---|---|
+| `git status`（无标志） | 15 / 150 |
+| `git status --no-optional-locks` | 0 / 150 |
+
+上报的状态两种写法完全一样，所以这个标志没有任何代价。规矩不靠记性：`test/gp34a`
+里有两条防线 —— 一条在真仓库上量 `.git/index` 的 mtime（裸 status 必须能把它推动，
+这是对照；插件的面板完整读取和 `git_status` 工具必须推不动），一条在源码里点名，任何
+一条读状态的调用少了标志就红。
+
+顺带清掉一个误导：**后台 auto-gc 不碰 `index.lock`**。fetch 触发的
+`git maintenance run --auto` 跑的是 `pack-objects --indexed-objects` ——
+`--indexed-objects` 只是**读** index 来挑要打包的对象，全程不创建 `index.lock`。
+看到 `index.lock` 报错就去 gc 上找原因，方向是反的：能写 `.git/index` 的只有 index
+的写者（`git add` / `commit` / `checkout` / `status` / `update-index` …）。
+
 ## 动态插件的来历与恢复
 
 WSL 重启、进程重启都会清掉动态插件。恢复只需要重新定义一次桥（一次批准）：

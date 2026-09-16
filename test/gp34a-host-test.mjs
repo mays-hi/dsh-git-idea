@@ -16,7 +16,8 @@ const ctx = {
   get: n => (n === 'shell' ? { resolve: r => r, run: runShell } : undefined),
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
-const harness = { defineTool: d => d, registerTool: () => () => {}, handle(n, f) { handlers.set(n, f); return () => {} } }
+const TOOLS = new Map()
+const harness = { defineTool: d => { TOOLS.set(d.name, d); return d }, registerTool: () => () => {}, handle(n, f) { handlers.set(n, f); return () => {} } }
 new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
   ctx, harness, console, s => Buffer.from(s, 'binary').toString('base64'),
   s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx)
@@ -121,7 +122,13 @@ console.log('  字面量 ^fix（原样）  →', caret.commits.length, msgsOf(ca
 console.log('  正则 ^fix 忽略大小写 →', reAny.commits.length, msgsOf(reAny))
 console.log('  正则 ^fix 区分大小写 →', reCase.commits.length, msgsOf(reCase))
 let searchOk = true
-const check = (label, value) => { if (value !== true) searchOk = false; console.log('  ' + (value ? '✓' : '✗') + ' ' + label) }
+/* 一次都不许静默通过：任何一条 ✗ 都要让这个文件以非 0 退出。之前只有搜索那一段
+   会 exit(1)，后面段落里的失败只留一行红字 —— 那样的绿是假的。 */
+let failedChecks = 0
+const check = (label, value) => {
+  if (value !== true) { searchOk = false; failedChecks += 1 }
+  console.log('  ' + (value ? '✓' : '✗') + ' ' + label)
+}
 check('默认仍是字面量 + 忽略大小写', literal.commits.length === 2 && caret.commits.length === 0)
 check('正则开关生效', reAny.commits.length === 2)
 check('大小写开关生效', reCase.commits.length === 1 && reCase.commits[0].subject === 'fix the lexer')
@@ -305,3 +312,61 @@ const denied = await handlers3.get('git/stage')({ repo: '/x', paths: ['a.txt'] }
 console.log('  被拒的答复:', JSON.stringify({ ok: denied.ok, sandboxDenied: denied.sandboxDenied, stderr: denied.stderr.slice(0, 40) }))
 check('被沙箱拒绝时答复里明说是沙箱拒绝的', denied.ok !== true && denied.sandboxDenied === true)
 check('git 的原话也还在', denied.stderr.indexOf('index.lock') >= 0)
+
+/* ── 读操作不许抢 index.lock ──
+
+   一个 `git status` 会顺手刷新 index 的 stat 缓存 —— 也就是说它会拿
+   .git/index.lock。轮询的面板、被并发调用的模型工具，只要撞上别人正在
+   `git add`，输的就是别人（"Unable to create index.lock"）。这里的规矩：
+   所有读路径都带 --no-optional-locks，读就只是读。
+
+   顺带记一个查错记录：一次 fetch 触发的后台 auto-gc 被当成元凶，但 gc 根本
+   不碰 index.lock（它跑的是 pack-objects --indexed-objects，只读 index）。
+   会写 index 的只有 index 的写者，而 `git status` 就是其中一个。 */
+
+console.log('')
+console.log('=== 读操作不写 index（也就不抢 index.lock）===')
+const LOCK = '/tmp/gp34-lock'
+await sh(`rm -rf ${LOCK} && mkdir -p ${LOCK} && cd ${LOCK} && git init -q -b main && git config user.email t@t && git config user.name T && seq 1 50 > f && git add f && git commit -qm init`, '/tmp')
+const indexStamp = async () => (await sh('stat -c %y .git/index', LOCK)).out.trim()
+
+/* 先把 index 里的 stat 缓存弄过期 —— 不然裸 status 也懒得重写，对照就白测了 */
+await sh('touch f', LOCK)
+const beforeBare = await indexStamp()
+await sh('git status --porcelain >/dev/null', LOCK)
+const afterBare = await indexStamp()
+check('对照组：裸 git status 确实会重写 index（这个 fixture 能触发它）', beforeBare !== afterBare)
+
+await sh('touch f', LOCK)
+const beforePanel = await indexStamp()
+await H('git/flush')({ repo: LOCK })
+const panelRead = await H('git/panel')({ repo: LOCK })
+const afterPanel = await indexStamp()
+console.log('  面板完整读取:', panelRead.ok === true ? 'ok' : String(panelRead.error), ' index 有没被动:', beforePanel !== afterPanel)
+check('面板的完整读取没有写 index', panelRead.ok === true && beforePanel === afterPanel)
+
+await sh('touch f', LOCK)
+const beforeTool = await indexStamp()
+const toolRead = await TOOLS.get('git_status').execute({ repo: LOCK }, { agent: { session: { header: { cwd: LOCK } } } })
+const afterTool = await indexStamp()
+console.log('  git_status 工具:', toolRead.ok === true ? 'ok' : String(toolRead.error), ' index 有没被动:', beforeTool !== afterTool)
+check('模型工具 git_status 也没有写 index', toolRead.ok === true && beforeTool === afterTool)
+
+/* 规矩写死在源码里：以后再加一条读状态的地方，忘了标志就红。
+   只认真正的调用行（`git -C …` 的 shell 串，或 `git(args, […])` 的参数表），
+   免得把工具描述里那句 "Reads git status --porcelain=v2" 也算进来。 */
+const statusLines = body.split('\n').map((l, i) => ({ n: i + 1, l: l }))
+  .filter((x) => x.l.indexOf('--porcelain') >= 0 && x.l.indexOf('status') >= 0
+    && (x.l.indexOf('git -C') >= 0 || x.l.indexOf('git(args,') >= 0))
+const unguarded = statusLines.filter((x) => x.l.indexOf('no-optional-locks') < 0)
+console.log('  源码里读状态的调用:', statusLines.length, '条，没带标志的:', unguarded.length)
+for (const x of unguarded) console.log('    L' + x.n + ': ' + x.l.trim().slice(0, 80))
+check('每一条读状态的 git 调用都带 --no-optional-locks', statusLines.length >= 3 && unguarded.length === 0)
+
+
+/* 前面任何一条 ✗ 都要反映到退出码上 */
+if (failedChecks > 0) {
+  console.log('')
+  console.log('✗ ' + failedChecks + ' 条不符合预期')
+  process.exit(1)
+}

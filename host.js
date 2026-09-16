@@ -499,7 +499,10 @@ define('git_status', {
   },
   isConcurrencySafe: function () { return true },
   execute: async function (args, exec) {
-    const result = await git(args, ['-c', 'core.quotePath=false', 'status', '--porcelain=v2', '--branch', '--untracked-files=all'], exec, {})
+    /* A read must not take .git/index.lock: `git status` would happily refresh
+       the index cache, and a tool call that overlaps anyone else's `git add`
+       makes THEIR command fail with "Unable to create index.lock". */
+    const result = await git(args, ['--no-optional-locks', '-c', 'core.quotePath=false', 'status', '--porcelain=v2', '--branch', '--untracked-files=all'], exec, {})
     if (result.exitCode !== 0) {
       return { ok: false, cwd: result.cwd, exitCode: result.exitCode, stderr: result.stderr, error: 'not-a-repository' }
     }
@@ -1176,7 +1179,7 @@ function panelCommand(target) {
     'if [ -d ' + quoted + ' ]; then',
     "  printf 'K:dir\\n'",
     '  if ' + repoHere(target) + '; then',
-    "    out=$(git -C " + quoted + " -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1); rc=$?",
+    "    out=$(git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1); rc=$?",
     '  else',
     "    out='fatal: not a git repository'; rc=1",
     '  fi',
@@ -1213,8 +1216,15 @@ function panelCommand(target) {
    --no-optional-locks is load-bearing, not decoration: a plain `git status`
    refreshes the index cache and takes .git/index.lock to do it, so a background
    poller racing the user's own `git add` makes THEIR command fail. Measured on
-   this machine: 3 of 20 adds failed without the flag, 0 of 30 with it, and the
-   reported status is identical either way. */
+   this machine: 15 of 150 adds failed without the flag, 0 of 150 with it, and
+   the reported status is identical either way.
+
+   The rule is not "this one call": it is every read this plugin makes. The full
+   panel read and the `git_status` tool missed it for a while and were caught by
+   a case of exactly this — a fetch that triggered auto-gc was blamed first, but
+   background gc never touches index.lock (it runs pack-objects --indexed-objects,
+   which only reads the index). Whoever writes .git/index is the suspect, and a
+   `git status` writes it. `test/gp34a` now holds both the rule and the probe. */
 /* What "did anything move?" costs. The status is the expensive part — seconds
    on a slow mount, every tick — and it is only worth paying while something is
    showing the working tree, which is what `deep` asks for. Everything else in

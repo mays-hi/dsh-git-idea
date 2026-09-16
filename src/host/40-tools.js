@@ -59,7 +59,10 @@ define('git_status', {
   },
   isConcurrencySafe: function () { return true },
   execute: async function (args, exec) {
-    const result = await git(args, ['-c', 'core.quotePath=false', 'status', '--porcelain=v2', '--branch', '--untracked-files=all'], exec, {})
+    /* A read must not take .git/index.lock: `git status` would happily refresh
+       the index cache, and a tool call that overlaps anyone else's `git add`
+       makes THEIR command fail with "Unable to create index.lock". */
+    const result = await git(args, ['--no-optional-locks', '-c', 'core.quotePath=false', 'status', '--porcelain=v2', '--branch', '--untracked-files=all'], exec, {})
     if (result.exitCode !== 0) {
       return { ok: false, cwd: result.cwd, exitCode: result.exitCode, stderr: result.stderr, error: 'not-a-repository' }
     }
