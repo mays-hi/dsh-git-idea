@@ -1389,8 +1389,13 @@ async function authorsSnapshot(input) {
 
 async function readRefs(input, repo) {
   const args = argsFor(input)
-  const listed = await git(args, ['-c', 'core.quotePath=false', 'for-each-ref',
-    '--format=%(refname)%1f%(refname:short)%1f%(HEAD)%1f%(objectname:short)',
+  /* The tracking columns matter as much as the names here: the tree is where a
+     branch and its standing against its upstream are seen together, and the
+     atoms are free once the command is running anyway. */
+  /* `gitC`, not `git`: %(upstream:track) is a translated string and parsing it
+     needs the same pinned locale the branch list already runs under. */
+  const listed = await gitC(args, ['-c', 'core.quotePath=false', 'for-each-ref',
+    '--format=%(refname)%1f%(refname:short)%1f%(HEAD)%1f%(objectname:short)%1f%(upstream:short)%1f%(upstream:track)%1f%(committerdate:unix)',
     'refs/heads', 'refs/remotes'], null, {})
   if (listed.exitCode !== 0) {
     return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, current: [], local: [], remote: [] }
@@ -1406,7 +1411,13 @@ async function readRefs(input, repo) {
     const short = fields[1] === undefined ? '' : fields[1]
     const isCurrent = fields[2] === '*'
     if (full.indexOf('refs/heads/') === 0) {
-      local.push({ segments: short.split('/'), data: short })
+      const counts = trackCounts(fields[5] === undefined ? '' : fields[5])
+      local.push({
+        segments: short.split('/'), data: short,
+        upstream: fields[4] === undefined ? '' : fields[4],
+        ahead: counts.ahead, behind: counts.behind,
+        at: parseInt(fields[6], 10) || 0,
+      })
       if (isCurrent) current.push(short)
     } else if (full.indexOf('refs/remotes/') === 0) {
       const slash = short.indexOf('/')

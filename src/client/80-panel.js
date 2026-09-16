@@ -793,6 +793,13 @@
           h('div', { className: 'dsh-git-left' },
             h(RefTree, {
               refs: refs, collapsed: collapsed, selectedKey: effectiveSelection,
+              headName: currentName,
+              /* The changes that are not committed yet, shown on the branch they
+                 would be committed to. Zero until the working-tree read lands,
+                 which is why the badge appears a moment after the tree. */
+              dirty: status != null && status.ok === true
+                ? status.staged.length + status.unstaged.length + status.untracked.length + status.unmerged.length
+                : 0,
               onToggle: toggle, onSelect: function (key) { setSelectedKey(key) },
               onPick: function (name) { setAllRefs(false); setActiveRef(name) }, activeRef: shownRef,
             })),

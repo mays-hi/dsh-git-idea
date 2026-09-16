@@ -375,3 +375,62 @@ ok('变更页的轮询带 deep（要看工作区）', watchChanges !== undefined
 buttons(backToChanges).find((b) => textOf(b) === '历史').props.onClick()
 await wait(20)
 await settle()
+
+/* ── 8. 分支树上的提交差异 ── */
+
+console.log('')
+console.log('== 分支树上的领先/落后与未提交改动 ==')
+
+const beforeRefs = host.call
+host.call = function (method, args) {
+  if (method === 'git/refs') {
+    calls.push({ method, args })
+    return Promise.resolve({
+      ok: true, repo: '/tmp/ws', current: ['main'],
+      local: [
+        { segments: ['main'], data: 'main', upstream: 'origin/main', ahead: 2, behind: 1, at: nowSec - 60 },
+        { segments: ['feature'], data: 'feature', upstream: 'origin/feature', ahead: 0, behind: 3, at: nowSec - 900 },
+        { segments: ['stable'], data: 'stable', upstream: 'origin/stable', ahead: 4, behind: 0, at: nowSec - 90000 },
+        { segments: ['lone'], data: 'lone', upstream: '', ahead: 0, behind: 0, at: 0 },
+      ],
+      remote: [],
+    })
+  }
+  if (method === 'git/panel') {
+    calls.push({ method, args })
+    const base = { ok: true, repo: '/tmp/ws', branch: 'main', detached: false, upstream: 'origin/main', ahead: 2, behind: 1, sequencer: null }
+    if (args != null && args.quick === true) {
+      return Promise.resolve(Object.assign({ partial: true, staged: [], unstaged: [], untracked: [], unmerged: [] }, base))
+    }
+    /* 3 个未提交改动：1 已暂存、1 已改未暂存、1 未跟踪 */
+    return Promise.resolve(Object.assign({
+      staged: [{ path: 'a.txt', code: 'M.', label: 'M/ ' }],
+      unstaged: [{ path: 'b.txt', code: '.M', label: ' /M' }],
+      untracked: [{ path: 'c.txt', code: '??' }],
+      unmerged: [],
+    }, base))
+  }
+  return beforeRefs.call(host, method, args)
+}
+
+/* 全新挂载一次，让 refs 与 panel 都用上面这份数据读一遍 */
+fibers.clear()
+await openPanel()
+await wait(30)
+const withCounts = await settle()
+const trows = collect(withCounts).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf('dsh-git-trow') >= 0)
+const rowNamed = (name) => trows.find((n) => textOf(n).indexOf(name) >= 0)
+ok('落后 3 的分支显示 ↙3', textOf(rowNamed('feature')).indexOf('↙3') >= 0)
+ok('领先 4 的分支显示 ↗4', textOf(rowNamed('stable')).indexOf('↗4') >= 0)
+ok('领先又落后的两个都显示', textOf(rowNamed('main')).indexOf('↗2') >= 0 && textOf(rowNamed('main')).indexOf('↙1') >= 0)
+ok('没有上游的分支两个都不显示', textOf(rowNamed('lone')).indexOf('↗') < 0 && textOf(rowNamed('lone')).indexOf('↙') < 0)
+ok('当前分支顶上显示未提交改动数（●3）', textOf(rowNamed('main')).indexOf('●3') >= 0)
+ok('tooltip 说明了箭头与未提交的含义',
+  String(rowNamed('feature').props.title).indexOf('落后上游 3 个提交') >= 0
+  && String(rowNamed('main').props.title).indexOf('未提交改动') >= 0)
+
+host.call = beforeRefs
+fibers.clear()
+await openPanel()
+await wait(20)
+await settle()
