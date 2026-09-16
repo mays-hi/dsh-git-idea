@@ -668,8 +668,13 @@
         tool('branch', h(BranchIcon, { size: 15 }), '分支：从这个提交新建分支并切过去',
           function () { setArmed(''); setPrompt({ kind: 'branch', value: '' }) },
           { disabled: !canAct, ico: true }),
-        h('span', { key: 'count', className: 'dsh-git-count dsh-git-dim' },
-          String(commitCount) + (hasFilter ? ' 条匹配' : ' 条')))
+        /* Pinned to the right end of the strip, and short: the room it reserves
+           is room the filters cannot use, and "200 条" says as much as
+           "200 条匹配" once the filters above it are visible. */
+        h('span', {
+          key: 'count', className: 'dsh-git-count dsh-git-dim',
+          title: String(commitCount) + (hasFilter ? ' 条匹配当前筛选' : ' 条提交'),
+        }, String(commitCount)))
 
       const promptRow = prompt === null ? null : h('div', { className: 'dsh-git-prompt' },
         h('span', { key: 'l', className: 'dsh-git-hint' }, prompt.kind === 'tag' ? '标签名' : '新分支名'),

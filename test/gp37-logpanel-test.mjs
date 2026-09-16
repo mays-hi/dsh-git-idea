@@ -329,8 +329,11 @@ const pxNum = (re) => {
 const padRight = pxNum(/\.dsh-git-tools\{[^}]*padding:\d+px (\d+)px \d+px \d+px/)
 const searchMax = pxNum(/\.dsh-git-logsearch\{[^}]*max-width:(\d+)px/)
 const selectRule = (sourceCss.match(/\.dsh-git-lf-select\{[^}]*\}/) || [''])[0]
-ok('工具条给右上角的条数留出了位置', padRight >= 70)
+ok('工具条给右上角的条数留出了位置', padRight >= 44)
 ok('条数绝对定位在右端（不会自己换到第二行）', /\.dsh-git-count\{[^}]*position:absolute/.test(sourceCss))
+ok('这条工具栏不再换行（分支名再长也挤不散）', /\.dsh-git-tools\{[^}]*flex-wrap:nowrap/.test(sourceCss))
+ok('筛选触发器可以让位（flex:0 1 auto + min-width:0）', /\.dsh-git-lf\{[^}]*flex:0 1 auto[^}]*min-width:0/.test(sourceCss))
+ok('提交操作图标是固定的，不会被挤走', /\.dsh-git-tool-ico\{[^}]*width:26px/.test(sourceCss))
 ok('搜索框不再是越大越好（上限收到 260 以内）', searchMax > 0 && searchMax <= 260)
 ok('下拉不再写死宽度（改为按当前显示的值量宽）', selectRule.indexOf('max-width') < 0)
 
