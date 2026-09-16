@@ -12,12 +12,43 @@
 
     /* ── asking the Host ──
 
-       A command that ran and failed is not a transport error: the Host answers
-       `{ok:false, stderr}` because git's own sentence is what the reader needs to
-       see. So every operation had two failure paths to write — the `ok !== true`
-       branch and the `catch` — and they forget different things (a busy flag, a
-       reload, the armed-delete row). This collapses them: the failure arrives at
-       one handler, carrying git's words as the Error message.
+       One door to the Host, because there is one thing every call has to survive:
+       the Host half of the bridge reads its own source file when the plugin
+       starts, and this half can be mounted before that read lands. A call that
+       arrives first is refused with "... is not registered" — it never reached a
+       handler, so it is safe to ask again a moment later. Without this the panel
+       mounts, every request it makes is refused once, and it stays empty until
+       something happens to re-read.
+
+       The retry is deliberately finite: a Host that is genuinely gone has to end
+       as an error the reader can see, not as a request that never comes back. */
+    const HOST_NOT_READY = 'is not registered'
+    const HOST_RETRY_MAX = 24
+    const HOST_RETRY_MS = 120
+
+    function hostWait(ms) {
+      return new Promise(function (resolve) {
+        const timer = ctx.get('timer')
+        if (timer === undefined) { resolve(); return }
+        timer.timeout(function () { resolve() }, ms)
+      })
+    }
+
+    function callHost(method, payload, left) {
+      return host.call(method, payload).catch(function (failure) {
+        const remaining = left === undefined ? HOST_RETRY_MAX : left
+        const waiting = remaining > 0 && failureText(failure).indexOf(HOST_NOT_READY) >= 0
+        if (waiting !== true) throw failure
+        return hostWait(HOST_RETRY_MS).then(function () { return callHost(method, payload, remaining - 1) })
+      })
+    }
+
+    /* A command that ran and failed is not a transport error either: the Host
+       answers `{ok:false, stderr}` because git's own sentence is what the reader
+       needs to see. So every operation had two failure paths to write — the
+       `ok !== true` branch and the `catch` — and they forget different things (a
+       busy flag, a reload, the armed-delete row). This collapses them: the
+       failure arrives at one handler, carrying git's words as the Error message.
 
        The whole reply stays reachable as `failure.reply` for the callers that
        have to look further — `stashed`, `popConflict`, `error`. A transport
@@ -25,7 +56,7 @@
        Host never answered". (`commandDetail` is defined further down; the two are
        both function declarations in this one scope, so order does not matter.) */
     function rpc(method, payload, fallback) {
-      return host.call(method, payload).then(function (result) {
+      return callHost(method, payload).then(function (result) {
         if (result != null && result.ok === true) return result
         const failure = new Error(commandDetail(result) || fallback || '操作失败')
         failure.reply = result

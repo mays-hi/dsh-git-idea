@@ -177,3 +177,57 @@ filter.props.onChange({ target: { value: 'feature' } })
 await wait(20)
 const filtered = await settle()
 ok('筛选后只剩匹配的分支', branchRows(filtered).length === 1 && textOf(branchRows(filtered)[0]).indexOf('feature/one') >= 0)
+
+/* ── 5. Host 还没注册好时自动重试 ── */
+
+console.log('')
+console.log('== Host 未就绪时的重试 ==')
+
+/* 只有「is not registered」值得重试：那是 Host 半侧还没读完自己的源码，
+   调用根本没到处理器。别的错误一次就结束。 */
+const firePendingTimeouts = async function () {
+  const pending = timers.filter((t) => t.kind === 'timeout' && t.dead !== true)
+  for (const t of pending) { t.dead = true; t.cb() }
+  await wait(5)
+}
+
+/* 回到「200 个提交 + 有视口」的状态：这时行数才有意义 */
+graphCommits = many
+fakeNode.clientHeight = 600
+fakeNode.scrollTop = 0
+
+const plainCall2 = host.call
+let refusals = 0
+host.call = function (method, args) {
+  if (method === 'git/graph' && refusals < 2) {
+    refusals += 1
+    calls.push({ method, args })
+    return Promise.reject(new Error('host.call("git/graph") on dshgit-3 is not registered: the host half must declare it with harness.handle("git/graph", fn).'))
+  }
+  return plainCall2.call(host, method, args)
+}
+
+byClass(filtered, 'dsh-git-lf-select')[1].props.onChange({ target: { value: 'mays@example.com' } })
+await wait(10)
+await settle()                                   /* 效果跑起来，第一次被拒 */
+for (let i = 0; i < 3; i += 1) await firePendingTimeouts()   /* 重试定时器：第二次被拒，第三次成功 */
+await wait(20)
+const retried = await settle()
+ok('Host 尚未注册时被拒绝，随后自动重试成功', refusals === 2)
+ok('重试之后拿到的是这一轮的数据', crow(retried).length === 32 && textOf(retried).indexOf('commit 5') >= 0)
+
+/* 别的错误不重试：一次就报错，不拖满 24 次 */
+const plainCall3 = host.call
+let hardFailures = 0
+host.call = function (method, args) {
+  if (method === 'git/graph') {
+    hardFailures += 1
+    return Promise.reject(new Error('boom'))
+  }
+  return plainCall3.call(host, method, args)
+}
+byClass(retried, 'dsh-git-lf-select')[1].props.onChange({ target: { value: '' } })
+await wait(30)
+await settle()
+ok('普通错误一次就结束，不会反复重试', hardFailures === 1)
+host.call = plainCall3

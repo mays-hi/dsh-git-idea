@@ -94,7 +94,7 @@
     function loadPluginConfig() {
       if (pluginConfigLoaded) return
       pluginConfigLoaded = true
-      host.call('git/config', {}).then(adoptPluginConfig).catch(function (failure) {
+      callHost('git/config', {}).then(adoptPluginConfig).catch(function (failure) {
         pluginConfigError = failureText(failure)
         pluginConfigSignal.notify()
       })
@@ -104,7 +104,7 @@
       pluginConfig = normalizePluginConfig(next)
       pluginConfigError = ''
       pluginConfigSignal.notify()
-      host.call('git/config-save', { config: pluginConfig }).then(function (result) {
+      callHost('git/config-save', { config: pluginConfig }).then(function (result) {
         if (result == null || result.ok !== true) {
           pluginConfigError = text(result != null ? result.error : '') || '保存失败'
           pluginConfigSignal.notify()

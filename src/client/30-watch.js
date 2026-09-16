@@ -35,13 +35,13 @@
         entry.busy = true
         const request = repo.length > 0 ? { repo: repo } : {}
         if (request.repo === undefined) request.sessionId = entry.sessionId
-        host.call('git/watch', request).then(function (data) {
+        callHost('git/watch', request).then(function (data) {
           entry.busy = false
           if (data == null || data.ok !== true) return
           const next = text(data.sig)
           if (entry.sig === null || entry.sig === next) { entry.sig = next; return }
           entry.sig = next
-          host.call('git/flush', request).catch(function () {})
+          callHost('git/flush', request).catch(function () {})
           entry.listeners.forEach(function (listener) { listener() })
         }).catch(function () { entry.busy = false })
       }, watcherInterval(entry))

@@ -47,9 +47,16 @@
         measure()
         return undefined
       })
+      /* Clamped again on the way out, because the window was measured against the
+         list as it was on the previous render: a re-read that returns a shorter
+         history would otherwise ask for rows that no longer exist. The effect
+         above corrects the window on the next pass; this keeps the one render in
+         between honest. */
+      const first = win === null ? 0 : Math.max(0, Math.min(win.first, count))
+      const last = win === null ? count : Math.max(first, Math.min(win.last, count))
       return {
-        first: win === null ? 0 : win.first,
-        last: win === null ? count : win.last,
+        first: first,
+        last: last,
         windowed: win !== null,
         measure: measure,
         attach: attach,

@@ -59,7 +59,7 @@
       if (repo == null || repo.length === 0) return
       if (branchCache[repo] !== undefined || branchPrefetching[repo] === true) return
       branchPrefetching[repo] = true
-      host.call('git/branches', { sessionId: sessionId, repo: repo }).then(function (list) {
+      callHost('git/branches', { sessionId: sessionId, repo: repo }).then(function (list) {
         branchPrefetching[repo] = false
         rememberBranches(repo, list)
       }).catch(function () { branchPrefetching[repo] = false })

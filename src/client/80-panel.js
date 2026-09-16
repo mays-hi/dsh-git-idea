@@ -47,7 +47,7 @@
       }
 
       const loadWork = function (repo) {
-        host.call('git/panel', base(repo)).then(function (data) {
+        callHost('git/panel', base(repo)).then(function (data) {
           setWork(data)
         }).catch(function (failure) {
           setError(failureText(failure))
@@ -102,7 +102,7 @@
          it would repaint stale data and look like nothing happened. */
       const refresh = function () {
         setArmed('')
-        host.call('git/flush', base(appliedRepo)).then(bump, bump)
+        callHost('git/flush', base(appliedRepo)).then(bump, bump)
       }
 
       /* One path for every panel operation. A failed operation still re-reads,
@@ -187,7 +187,7 @@
       React.useEffect(function () {
         if (!repoOk || props.ready !== true) return undefined
         let alive = true
-        host.call('git/refs', base(appliedRepo)).then(function (data) {
+        callHost('git/refs', base(appliedRepo)).then(function (data) {
           if (alive) setRefs(data)
         }).catch(function (failure) {
           if (alive) setError(failureText(failure))
@@ -201,7 +201,7 @@
       React.useEffect(function () {
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
         let alive = true
-        host.call('git/authors', base(appliedRepo)).then(function (data) {
+        callHost('git/authors', base(appliedRepo)).then(function (data) {
           if (alive) setAuthors(data)
         }).catch(function () {
           if (alive) setAuthors(null)
@@ -227,7 +227,7 @@
         const since = dateSince(datePreset)
         if (since.length > 0) request.since = since
         if (pathFilter.length > 0) request.path = pathFilter
-        host.call('git/graph', request).then(function (data) {
+        callHost('git/graph', request).then(function (data) {
           if (!alive) return
           setGraph(data)
           /* Nothing is selected until a commit is clicked. Re-reading the history
@@ -246,7 +246,7 @@
           }
           const detailRequest = base(appliedRepo)
           detailRequest.hash = keep
-          host.call('git/commit-detail', detailRequest).then(function (chosen) {
+          callHost('git/commit-detail', detailRequest).then(function (chosen) {
             if (alive) setDetail(chosen)
           }).catch(function () {})
         }).catch(function (failure) {

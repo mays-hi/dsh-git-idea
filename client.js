@@ -38,12 +38,43 @@ return {
 
     /* ── asking the Host ──
 
-       A command that ran and failed is not a transport error: the Host answers
-       `{ok:false, stderr}` because git's own sentence is what the reader needs to
-       see. So every operation had two failure paths to write — the `ok !== true`
-       branch and the `catch` — and they forget different things (a busy flag, a
-       reload, the armed-delete row). This collapses them: the failure arrives at
-       one handler, carrying git's words as the Error message.
+       One door to the Host, because there is one thing every call has to survive:
+       the Host half of the bridge reads its own source file when the plugin
+       starts, and this half can be mounted before that read lands. A call that
+       arrives first is refused with "... is not registered" — it never reached a
+       handler, so it is safe to ask again a moment later. Without this the panel
+       mounts, every request it makes is refused once, and it stays empty until
+       something happens to re-read.
+
+       The retry is deliberately finite: a Host that is genuinely gone has to end
+       as an error the reader can see, not as a request that never comes back. */
+    const HOST_NOT_READY = 'is not registered'
+    const HOST_RETRY_MAX = 24
+    const HOST_RETRY_MS = 120
+
+    function hostWait(ms) {
+      return new Promise(function (resolve) {
+        const timer = ctx.get('timer')
+        if (timer === undefined) { resolve(); return }
+        timer.timeout(function () { resolve() }, ms)
+      })
+    }
+
+    function callHost(method, payload, left) {
+      return host.call(method, payload).catch(function (failure) {
+        const remaining = left === undefined ? HOST_RETRY_MAX : left
+        const waiting = remaining > 0 && failureText(failure).indexOf(HOST_NOT_READY) >= 0
+        if (waiting !== true) throw failure
+        return hostWait(HOST_RETRY_MS).then(function () { return callHost(method, payload, remaining - 1) })
+      })
+    }
+
+    /* A command that ran and failed is not a transport error either: the Host
+       answers `{ok:false, stderr}` because git's own sentence is what the reader
+       needs to see. So every operation had two failure paths to write — the
+       `ok !== true` branch and the `catch` — and they forget different things (a
+       busy flag, a reload, the armed-delete row). This collapses them: the
+       failure arrives at one handler, carrying git's words as the Error message.
 
        The whole reply stays reachable as `failure.reply` for the callers that
        have to look further — `stashed`, `popConflict`, `error`. A transport
@@ -51,7 +82,7 @@ return {
        Host never answered". (`commandDetail` is defined further down; the two are
        both function declarations in this one scope, so order does not matter.) */
     function rpc(method, payload, fallback) {
-      return host.call(method, payload).then(function (result) {
+      return callHost(method, payload).then(function (result) {
         if (result != null && result.ok === true) return result
         const failure = new Error(commandDetail(result) || fallback || '操作失败')
         failure.reply = result
@@ -324,9 +355,16 @@ return {
         measure()
         return undefined
       })
+      /* Clamped again on the way out, because the window was measured against the
+         list as it was on the previous render: a re-read that returns a shorter
+         history would otherwise ask for rows that no longer exist. The effect
+         above corrects the window on the next pass; this keeps the one render in
+         between honest. */
+      const first = win === null ? 0 : Math.max(0, Math.min(win.first, count))
+      const last = win === null ? count : Math.max(first, Math.min(win.last, count))
       return {
-        first: win === null ? 0 : win.first,
-        last: win === null ? count : win.last,
+        first: first,
+        last: last,
         windowed: win !== null,
         measure: measure,
         attach: attach,
@@ -428,7 +466,7 @@ return {
     function loadPluginConfig() {
       if (pluginConfigLoaded) return
       pluginConfigLoaded = true
-      host.call('git/config', {}).then(adoptPluginConfig).catch(function (failure) {
+      callHost('git/config', {}).then(adoptPluginConfig).catch(function (failure) {
         pluginConfigError = failureText(failure)
         pluginConfigSignal.notify()
       })
@@ -438,7 +476,7 @@ return {
       pluginConfig = normalizePluginConfig(next)
       pluginConfigError = ''
       pluginConfigSignal.notify()
-      host.call('git/config-save', { config: pluginConfig }).then(function (result) {
+      callHost('git/config-save', { config: pluginConfig }).then(function (result) {
         if (result == null || result.ok !== true) {
           pluginConfigError = text(result != null ? result.error : '') || '保存失败'
           pluginConfigSignal.notify()
@@ -487,13 +525,13 @@ return {
         entry.busy = true
         const request = repo.length > 0 ? { repo: repo } : {}
         if (request.repo === undefined) request.sessionId = entry.sessionId
-        host.call('git/watch', request).then(function (data) {
+        callHost('git/watch', request).then(function (data) {
           entry.busy = false
           if (data == null || data.ok !== true) return
           const next = text(data.sig)
           if (entry.sig === null || entry.sig === next) { entry.sig = next; return }
           entry.sig = next
-          host.call('git/flush', request).catch(function () {})
+          callHost('git/flush', request).catch(function () {})
           entry.listeners.forEach(function (listener) { listener() })
         }).catch(function () { entry.busy = false })
       }, watcherInterval(entry))
@@ -1662,7 +1700,7 @@ textarea.dsh-git-input{resize:vertical}
       if (repo == null || repo.length === 0) return
       if (branchCache[repo] !== undefined || branchPrefetching[repo] === true) return
       branchPrefetching[repo] = true
-      host.call('git/branches', { sessionId: sessionId, repo: repo }).then(function (list) {
+      callHost('git/branches', { sessionId: sessionId, repo: repo }).then(function (list) {
         branchPrefetching[repo] = false
         rememberBranches(repo, list)
       }).catch(function () { branchPrefetching[repo] = false })
@@ -2322,7 +2360,7 @@ textarea.dsh-git-input{resize:vertical}
       }
 
       const loadWork = function (repo) {
-        host.call('git/panel', base(repo)).then(function (data) {
+        callHost('git/panel', base(repo)).then(function (data) {
           setWork(data)
         }).catch(function (failure) {
           setError(failureText(failure))
@@ -2377,7 +2415,7 @@ textarea.dsh-git-input{resize:vertical}
          it would repaint stale data and look like nothing happened. */
       const refresh = function () {
         setArmed('')
-        host.call('git/flush', base(appliedRepo)).then(bump, bump)
+        callHost('git/flush', base(appliedRepo)).then(bump, bump)
       }
 
       /* One path for every panel operation. A failed operation still re-reads,
@@ -2462,7 +2500,7 @@ textarea.dsh-git-input{resize:vertical}
       React.useEffect(function () {
         if (!repoOk || props.ready !== true) return undefined
         let alive = true
-        host.call('git/refs', base(appliedRepo)).then(function (data) {
+        callHost('git/refs', base(appliedRepo)).then(function (data) {
           if (alive) setRefs(data)
         }).catch(function (failure) {
           if (alive) setError(failureText(failure))
@@ -2476,7 +2514,7 @@ textarea.dsh-git-input{resize:vertical}
       React.useEffect(function () {
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
         let alive = true
-        host.call('git/authors', base(appliedRepo)).then(function (data) {
+        callHost('git/authors', base(appliedRepo)).then(function (data) {
           if (alive) setAuthors(data)
         }).catch(function () {
           if (alive) setAuthors(null)
@@ -2502,7 +2540,7 @@ textarea.dsh-git-input{resize:vertical}
         const since = dateSince(datePreset)
         if (since.length > 0) request.since = since
         if (pathFilter.length > 0) request.path = pathFilter
-        host.call('git/graph', request).then(function (data) {
+        callHost('git/graph', request).then(function (data) {
           if (!alive) return
           setGraph(data)
           /* Nothing is selected until a commit is clicked. Re-reading the history
@@ -2521,7 +2559,7 @@ textarea.dsh-git-input{resize:vertical}
           }
           const detailRequest = base(appliedRepo)
           detailRequest.hash = keep
-          host.call('git/commit-detail', detailRequest).then(function (chosen) {
+          callHost('git/commit-detail', detailRequest).then(function (chosen) {
             if (alive) setDetail(chosen)
           }).catch(function () {})
         }).catch(function (failure) {
@@ -3225,7 +3263,7 @@ textarea.dsh-git-input{resize:vertical}
            queue: coming back to a workspace you have used should not feel like
            waiting for the branch list twice. */
         prefetchBranches(sessionId, mine)
-        host.call('git/panel', request).then(function (data) {
+        callHost('git/panel', request).then(function (data) {
           if (!alive) return
           if (data != null && data.ok === true) {
             const branch = text(data.branch)

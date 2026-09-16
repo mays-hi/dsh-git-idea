@@ -32,7 +32,7 @@
            queue: coming back to a workspace you have used should not feel like
            waiting for the branch list twice. */
         prefetchBranches(sessionId, mine)
-        host.call('git/panel', request).then(function (data) {
+        callHost('git/panel', request).then(function (data) {
           if (!alive) return
           if (data != null && data.ok === true) {
             const branch = text(data.branch)
