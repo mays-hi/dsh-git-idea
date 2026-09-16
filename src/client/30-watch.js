@@ -26,7 +26,12 @@
       if (repoWatchers[key] === undefined) {
         repoWatchers[key] = {
           key: key, repo: repo, sessionId: sessionId,
-          listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
+          /* Keyed by a token per registration, never by the listener: the chip and
+             the panel both want `bumpData` called, and keyed by the function the
+             two registrations collapsed into one — so whichever surface was torn
+             down first deleted the other's notification AND, once the count
+             reached zero, stopped the poller the other one was still on. */
+          listeners: new Map(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
         }
       }
       return repoWatchers[key]
@@ -62,6 +67,7 @@
         if (entry.sig === null || entry.sig === next) { entry.sig = next; return }
         entry.sig = next
         callHost('git/flush', request).catch(function () {})
+        /* Map.forEach hands over (value, key): the value is the listener. */
         entry.listeners.forEach(function (listener) { listener() })
       }).catch(function () { entry.busy = false })
     }
@@ -86,7 +92,8 @@
 
     function watchRepo(repo, sessionId, listener, fast, deep) {
       const entry = watcherFor(repo, sessionId)
-      entry.listeners.add(listener)
+      const token = {}
+      entry.listeners.set(token, listener)
       if (fast === true) entry.fast += 1
       if (deep === true) entry.deep += 1
       if (watchPageDoc == null) {
@@ -107,7 +114,7 @@
       }
       watcherSchedule(entry)
       return function () {
-        entry.listeners.delete(listener)
+        entry.listeners.delete(token)
         if (fast === true && entry.fast > 0) entry.fast -= 1
         if (deep === true && entry.deep > 0) entry.deep -= 1
         /* Nobody watches this workspace any more: the entry goes with the last

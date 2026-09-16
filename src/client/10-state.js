@@ -264,6 +264,14 @@
        empty entry means "nothing was applied here", which makes the Host fall
        back to that session's own working directory. */
     const sharedRepos = {}
+    /* …and a signal for "that changed", because the panel keeps its own copy in
+       state while the chip and the hover card read this one: a surface that keeps
+       rendering a value no signal carries on about keeps reading and watching the
+       workspace it was first told about. */
+    let repoApplied = 0
+    const repoAppliedSignal = createSignal(function () { return repoApplied })
+    const useRepoApplied = repoAppliedSignal.use
+
     function sessionRepo(sessionId) {
       if (sessionId === undefined || sessionId === null) return ''
       const value = sharedRepos[sessionId]
@@ -271,8 +279,12 @@
     }
     function rememberRepo(sessionId, next) {
       if (sessionId === undefined || sessionId === null) return
+      const previous = sessionRepo(sessionId)
       if (next.length > 0) sharedRepos[sessionId] = next
       else delete sharedRepos[sessionId]
+      if (previous === next) return
+      repoApplied += 1
+      repoAppliedSignal.notify()
     }
 
     /* ── panel geometry ──

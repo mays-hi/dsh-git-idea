@@ -290,6 +290,14 @@ return {
        empty entry means "nothing was applied here", which makes the Host fall
        back to that session's own working directory. */
     const sharedRepos = {}
+    /* …and a signal for "that changed", because the panel keeps its own copy in
+       state while the chip and the hover card read this one: a surface that keeps
+       rendering a value no signal carries on about keeps reading and watching the
+       workspace it was first told about. */
+    let repoApplied = 0
+    const repoAppliedSignal = createSignal(function () { return repoApplied })
+    const useRepoApplied = repoAppliedSignal.use
+
     function sessionRepo(sessionId) {
       if (sessionId === undefined || sessionId === null) return ''
       const value = sharedRepos[sessionId]
@@ -297,8 +305,12 @@ return {
     }
     function rememberRepo(sessionId, next) {
       if (sessionId === undefined || sessionId === null) return
+      const previous = sessionRepo(sessionId)
       if (next.length > 0) sharedRepos[sessionId] = next
       else delete sharedRepos[sessionId]
+      if (previous === next) return
+      repoApplied += 1
+      repoAppliedSignal.notify()
     }
 
     /* ── panel geometry ──
@@ -555,7 +567,12 @@ return {
       if (repoWatchers[key] === undefined) {
         repoWatchers[key] = {
           key: key, repo: repo, sessionId: sessionId,
-          listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
+          /* Keyed by a token per registration, never by the listener: the chip and
+             the panel both want `bumpData` called, and keyed by the function the
+             two registrations collapsed into one — so whichever surface was torn
+             down first deleted the other's notification AND, once the count
+             reached zero, stopped the poller the other one was still on. */
+          listeners: new Map(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
         }
       }
       return repoWatchers[key]
@@ -591,6 +608,7 @@ return {
         if (entry.sig === null || entry.sig === next) { entry.sig = next; return }
         entry.sig = next
         callHost('git/flush', request).catch(function () {})
+        /* Map.forEach hands over (value, key): the value is the listener. */
         entry.listeners.forEach(function (listener) { listener() })
       }).catch(function () { entry.busy = false })
     }
@@ -615,7 +633,8 @@ return {
 
     function watchRepo(repo, sessionId, listener, fast, deep) {
       const entry = watcherFor(repo, sessionId)
-      entry.listeners.add(listener)
+      const token = {}
+      entry.listeners.set(token, listener)
       if (fast === true) entry.fast += 1
       if (deep === true) entry.deep += 1
       if (watchPageDoc == null) {
@@ -636,7 +655,7 @@ return {
       }
       watcherSchedule(entry)
       return function () {
-        entry.listeners.delete(listener)
+        entry.listeners.delete(token)
         if (fast === true && entry.fast > 0) entry.fast -= 1
         if (deep === true && entry.deep > 0) entry.deep -= 1
         /* Nobody watches this workspace any more: the entry goes with the last
@@ -3599,6 +3618,11 @@ textarea.dsh-git-input{resize:vertical}
       const switching = useSwitchingTo()
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
       const reloadAt = useDataVersion()
+      /* Applying a directory in the panel changes which repository this chip is
+         about, and this signal is how the chip hears about it: without the render
+         it went on reading — and watching — the workspace it started with. */
+      const repoVersion = useRepoApplied()
+      const watched = sessionRepo(props.sessionId)
       const sessionId = props.sessionId
 
       React.useEffect(function () {
@@ -3617,13 +3641,13 @@ textarea.dsh-git-input{resize:vertical}
          working in, so it may lag the panel. */
       React.useEffect(function () {
         if (gitSettings.watchChip !== true) return undefined
-        return watchRepo(sessionRepo(sessionId), sessionId, bumpData, false)
-      }, [sessionId, isOpen])
+        return watchRepo(watched, sessionId, bumpData, false)
+      }, [watched, repoVersion, sessionId, isOpen])
 
       React.useEffect(function () {
         let alive = true
         const request = { sessionId: sessionId }
-        const mine = sessionRepo(sessionId)
+        const mine = watched
         if (mine.length > 0) request.repo = mine
         /* Started before the panel read, so both round trips overlap rather than
            queue: coming back to a workspace you have used should not feel like
@@ -3694,7 +3718,7 @@ textarea.dsh-git-input{resize:vertical}
           if (alive) setInfo({ phase: 'none', label: null, pending: 0, repo: '', reason: '' })
         })
         return function () { alive = false }
-      }, [isOpen, sessionId, reloadAt])
+      }, [watched, repoVersion, isOpen, sessionId, reloadAt])
 
       const isRepo = info.phase === 'repo'
       const where = info.repo.length > 0 ? info.repo : '当前会话工作区'

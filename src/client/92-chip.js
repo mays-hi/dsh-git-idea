@@ -10,6 +10,11 @@
       const switching = useSwitchingTo()
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
       const reloadAt = useDataVersion()
+      /* Applying a directory in the panel changes which repository this chip is
+         about, and this signal is how the chip hears about it: without the render
+         it went on reading — and watching — the workspace it started with. */
+      const repoVersion = useRepoApplied()
+      const watched = sessionRepo(props.sessionId)
       const sessionId = props.sessionId
 
       React.useEffect(function () {
@@ -28,13 +33,13 @@
          working in, so it may lag the panel. */
       React.useEffect(function () {
         if (gitSettings.watchChip !== true) return undefined
-        return watchRepo(sessionRepo(sessionId), sessionId, bumpData, false)
-      }, [sessionId, isOpen])
+        return watchRepo(watched, sessionId, bumpData, false)
+      }, [watched, repoVersion, sessionId, isOpen])
 
       React.useEffect(function () {
         let alive = true
         const request = { sessionId: sessionId }
-        const mine = sessionRepo(sessionId)
+        const mine = watched
         if (mine.length > 0) request.repo = mine
         /* Started before the panel read, so both round trips overlap rather than
            queue: coming back to a workspace you have used should not feel like
@@ -105,7 +110,7 @@
           if (alive) setInfo({ phase: 'none', label: null, pending: 0, repo: '', reason: '' })
         })
         return function () { alive = false }
-      }, [isOpen, sessionId, reloadAt])
+      }, [watched, repoVersion, isOpen, sessionId, reloadAt])
 
       const isRepo = info.phase === 'repo'
       const where = info.repo.length > 0 ? info.repo : '当前会话工作区'
