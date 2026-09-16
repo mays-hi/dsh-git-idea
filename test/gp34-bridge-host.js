@@ -37,15 +37,13 @@ return {
       return typeof raw.stdout.text === 'string' ? raw.stdout.text : ''
     }
 
-    let dirsCache = null
-    async function sourceDirs() {
-      if (dirsCache !== null) return dirsCache
-      dirsCache = []
+    let dirCache = null
+    async function sourceDir() {
+      if (dirCache !== null) return dirCache
       const home = (await probeText('printf %s "${DSH_HOME:-$HOME/.dsh}"')).trim()
-      if (home.length > 0) {
-        dirsCache.push(home + '/dsh-git-idea')
-      }
-      return dirsCache
+      if (home.length === 0) throw new Error('neither DSH_HOME nor $HOME could be read')
+      dirCache = home + '/dsh-git-idea'
+      return dirCache
     }
 
     async function readOne(path) {
@@ -62,12 +60,10 @@ return {
     }
 
     async function readSource(name) {
-      const dirs = await sourceDirs()
-      for (let i = 0; i < dirs.length; i += 1) {
-        const text = await readOne(dirs[i] + '/' + name)
-        if (text.length > 0) return text
-      }
-      throw new Error('cannot read ' + name + (dirs.length > 0 ? ' from ' + dirs.join(' or ') : ''))
+      const dir = await sourceDir()
+      const text = await readOne(dir + '/' + name)
+      if (text.length === 0) throw new Error('cannot read ' + dir + '/' + name)
+      return text
     }
 
     /* The Client half is fetched from here, because the Client realm has no
