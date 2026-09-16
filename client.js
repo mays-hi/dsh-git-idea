@@ -802,6 +802,8 @@ return {
 .dsh-git-chip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .dsh-git-chip-idle{opacity:.72}
 .dsh-git-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:10px;line-height:1;flex:none}
+/* 上一个测量值还在，新的还没回来：留个位置，但看得出来还没核对 */
+.dsh-git-badge-stale{opacity:.45}
 .dsh-git-pop{position:absolute;left:8px;right:8px;bottom:100%;margin-bottom:8px;z-index:30;pointer-events:auto;box-sizing:border-box;height:74vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
 .dsh-git-top{display:flex;align-items:center;gap:8px;row-gap:6px;flex-wrap:wrap;flex:none;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);position:relative}
 .dsh-git-tabs{display:flex;gap:2px;flex:none}
@@ -3486,6 +3488,13 @@ textarea.dsh-git-input{resize:vertical}
           }, '本浏览器全部恢复默认')))
     }
 
+    /* The last count that was actually measured, per repository. Two sessions
+       usually point at the same workspace, and the count is a property of the
+       repository, not of the session looking at it — so a session opened for the
+       first time can show the number instead of a gap while its own full read
+       grinds through the working tree. */
+    const pendingByRepo = {}
+
     function GitChip(props) {
       const isOpen = useOpen()
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
@@ -3525,17 +3534,37 @@ textarea.dsh-git-input{resize:vertical}
           if (data != null && data.ok === true) {
             const branch = text(data.branch)
             const detached = data.detached === true
-            const pending = data.staged.length + data.unstaged.length + data.untracked.length + data.unmerged.length
+            const repo = text(data.repo)
+            const measured = data.partial !== true
+            const counted = data.staged.length + data.unstaged.length + data.untracked.length + data.unmerged.length
+            /* The cheap read answers in a fifth of a second and carries no working
+               tree at all, so its "no changes" means "not asked", not "nothing to
+               report". Counting it dropped the badge to nothing on every poll tick
+               — and on a Windows-mounted worktree it stayed gone for the seven
+               seconds the full read takes, which reads as the number having been
+               lost. What was last measured is kept until something measures it
+               again, and `stale` says so out loud, so a stale number is never
+               shown as fact. */
+            const known = chipLabels[sessionId]
+            const remembered = known !== undefined && known.phase === 'repo' && known.repo === repo
+            const carried = remembered ? known.pending : (pendingByRepo[repo] !== undefined ? pendingByRepo[repo] : 0)
+            if (measured) pendingByRepo[repo] = counted
+            const pending = measured ? counted : carried
             /* Kept outside React state because the hover card needs the count and
                hangs in a different subtree; a switch offer should not have to
                re-derive it with another read. */
-            chipInfos[sessionId] = { repo: text(data.repo), pending: pending }
-            prefetchBranches(sessionId, text(data.repo).length > 0 ? text(data.repo) : mine)
+            chipInfos[sessionId] = { repo: repo, pending: pending }
+            prefetchBranches(sessionId, repo.length > 0 ? repo : mine)
             chipLabels[sessionId] = {
               phase: 'repo',
               label: detached ? 'HEAD' : (branch.length > 0 ? branch : 'HEAD'),
               pending: pending,
-              repo: text(data.repo),
+              /* Only a session that has something to carry is stale: the first
+                 visit of a workspace still shows the last count this browser saw
+                 for that repository, which is better than a gap that fills in
+                 seven seconds later. */
+              stale: measured !== true && (remembered || pendingByRepo[repo] !== undefined),
+              repo: repo,
               reason: '',
             }
           } else {
@@ -3569,9 +3598,15 @@ textarea.dsh-git-input{resize:vertical}
 
       const isRepo = info.phase === 'repo'
       const where = info.repo.length > 0 ? info.repo : '当前会话工作区'
+      /* While the cheap read is in flight the count on screen is the last one
+         that was measured, so the tooltip says that instead of claiming the
+         working tree is clean. */
+      const count = info.pending > 0
+        ? String(info.pending) + ' 个改动' + (info.stale === true ? '（正在核对）' : '')
+        : (info.stale === true ? '正在核对改动…' : '工作区干净')
       let title = 'Git'
       if (info.phase === 'loading') title = 'Git'
-      else if (isRepo) title = info.label + ' · ' + info.repo + (info.pending > 0 ? ' · ' + String(info.pending) + ' 个改动' : ' · 工作区干净')
+      else if (isRepo) title = info.label + ' · ' + info.repo + ' · ' + count
       else if (info.reason === 'missing') title = '目录不存在：' + where + ' —— 点击修改路径'
       else if (info.reason === 'file') title = '这不是一个目录：' + where + ' —— 点击修改路径'
       else if (info.reason === 'empty-dir') title = where + ' 是空目录 —— 点击可在这里初始化仓库'
@@ -3581,7 +3616,12 @@ textarea.dsh-git-input{resize:vertical}
 
       const children = [h(BranchIcon, { key: 'icon', size: 14, plus: !isRepo && info.phase === 'none' })]
       if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
-      if (isRepo && info.pending > 0) children.push(h('span', { className: 'dsh-git-badge', key: 'badge' }, String(info.pending)))
+      if (isRepo && info.pending > 0) {
+        children.push(h('span', {
+          className: 'dsh-git-badge' + (info.stale === true ? ' dsh-git-badge-stale' : ''),
+          key: 'badge',
+        }, String(info.pending)))
+      }
 
       return h('button', {
         type: 'button',

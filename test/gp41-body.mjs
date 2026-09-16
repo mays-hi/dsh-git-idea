@@ -98,3 +98,78 @@ mark = calls.length
 fakeDoc.fire('visibilitychange')
 await wait(40)
 ok('仓库没动时切回来也不会白读一遍', methodsSince(mark).indexOf('git/panel') < 0)
+
+/* ── chip 上的未提交数量：便宜的第一次读回来时不能消失 ──
+
+   面板与 chip 都是两段读：先 0.15 秒的身份读（`partial`，**不带工作区**），
+   再 7 秒的完整读。把 `partial` 的「没有改动列表」当成「没有改动」，就会在
+   每次仓库动过之后把徽标抹掉，几秒后才补回来 —— 用户看到的就是「数量消失，
+   过一会才出来」。这一节盯住那个瞬间。 */
+
+console.log('')
+console.log('=== 轮询之后，未提交数量不许先消失 ===')
+const beforePanel = host.call
+let fullPending = 3
+let fullGate = null
+const panelCalls = []
+host.call = function (method, args) {
+  if (method === 'git/panel') {
+    panelCalls.push(args)
+    const head = { ok: true, repo: '/tmp/ws', branch: 'main', detached: false, upstream: 'origin/main', ahead: 0, behind: 0, sequencer: null }
+    if (args != null && args.quick === true) {
+      return Promise.resolve(Object.assign({ partial: true, staged: [], unstaged: [], untracked: [], unmerged: [] }, head))
+    }
+    const items = []
+    for (let i = 0; i < fullPending; i += 1) items.push({ path: 'f' + i + '.txt', code: ' M' })
+    const reply = Object.assign({ staged: [], unstaged: items, untracked: [], unmerged: [] }, head)
+    if (fullGate !== null) return new Promise(function (resolve) { fullGate = resolve.bind(null, reply) })
+    return Promise.resolve(reply)
+  }
+  return beforePanel(method, args)
+}
+const badgeOf = (tree) => byClass(tree, 'dsh-git-badge')
+const badgeText = (tree) => (badgeOf(tree)[0] === undefined ? '' : textOf(badgeOf(tree)[0]))
+const badgeClass = (tree) => (badgeOf(tree)[0] === undefined ? '' : String(badgeOf(tree)[0].props.className))
+
+const s2 = await renderUntilStable(makeElement(chip, { sessionId: 's-2' }), 'chip-s2')
+ok('第一次完整读之后徽标显示 3', badgeText(s2) === '3' && !/stale/.test(badgeClass(s2)))
+
+watchSig = 'SIG-E'
+/* 把完整读按住，才看得见中间那一刻 —— 在真机上那一段是 7 秒，在测试里是 0 微秒 */
+fullGate = true
+tick()
+await wait(40)
+const during = await renderUntilStable(makeElement(chip, { sessionId: 's-2' }), 'chip-s2')
+ok('便宜的第一次读回来后徽标还在，没有先掉到 0', badgeText(during) === '3')
+ok('但它被标成「还没核对」（半透明）', /dsh-git-badge-stale/.test(badgeClass(during)))
+ok('tooltip 说的是正在核对，不会谎称工作区干净',
+  String(during.props.title).indexOf('正在核对') >= 0)
+
+const release2 = fullGate
+fullGate = null
+release2()
+await wait(40)
+const settled3 = await renderUntilStable(makeElement(chip, { sessionId: 's-2' }), 'chip-s2')
+ok('完整读回来之后同一个数字转正（去掉半透明）', badgeText(settled3) === '3' && !/stale/.test(badgeClass(settled3)))
+
+/* 换会话：这个会话是第一次来，自己的完整读还没回来 */
+fullGate = true
+watchSig = 'SIG-F'
+const s3 = await renderUntilStable(makeElement(chip, { sessionId: 's-3' }), 'chip-s3')
+ok('新会话的第一眼就带着这个仓库上次的数字（不空着）', badgeText(s3) === '3')
+ok('而且是「还没核对」的样子', /dsh-git-badge-stale/.test(badgeClass(s3)))
+const release = fullGate
+fullGate = null
+release()
+await wait(40)
+const s3done = await renderUntilStable(makeElement(chip, { sessionId: 's-3' }), 'chip-s3')
+ok('它自己的完整读回来后就转正了', badgeText(s3done) === '3' && !/stale/.test(badgeClass(s3done)))
+
+/* 提交干净之后：数字该变成「没有徽标」，而且不再是核对中的样子 */
+fullPending = 0
+watchSig = 'SIG-G'
+tick()
+await wait(60)
+const clean = await renderUntilStable(makeElement(chip, { sessionId: 's-3' }), 'chip-s3')
+ok('改动清零后徽标消失', badgeOf(clean).length === 0)
+ok('tooltip 这时才说工作区干净', String(clean.props.title).indexOf('工作区干净') >= 0)

@@ -1,3 +1,10 @@
+    /* The last count that was actually measured, per repository. Two sessions
+       usually point at the same workspace, and the count is a property of the
+       repository, not of the session looking at it — so a session opened for the
+       first time can show the number instead of a gap while its own full read
+       grinds through the working tree. */
+    const pendingByRepo = {}
+
     function GitChip(props) {
       const isOpen = useOpen()
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
@@ -37,17 +44,37 @@
           if (data != null && data.ok === true) {
             const branch = text(data.branch)
             const detached = data.detached === true
-            const pending = data.staged.length + data.unstaged.length + data.untracked.length + data.unmerged.length
+            const repo = text(data.repo)
+            const measured = data.partial !== true
+            const counted = data.staged.length + data.unstaged.length + data.untracked.length + data.unmerged.length
+            /* The cheap read answers in a fifth of a second and carries no working
+               tree at all, so its "no changes" means "not asked", not "nothing to
+               report". Counting it dropped the badge to nothing on every poll tick
+               — and on a Windows-mounted worktree it stayed gone for the seven
+               seconds the full read takes, which reads as the number having been
+               lost. What was last measured is kept until something measures it
+               again, and `stale` says so out loud, so a stale number is never
+               shown as fact. */
+            const known = chipLabels[sessionId]
+            const remembered = known !== undefined && known.phase === 'repo' && known.repo === repo
+            const carried = remembered ? known.pending : (pendingByRepo[repo] !== undefined ? pendingByRepo[repo] : 0)
+            if (measured) pendingByRepo[repo] = counted
+            const pending = measured ? counted : carried
             /* Kept outside React state because the hover card needs the count and
                hangs in a different subtree; a switch offer should not have to
                re-derive it with another read. */
-            chipInfos[sessionId] = { repo: text(data.repo), pending: pending }
-            prefetchBranches(sessionId, text(data.repo).length > 0 ? text(data.repo) : mine)
+            chipInfos[sessionId] = { repo: repo, pending: pending }
+            prefetchBranches(sessionId, repo.length > 0 ? repo : mine)
             chipLabels[sessionId] = {
               phase: 'repo',
               label: detached ? 'HEAD' : (branch.length > 0 ? branch : 'HEAD'),
               pending: pending,
-              repo: text(data.repo),
+              /* Only a session that has something to carry is stale: the first
+                 visit of a workspace still shows the last count this browser saw
+                 for that repository, which is better than a gap that fills in
+                 seven seconds later. */
+              stale: measured !== true && (remembered || pendingByRepo[repo] !== undefined),
+              repo: repo,
               reason: '',
             }
           } else {
@@ -81,9 +108,15 @@
 
       const isRepo = info.phase === 'repo'
       const where = info.repo.length > 0 ? info.repo : '当前会话工作区'
+      /* While the cheap read is in flight the count on screen is the last one
+         that was measured, so the tooltip says that instead of claiming the
+         working tree is clean. */
+      const count = info.pending > 0
+        ? String(info.pending) + ' 个改动' + (info.stale === true ? '（正在核对）' : '')
+        : (info.stale === true ? '正在核对改动…' : '工作区干净')
       let title = 'Git'
       if (info.phase === 'loading') title = 'Git'
-      else if (isRepo) title = info.label + ' · ' + info.repo + (info.pending > 0 ? ' · ' + String(info.pending) + ' 个改动' : ' · 工作区干净')
+      else if (isRepo) title = info.label + ' · ' + info.repo + ' · ' + count
       else if (info.reason === 'missing') title = '目录不存在：' + where + ' —— 点击修改路径'
       else if (info.reason === 'file') title = '这不是一个目录：' + where + ' —— 点击修改路径'
       else if (info.reason === 'empty-dir') title = where + ' 是空目录 —— 点击可在这里初始化仓库'
@@ -93,7 +126,12 @@
 
       const children = [h(BranchIcon, { key: 'icon', size: 14, plus: !isRepo && info.phase === 'none' })]
       if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
-      if (isRepo && info.pending > 0) children.push(h('span', { className: 'dsh-git-badge', key: 'badge' }, String(info.pending)))
+      if (isRepo && info.pending > 0) {
+        children.push(h('span', {
+          className: 'dsh-git-badge' + (info.stale === true ? ' dsh-git-badge-stale' : ''),
+          key: 'badge',
+        }, String(info.pending)))
+      }
 
       return h('button', {
         type: 'button',
