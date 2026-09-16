@@ -241,6 +241,12 @@ function panelIdentityCommand(target) {
    pathspec list is a command line, and a command line has a length. */
 const READ_PATHS_MAX = 200
 
+/* How much plain history a filtered graph may lay itself out on. Measured on the
+   reader's repository: 200 `fix` matches span 1518 commits, read in 190ms. The
+   cap is what keeps a search that matches once per thousand commits from turning
+   a keystroke into a whole-history walk — past it, edges leave the page. */
+const DAG_MAX = 4000
+
 function readPaths(input) {
   if (input == null || !Array.isArray(input.paths)) return []
   const out = []
@@ -507,7 +513,39 @@ async function readGraph(input, repo) {
   const parsed = parseCommitRecords(logged.stdout)
   const hasMore = parsed.length > maxCount
   const commits = hasMore ? parsed.slice(0, maxCount) : parsed
-  const layout = layoutGraph(commits, 14)
+  /* ── a filtered list is laid out on the history it was filtered out of ──
+
+     Anything that *hides* commits — the search box, an author, a date range, a
+     path — leaves the plain layout with parents it cannot see, and the lanes it
+     books for them are never claimed (see layoutVisible). So the plain
+     hash+parents history is read for the span those matches cover: everything
+     above the oldest match, plus the oldest itself (its parents came with the
+     filtered read). `--not <oldest>` is exactly that span, and it is what keeps
+     this read proportional to the answer instead of to the repository.
+
+     The scope is the same as the filtered read's — `--all` or the one ref — and
+     deliberately carries none of the hiding flags: this is the history, not the
+     answer. `DAG_MAX` bounds the walk for a search that matches rarely; past it
+     an edge simply leaves the page, which is what the unfiltered graph does at
+     the end of a page too. */
+  const hiding = search.length > 0 || author.length > 0 || since.length > 0 || until.length > 0 || path.length > 0
+  let layout = layoutGraph(commits, 14)
+  if (hiding && commits.length > 0) {
+    const oldest = commits[commits.length - 1].hash
+    const dagArgv = ['-c', 'core.quotePath=false', 'log', '--date-order', '--max-count=' + String(DAG_MAX),
+      '--pretty=format:%H %P']
+    if (allRefs) dagArgv.push('--all')
+    else dagArgv.push(ref)
+    dagArgv.push('--not')
+    dagArgv.push(oldest)
+    const dagged = await git(args, dagArgv, null, {})
+    if (dagged.exitCode === 0) {
+      const full = parseDag(dagged.stdout)
+      const last = commits[commits.length - 1]
+      full.push({ hash: last.hash, parents: last.parents })
+      layout = layoutVisible(full, commits, 14)
+    }
+  }
   return {
     ok: true, repo: logged.cwd, currentBranch: currentBranch, ref: ref, allRefs: allRefs,
     commits: commits, rows: layout.rows, lanes: layout.lanes, hasMore: hasMore, maxCount: maxCount,

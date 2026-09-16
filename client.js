@@ -1261,6 +1261,11 @@ textarea.dsh-git-input{resize:vertical}
       }, [commits])
       const cx = function (lane) { return lane * LANE_W + LANE_W / 2 + 3 }
       const cy = function (row) { return row * ROW_H + ROW_H / 2 }
+      /* Where a line that leaves this list goes: the bottom of the rows that are
+         drawn. It used to stop one row under its own dot, which is what made a
+         filtered history look like a row of lollipops — every match with a
+         parent the filter hid drew a ten-pixel tail and nothing else. */
+      const exitY = cy(Math.max(first, last - 1)) + ROW_H
       const shapes = []
       for (let i = first; i < last; i += 1) {
         const row = rows[i]
@@ -1270,7 +1275,7 @@ textarea.dsh-git-input{resize:vertical}
           const x1 = cx(row.lane)
           const y1 = cy(i)
           const x2 = cx(edge.lane)
-          const y2 = target === undefined ? cy(i) + ROW_H : cy(target)
+          const y2 = target === undefined ? exitY : cy(target)
           const mid = (y1 + y2) / 2
           shapes.push(h('path', {
             key: 'e' + i + '_' + k,
@@ -1279,6 +1284,10 @@ textarea.dsh-git-input{resize:vertical}
             stroke: LANE_COLORS[row.lane % LANE_COLORS.length],
             strokeWidth: 1.6,
             strokeLinecap: 'round',
+            /* Dashed means the same thing IDEA means by it: this edge is real,
+               but the commits along it are not in the list — a filter hid them
+               (see layoutVisible in the Host half). */
+            strokeDasharray: edge.dashed === true ? '3 3' : undefined,
           }))
         }
       }

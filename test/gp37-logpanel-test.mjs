@@ -712,3 +712,55 @@ const clearedTree = await settle('pop')
 ok('点 × 清空了框', inputs(byClass(clearedTree, 'dsh-git-clearable')[0])[0].props.value === '')
 host.call = beforeSetupRead
 
+
+/* ── 图形：虚线，和画到页外的那条线 ──
+
+   过滤后的图形由 Host 按真实 DAG 排（见 Host 那一半的 layoutVisible）：边连到最近
+   的**可见**祖先，中间隔着被筛掉的提交时标成虚线；连不到可见祖先的边，画面要把它
+   画到**画出来的最后一行底下**，而不是在圆点下面一行就断（以前就是那样，一整屏
+   匹配看过去像一排棒棒糖）。这一节把三件事钉在线的形状上：实线没有 dash、虚线有
+   dash、离开这一页的线一直画到底。 */
+console.log('')
+console.log('== 图形：虚线 = 中间有看不见的提交 ==')
+const graphSavedCall = host.call
+const dashCommits = [
+  { hash: 'd1', subject: 'newest match', author: 'mays', date: '2026-09-16', committedAt: nowSec - 10, refs: [] },
+  { hash: 'd2', subject: 'second match', author: 'mays', date: '2026-09-15', committedAt: nowSec - 20, refs: [] },
+  { hash: 'd3', subject: 'third match', author: 'mays', date: '2026-09-14', committedAt: nowSec - 30, refs: [] },
+  { hash: 'd4', subject: 'fourth match', author: 'mays', date: '2026-09-13', committedAt: nowSec - 40, refs: [] },
+]
+const dashRows = [
+  { lane: 0, edges: [{ hash: 'd2', lane: 0 }] },
+  { lane: 0, edges: [{ hash: 'd4', lane: 1, dashed: true }] },
+  { lane: 1, edges: [{ hash: 'gone', lane: 1, dashed: true }] },
+  { lane: 1, edges: [] },
+]
+host.call = function (method, args) {
+  if (method === 'git/graph') {
+    return Promise.resolve({ ok: true, repo: '/tmp/ws', ref: 'main', currentBranch: 'main', commits: dashCommits, rows: dashRows, lanes: 2, hasMore: false })
+  }
+  return graphSavedCall(method, args)
+}
+graphCommits = dashCommits
+/* 上一节把面板留在了「不是仓库」的说明页上，所以这里重新挂载一次；mock 先装好，
+   挂载时那一次读拿到的就是上面这份带 rows 的回答。 */
+fibers.clear()
+fresh = await openPanel()
+await wait(15)
+fresh = await settle('pop')
+host.call = graphSavedCall
+
+const graphSvg = byClass(fresh, 'dsh-git-graph')[0]
+const gpaths = graphSvg === undefined ? [] : graphSvg.props.children.filter((n) => n.type === 'path')
+const gcircles = graphSvg === undefined ? [] : graphSvg.props.children.filter((n) => n.type === 'circle')
+const dOf = (i) => (gpaths[i] === undefined ? '' : String(gpaths[i].props.d))
+ok('四条匹配画四个点', gcircles.length === 4)
+ok('三条边画三条线', gpaths.length === 3)
+ok('相邻的可见父提交：实线（没有 dash）', gpaths[0] !== undefined && gpaths[0].props.strokeDasharray === undefined)
+ok('中间藏着看不见的提交：虚线', gpaths[1] !== undefined && gpaths[1].props.strokeDasharray === '3 3')
+ok('虚线的弯从自己的道走到父提交那条道（x 10 → 24）',
+  dOf(1).indexOf('M 10 ') === 0 && dOf(1).indexOf('24 ') > 0)
+ok('连不到可见祖先的边也是虚线', gpaths[2] !== undefined && gpaths[2].props.strokeDasharray === '3 3')
+/* 行高 26：最后一行的圆心在 y=91，行底是 117。老写法会停在 91（自己下面一行）。 */
+ok('离开这一页的线一直画到画出来的最后一行底下（y=117，而不是 91）',
+  dOf(2).indexOf('M 24 65') === 0 && dOf(2).slice(-4) === ' 117')

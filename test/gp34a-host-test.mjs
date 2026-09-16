@@ -589,6 +589,86 @@ console.log('  未出生分支:', JSON.stringify({ branch: unborn.branch, detach
 check('还没有提交的分支，身份读照样报名字（读的是 HEAD 文件本身）',
   unborn.ok === true && unborn.branch === 'trunk' && unborn.detached === false)
 
+/* ── 过滤之后的图形 ──
+   搜索框一开，普通布局就只连得上它手里的那些提交：被筛掉的父提交不在列表里，
+   为它占的道永远没人来认领，下一个提交于是另占一条 —— 读者那台机器上量到过：
+   200 个 `fix` 匹配，104 条道的占位（上限 14），202px 宽、大半是空的列，52% 的
+   边只画一行就断，圆点一路往右挤最后全堆在最后一条道上。
+
+   现在有过滤时，Host 会另读一遍**这段匹配真正覆盖的普通历史**（`--not <最老的
+   那个匹配>`，只取 `%H %P`），按真实 DAG 排好道，再把每个匹配放到它真正所在的
+   道上；边连到最近的**可见**祖先，中间隔着被筛掉的提交时标成虚线 —— 和 IDEA
+   对虚线的读法一样。没有过滤时这条路径根本不走，一个字节都没变。 */
+
+console.log('')
+console.log('=== 过滤后的图形：按真实历史布局 ===')
+
+/* 一条直线：四个提交里只有两个匹配，中间那个被筛掉 */
+const G = '/tmp/gp42-graphrepo'
+await sh('rm -rf ' + G + ' && mkdir -p ' + G + ' && cd ' + G + ' && git init -q -b main .'
+  + " && git config user.email t@t && git config user.name T", '/tmp')
+const gcommit = async (n, msg) => {
+  await sh('GIT_COMMITTER_DATE="2020-01-0' + n + 'T00:00:00" GIT_AUTHOR_DATE="2020-01-0' + n + 'T00:00:00" '
+    + 'git commit -q --allow-empty -m ' + JSON.stringify(msg), G)
+}
+await gcommit(1, 'unrelated first')
+await gcommit(2, 'REFACTOR: parser')
+await gcommit(3, 'fix the lexer')
+await gcommit(4, 'Fix the parser')
+const ggraph = async (args) => { await H('git/flush')({ repo: G }); return await H('git/graph')(Object.assign({ repo: G }, args)) }
+
+const plainGraph = await ggraph({})
+const filteredGraph = await ggraph({ search: 'parser' })
+console.log('  未过滤：' + plainGraph.commits.length + ' 条，道 ' + plainGraph.lanes
+  + '；过滤 parser：' + filteredGraph.commits.length + ' 条，道 ' + filteredGraph.lanes)
+console.log('  过滤后的行:', JSON.stringify(filteredGraph.rows))
+check('过滤读只给匹配的那两条',
+  filteredGraph.commits.length === 2 && filteredGraph.commits[0].subject === 'Fix the parser'
+  && filteredGraph.commits[1].subject === 'REFACTOR: parser')
+check('两条落在同一条道上（它们在一条链上），列宽也只有一条道',
+  filteredGraph.rows[0].lane === 0 && filteredGraph.rows[1].lane === 0 && filteredGraph.lanes === 1)
+check('边指向最近的**可见**祖先（不是那个看不见的父提交）',
+  filteredGraph.rows[0].edges.length === 1
+  && filteredGraph.rows[0].edges[0].hash === filteredGraph.commits[1].hash
+  && filteredGraph.rows[0].edges[0].lane === 0)
+check('中间隔着被筛掉的提交：这条边是虚线',
+  filteredGraph.rows[0].edges[0].dashed === true)
+check('没有可见祖先可连：也标虚线，让画面把线画到页外（而不是断在自己下面一行）',
+  filteredGraph.rows[1].edges.length === 1 && filteredGraph.rows[1].edges[0].dashed === true
+  && filteredGraph.commits.every((c) => c.hash !== filteredGraph.rows[1].edges[0].hash))
+check('没有过滤时一条虚线都没有（那条路径没变）',
+  plainGraph.rows.every((r) => r.edges.every((e) => e.dashed !== true))
+  && plainGraph.lanes === 1 && plainGraph.rows.length === 4)
+
+/* 有分支的仓库：两个匹配不在同一条链上，真实 DAG 就该把它们放在两条道上 ——
+   「谁先来谁占 0 号」的写法会把它们挤在一条道上，或者各占一条越来越右的新道。 */
+const GB = '/tmp/gp42-graphbranch'
+await sh('rm -rf ' + GB + ' && mkdir -p ' + GB + ' && cd ' + GB + ' && git init -q -b main .'
+  + " && git config user.email t@t && git config user.name T", '/tmp')
+const bcommit = async (n, msg) => {
+  await sh('GIT_COMMITTER_DATE="2020-01-0' + n + 'T00:00:00" GIT_AUTHOR_DATE="2020-01-0' + n + 'T00:00:00" '
+    + 'git commit -q --allow-empty -m ' + JSON.stringify(msg), GB)
+}
+await bcommit(1, 'base commit')
+await sh('git checkout -q -b feat', GB)
+await bcommit(2, 'fix on feat')
+await sh('git checkout -q main', GB)
+await bcommit(3, 'fix on main')
+await sh('GIT_COMMITTER_DATE="2020-01-04T00:00:00" GIT_AUTHOR_DATE="2020-01-04T00:00:00" '
+  + 'git merge -q --no-ff -m "Merge branch feat" feat', GB)
+const gbranch = async (args) => { await H('git/flush')({ repo: GB }); return await H('git/graph')(Object.assign({ repo: GB }, args)) }
+const branched = await gbranch({ search: 'fix' })
+console.log('  分支仓库，过滤 fix：' + branched.commits.length + ' 条 ' + JSON.stringify(branched.rows)
+  + '，道 ' + branched.lanes)
+check('两个匹配各在自己的道上（布局来自真实 DAG，不是「谁先来谁占 0 号」）',
+  branched.commits.length === 2 && branched.lanes === 2
+  && branched.rows[0].lane !== branched.rows[1].lane)
+check('两条边都是虚线，而且都指向这一页里没有的提交（线画到页外）',
+  branched.rows.every((r) => r.edges.length === 1 && r.edges[0].dashed === true
+    && branched.commits.every((c) => c.hash !== r.edges[0].hash)))
+check('列宽数的是真正画出来的道（两条）',
+  Math.max(branched.rows[0].lane, branched.rows[1].lane) + 1 === branched.lanes)
+
 /* ── 一个文件的差异 ──
    面板能说「哪个文件改了」很久了，但没有任何一次读取返回过 patch，所以两处的
    文件行都到那里为止。这一节盯的就是补上的那次读取：四种状态各自的形状。 */
