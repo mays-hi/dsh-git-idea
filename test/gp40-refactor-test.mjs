@@ -15,6 +15,45 @@ const fakeDoc = {
   addEventListener(t, f) { (this._listeners[t] = this._listeners[t] || []).push(f) },
   removeEventListener(t, f) { this._listeners[t] = (this._listeners[t] || []).filter((x) => x !== f) },
   fire(t, e) { (this._listeners[t] || []).slice().forEach((f) => f(e)) },
+  /* 设置弹窗的左栏：外壳按 section id 挑图标（没有专属字形的给齿轮），插件只能
+     在自己那一行上换掉它。这里照外壳真实的结构搭一份最小 DOM —— 只实现我们用到
+     的那几样：querySelector('[role="dialog"] nav')、querySelectorAll('button')、
+     textContent、classList。 */
+  _nav: null,
+  querySelector(sel) { return sel === '[role="dialog"] nav' ? this._nav : null },
+}
+function navButton(label, className) {
+  const classes = String(className === undefined ? 'VOzbGW_navCell' : className).split(' ').filter((c) => c.length > 0)
+  return {
+    textContent: label,
+    get className() { return classes.join(' ') },
+    /* 外壳每次重渲染都会重写 className（选中态一变就写），我们加的类会被抹掉 */
+    set className(value) {
+      classes.length = 0
+      String(value).split(' ').filter((c) => c.length > 0).forEach((c) => classes.push(c))
+    },
+    classList: {
+      add(c) { if (classes.indexOf(c) < 0) classes.push(c) },
+      contains(c) { return classes.indexOf(c) >= 0 },
+      remove(c) { const i = classes.indexOf(c); if (i >= 0) classes.splice(i, 1) },
+    },
+  }
+}
+const navObservers = []
+class FakeMutationObserver {
+  constructor(cb) { this.cb = cb; this.dead = false; navObservers.push(this) }
+  observe(node, options) { this.node = node; this.options = options }
+  disconnect() { this.dead = true }
+}
+fakeDoc.defaultView.MutationObserver = FakeMutationObserver
+function setSettingsNav(labels) {
+  const buttons = labels.map((l) => navButton(l))
+  fakeDoc._nav = { querySelectorAll: (sel) => (sel === 'button' ? buttons : []) }
+  return buttons
+}
+/* 左栏里出现一次「外壳自己改了 className」 */
+function shellRewritesNav() {
+  navObservers.filter((o) => o.dead !== true).forEach((o) => o.cb())
 }
 const INSIDE = { nodeType: 1, name: 'inside-panel' }
 const IN_CARD = { nodeType: 1, name: 'inside-switcher-card' }
@@ -717,3 +756,43 @@ fibers.clear()
 await openPanel()
 await wait(20)
 await settle()
+
+/* ── 6. 设置左栏里我们这一项：名字与图标 ──
+
+   外壳按 section id 选图标，未知的给齿轮；注册选项只有 id/order/label，没有
+   图标这一项。所以插件只做一件事：把自己那一行标出来，图标由样式表画。 */
+
+console.log('')
+console.log('== 设置左栏的名字与图标 ==')
+const sectionReg = registered.find((r) => r.options.id === 'dsh-git-idea')
+ok('左栏里的名字就是页面上那行标题',
+  sectionReg.options.label === 'dsh-git-idea配置'
+  && textOf(byClass(await renderUntilStable(makeElement(section, {}), 'gp40-label'), 'dsh-git-set-h')[0]) === 'dsh-git-idea配置')
+
+const navRow = registered.find((r) => r.options.id === 'dsh-git-idea-navmark')
+ok('设置弹窗开着的时候有一个我们自己的常驻座位（渲染为空）',
+  navRow !== undefined && navRow.options.name === 'settings.action')
+const navButtons = setSettingsNav(['通用', 'Agent 预设', sectionReg.options.label, '插件'])
+const renderNavMark = async (label) => {
+  if (navRow === undefined) return false
+  await renderUntilStable(makeElement(navRow.component, {}), label)
+  return true
+}
+const navRendered = await renderNavMark('gp40-nav')
+const withMark = navButtons.filter((b) => b.classList.contains('dsh-git-navmark'))
+ok('只标了我们那一行，别人的没动',
+  navRendered === true && withMark.length === 1 && withMark[0].textContent === 'dsh-git-idea配置')
+
+/* 外壳重渲染会重写 className，把我们加的类一起抹掉；观察者要能补回来 */
+navButtons[2].className = 'VOzbGW_navCell VOzbGW_active'
+ok('外壳重写 className 之后标记确实没了（这就是要盯的原因）',
+  withMark.length === 1 && navButtons[2].classList.contains('dsh-git-navmark') === false)
+shellRewritesNav()
+ok('观察者把标记补了回来', navButtons[2].classList.contains('dsh-git-navmark') === true)
+ok('别行仍然没被标上', navButtons[0].classList.contains('dsh-git-navmark') === false)
+
+/* 没有设置弹窗（querySelector 拿不到左栏）时：不抛错，也不乱标 */
+fakeDoc._nav = null
+let navQuiet = navRendered
+try { await renderNavMark('gp40-nav-none') } catch (error) { navQuiet = false }
+ok('弹窗不在时什么都不做，也不抛错', navQuiet === true)

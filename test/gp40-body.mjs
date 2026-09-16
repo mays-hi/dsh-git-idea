@@ -442,3 +442,43 @@ fibers.clear()
 await openPanel()
 await wait(20)
 await settle()
+
+/* ── 6. 设置左栏里我们这一项：名字与图标 ──
+
+   外壳按 section id 选图标，未知的给齿轮；注册选项只有 id/order/label，没有
+   图标这一项。所以插件只做一件事：把自己那一行标出来，图标由样式表画。 */
+
+console.log('')
+console.log('== 设置左栏的名字与图标 ==')
+const sectionReg = registered.find((r) => r.options.id === 'dsh-git-idea')
+ok('左栏里的名字就是页面上那行标题',
+  sectionReg.options.label === 'dsh-git-idea配置'
+  && textOf(byClass(await renderUntilStable(makeElement(section, {}), 'gp40-label'), 'dsh-git-set-h')[0]) === 'dsh-git-idea配置')
+
+const navRow = registered.find((r) => r.options.id === 'dsh-git-idea-navmark')
+ok('设置弹窗开着的时候有一个我们自己的常驻座位（渲染为空）',
+  navRow !== undefined && navRow.options.name === 'settings.action')
+const navButtons = setSettingsNav(['通用', 'Agent 预设', sectionReg.options.label, '插件'])
+const renderNavMark = async (label) => {
+  if (navRow === undefined) return false
+  await renderUntilStable(makeElement(navRow.component, {}), label)
+  return true
+}
+const navRendered = await renderNavMark('gp40-nav')
+const withMark = navButtons.filter((b) => b.classList.contains('dsh-git-navmark'))
+ok('只标了我们那一行，别人的没动',
+  navRendered === true && withMark.length === 1 && withMark[0].textContent === 'dsh-git-idea配置')
+
+/* 外壳重渲染会重写 className，把我们加的类一起抹掉；观察者要能补回来 */
+navButtons[2].className = 'VOzbGW_navCell VOzbGW_active'
+ok('外壳重写 className 之后标记确实没了（这就是要盯的原因）',
+  withMark.length === 1 && navButtons[2].classList.contains('dsh-git-navmark') === false)
+shellRewritesNav()
+ok('观察者把标记补了回来', navButtons[2].classList.contains('dsh-git-navmark') === true)
+ok('别行仍然没被标上', navButtons[0].classList.contains('dsh-git-navmark') === false)
+
+/* 没有设置弹窗（querySelector 拿不到左栏）时：不抛错，也不乱标 */
+fakeDoc._nav = null
+let navQuiet = navRendered
+try { await renderNavMark('gp40-nav-none') } catch (error) { navQuiet = false }
+ok('弹窗不在时什么都不做，也不抛错', navQuiet === true)

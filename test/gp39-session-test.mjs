@@ -15,6 +15,45 @@ const fakeDoc = {
   addEventListener(t, f) { (this._listeners[t] = this._listeners[t] || []).push(f) },
   removeEventListener(t, f) { this._listeners[t] = (this._listeners[t] || []).filter((x) => x !== f) },
   fire(t, e) { (this._listeners[t] || []).slice().forEach((f) => f(e)) },
+  /* 设置弹窗的左栏：外壳按 section id 挑图标（没有专属字形的给齿轮），插件只能
+     在自己那一行上换掉它。这里照外壳真实的结构搭一份最小 DOM —— 只实现我们用到
+     的那几样：querySelector('[role="dialog"] nav')、querySelectorAll('button')、
+     textContent、classList。 */
+  _nav: null,
+  querySelector(sel) { return sel === '[role="dialog"] nav' ? this._nav : null },
+}
+function navButton(label, className) {
+  const classes = String(className === undefined ? 'VOzbGW_navCell' : className).split(' ').filter((c) => c.length > 0)
+  return {
+    textContent: label,
+    get className() { return classes.join(' ') },
+    /* 外壳每次重渲染都会重写 className（选中态一变就写），我们加的类会被抹掉 */
+    set className(value) {
+      classes.length = 0
+      String(value).split(' ').filter((c) => c.length > 0).forEach((c) => classes.push(c))
+    },
+    classList: {
+      add(c) { if (classes.indexOf(c) < 0) classes.push(c) },
+      contains(c) { return classes.indexOf(c) >= 0 },
+      remove(c) { const i = classes.indexOf(c); if (i >= 0) classes.splice(i, 1) },
+    },
+  }
+}
+const navObservers = []
+class FakeMutationObserver {
+  constructor(cb) { this.cb = cb; this.dead = false; navObservers.push(this) }
+  observe(node, options) { this.node = node; this.options = options }
+  disconnect() { this.dead = true }
+}
+fakeDoc.defaultView.MutationObserver = FakeMutationObserver
+function setSettingsNav(labels) {
+  const buttons = labels.map((l) => navButton(l))
+  fakeDoc._nav = { querySelectorAll: (sel) => (sel === 'button' ? buttons : []) }
+  return buttons
+}
+/* 左栏里出现一次「外壳自己改了 className」 */
+function shellRewritesNav() {
+  navObservers.filter((o) => o.dead !== true).forEach((o) => o.cb())
 }
 const INSIDE = { nodeType: 1, name: 'inside-panel' }
 const IN_CARD = { nodeType: 1, name: 'inside-switcher-card' }

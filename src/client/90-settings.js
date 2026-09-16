@@ -1,3 +1,8 @@
+    /* The section's name in the settings rail, and the page's own heading; the
+       git mark in the rail hangs off this same string, so the two cannot drift
+       apart. */
+    const SETTINGS_NAV_LABEL = 'dsh-git-idea配置'
+
     function GitSettingsSection(props) {
       const settings = useGitSettings()
       const [draft, setDraft] = React.useState(settings)
@@ -36,7 +41,7 @@
           loadPluginConfig()
         },
       },
-        h('div', { className: 'dsh-git-set-h' }, 'Git'),
+        h('div', { className: 'dsh-git-set-h' }, SETTINGS_NAV_LABEL),
         h('div', { className: 'dsh-git-set-hint' }, '分两层：跟随插件的配置，和只影响本浏览器的外观与节奏。'),
 
         h('div', { className: 'dsh-git-set-group' }, '插件配置'),
