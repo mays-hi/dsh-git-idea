@@ -48,21 +48,16 @@
     let starredBranches = []
     let branchSort = 'recent'
     let branchPrefsLoaded = false
-    const branchPrefListeners = new Set()
+    /* A counter rather than a value: the two consumers of this signal are the
+       switcher and the settings page, and both want a fresh render after any of
+       the three lists changed, not the list itself. */
     let branchPrefVersion = 0
+    const branchPrefSignal = createSignal(function () { return branchPrefVersion })
+    const useBranchPrefs = branchPrefSignal.use
 
     function bumpBranchPrefs() {
       branchPrefVersion += 1
-      branchPrefListeners.forEach(function (listener) { listener() })
-    }
-    function useBranchPrefs() {
-      const pair = React.useState(branchPrefVersion)
-      React.useEffect(function () {
-        const listener = function () { pair[1](branchPrefVersion) }
-        branchPrefListeners.add(listener)
-        return function () { branchPrefListeners.delete(listener) }
-      }, [])
-      return pair[0]
+      branchPrefSignal.notify()
     }
     function stringList(raw, max) {
       const out = []
@@ -73,30 +68,18 @@
       return out
     }
     function loadBranchPrefs(doc) {
+      localStore(doc)
       if (branchPrefsLoaded) return
       branchPrefsLoaded = true
-      try {
-        const store = panelStore(doc)
-        if (store == null) return
-        recentBranches = stringList(JSON.parse(store.getItem(MRU_KEY) || 'null'), MRU_MAX)
-        starredBranches = stringList(JSON.parse(store.getItem(STARS_KEY) || 'null'), STARS_MAX)
-        const sort = store.getItem(SORT_KEY)
-        if (sort === 'name' || sort === 'recent') branchSort = sort
-      } catch (error) {
-        recentBranches = []
-        starredBranches = []
-      }
+      recentBranches = stringList(readStoredJSON(MRU_KEY, null), MRU_MAX)
+      starredBranches = stringList(readStoredJSON(STARS_KEY, null), STARS_MAX)
+      const sort = readStored(SORT_KEY)
+      if (sort === 'name' || sort === 'recent') branchSort = sort
     }
     function saveBranchPrefs() {
-      try {
-        const store = panelStore(settingsDoc != null ? settingsDoc : (chipNode != null ? chipNode.ownerDocument : null))
-        if (store == null) return
-        store.setItem(MRU_KEY, JSON.stringify(recentBranches))
-        store.setItem(STARS_KEY, JSON.stringify(starredBranches))
-        store.setItem(SORT_KEY, branchSort)
-      } catch (error) {
-        /* a refused preference is not worth breaking the panel over */
-      }
+      writeStoredJSON(MRU_KEY, recentBranches)
+      writeStoredJSON(STARS_KEY, starredBranches)
+      writeStored(SORT_KEY, branchSort)
     }
     function rememberBranch(name) {
       if (name.length === 0) return

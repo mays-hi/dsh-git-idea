@@ -50,7 +50,7 @@
         host.call('git/panel', base(repo)).then(function (data) {
           setWork(data)
         }).catch(function (failure) {
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -128,7 +128,7 @@
           bump()
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -195,7 +195,7 @@
         host.call('git/refs', base(appliedRepo)).then(function (data) {
           if (alive) setRefs(data)
         }).catch(function (failure) {
-          if (alive) setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
       }, [appliedRepo, repoOk, freshAt, props.ready])
@@ -255,7 +255,7 @@
             if (alive) setDetail(chosen)
           }).catch(function () {})
         }).catch(function (failure) {
-          if (alive) setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
       }, [appliedRepo, activeRef, allRefs, search, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
@@ -266,16 +266,16 @@
         const node = panelNode
         const doc = node != null ? node.ownerDocument : null
         loadPanelSize(doc)
-        adoptSettingsDoc(doc)
+        loadSettings(doc)
         loadPluginConfig()
         if (panelSize.w > 0 || panelSize.h > 0) setSize({ w: panelSize.w, h: panelSize.h })
       }, [])
 
       /* the settings page can reset the geometry while this panel is open */
       React.useEffect(function () {
-        const listener = function () { setSize({ w: panelSize.w, h: panelSize.h }) }
-        panelSizeListeners.add(listener)
-        return function () { panelSizeListeners.delete(listener) }
+        return panelSizeSignal.subscribe(function () {
+          setSize({ w: panelSize.w, h: panelSize.h })
+        })
       }, [])
 
       /* The panel watches fast only while it is the thing on screen; closed, it
@@ -293,7 +293,7 @@
         host.call('git/commit-detail', request).then(function (data) {
           setDetail(data)
         }).catch(function (failure) {
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -323,7 +323,7 @@
           loadWork(appliedRepo)
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -352,7 +352,7 @@
           loadWork(appliedRepo)
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 

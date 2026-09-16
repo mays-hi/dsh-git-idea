@@ -13,22 +13,144 @@ return {
       return typeof value === 'string' ? value : ''
     }
 
-    const listeners = new Set()
+    /* Whatever was thrown, said in one line. Every catch in this file wants the
+       same sentence, and the shape it guards against — a rejection that is a
+       string rather than an Error — is the one that would otherwise print
+       "undefined". */
+    function failureText(failure) {
+      return String(failure != null && failure.message !== undefined ? failure.message : failure)
+    }
+
+    /* ── one signal, seven of them ──
+
+       Every piece of state that two surfaces have to agree on is the same three
+       things: a value, a set of listeners, and a hook that re-renders its
+       component when one of them fires. Written out seven times, that is seven
+       chances for a notification to be forgotten on one path and sent twice on
+       another — and it was, in both directions. It is written once here; what
+       differs between the seven (whether an identical value may be set again,
+       where the value is persisted, whether it counts or holds) stays in the
+       section that owns it.
+
+       The reader is a function rather than a value, so the variable each section
+       already keeps — `open`, `panelSize`, `gitSettings` — stays the truth and
+       every existing read of it stays a plain read. */
+    function createSignal(read) {
+      const listeners = new Set()
+      const signal = {
+        /* Tell everyone. Called by whoever just changed the value, never by the
+           subscribers, so a notification always follows a real change. */
+        notify: function () {
+          listeners.forEach(function (listener) { listener() })
+        },
+        subscribe: function (listener) {
+          listeners.add(listener)
+          return function () { listeners.delete(listener) }
+        },
+        /* The React face of the signal: read the value when the signal fires,
+           never the one this render closed over. */
+        use: function () {
+          const pair = React.useState(read())
+          React.useEffect(function () {
+            return signal.subscribe(function () { pair[1](read()) })
+          }, [])
+          return pair[0]
+        },
+      }
+      return signal
+    }
+
+    /* ── the browser's own storage ──
+
+       A page can refuse storage at any point — private mode, a sandboxed frame,
+       a quota — and not one of the preferences below is worth breaking the panel
+       over. So every read and write goes through here, the try/catch lives here,
+       and the sections above only name a key.
+
+       The first document that hands over a panel or chip node is kept, because a
+       save can happen long after the node that prompted it is gone. */
+    let settingsDoc = null
+
+    function localStore(doc) {
+      if (doc != null && settingsDoc == null) settingsDoc = doc
+      if (settingsDoc == null) return null
+      try {
+        const view = settingsDoc.defaultView
+        return view != null ? view.localStorage : null
+      } catch (error) {
+        return null
+      }
+    }
+
+    /* The plugin answered to "gitops" before it was named dsh-git-idea, and the
+       keys it wrote then are the same preferences this version reads now. A
+       rename must not silently reset someone's panel size, cadence or
+       favourites, so the old key is copied across once, on the first store the
+       page hands over, and only when the new one is still absent. */
+    const STORE_RENAMES = [
+      ['dsh.gitops.settings', 'dsh.git-idea.settings'],
+      ['dsh.gitops.panel', 'dsh.git-idea.panel'],
+      ['dsh.gitops.mru', 'dsh.git-idea.mru'],
+      ['dsh.gitops.stars', 'dsh.git-idea.stars'],
+      ['dsh.gitops.sort', 'dsh.git-idea.sort'],
+    ]
+    let storeMigrated = false
+
+    function readStored(key) {
+      const store = localStore(null)
+      if (store == null) return null
+      let value = null
+      try {
+        if (storeMigrated !== true) {
+          storeMigrated = true
+          for (let i = 0; i < STORE_RENAMES.length; i += 1) {
+            const from = STORE_RENAMES[i][0]
+            const to = STORE_RENAMES[i][1]
+            const previous = store.getItem(from)
+            if (previous != null && store.getItem(to) == null) store.setItem(to, previous)
+          }
+        }
+        value = store.getItem(key)
+      } catch (error) {
+        return null
+      }
+      return value
+    }
+
+    function writeStored(key, value) {
+      const store = localStore(null)
+      if (store == null) return
+      try {
+        store.setItem(key, value)
+      } catch (error) {
+        /* a refused preference is not worth breaking the panel over */
+      }
+    }
+
+    function readStoredJSON(key, fallback) {
+      const raw = readStored(key)
+      if (raw == null) return fallback
+      try {
+        return JSON.parse(raw)
+      } catch (error) {
+        return fallback
+      }
+    }
+
+    function writeStoredJSON(key, value) {
+      writeStored(key, JSON.stringify(value))
+    }
+
+    /* Whether the panel is open at all: the composer chip and the panel are two
+       components racing to be the same answer. */
     let open = false
+    const openSignal = createSignal(function () { return open })
     const setOpen = function (next) {
       if (open === next) return
       open = next
-      listeners.forEach(function (listener) { listener() })
+      openSignal.notify()
     }
-    const useOpen = function () {
-      const pair = React.useState(open)
-      React.useEffect(function () {
-        const listener = function () { pair[1](open) }
-        listeners.add(listener)
-        return function () { listeners.delete(listener) }
-      }, [])
-      return pair[0]
-    }
+    const useOpen = openSignal.use
 
     let chipNode = null
     let panelNode = null
@@ -40,42 +162,26 @@ return {
        one component would leave the other one naming the branch it used to be
        on; and the panel itself stays mounted now, so it has to hear about a
        change that happened while it was hidden. */
-    const dataListeners = new Set()
     let dataVersion = 0
+    const dataSignal = createSignal(function () { return dataVersion })
     const bumpData = function () {
       dataVersion += 1
-      dataListeners.forEach(function (listener) { listener() })
+      dataSignal.notify()
     }
-    const useDataVersion = function () {
-      const pair = React.useState(dataVersion)
-      React.useEffect(function () {
-        const listener = function () { pair[1](dataVersion) }
-        dataListeners.add(listener)
-        return function () { dataListeners.delete(listener) }
-      }, [])
-      return pair[0]
-    }
+    const useDataVersion = dataSignal.use
 
     /* Which switcher is showing, if either: the dropdown hanging off the panel
        header's branch chip ('panel'), or the card the composer chip opens on
        hover ('hover'). One at a time, never both with the panel. */
-    const switchListeners = new Set()
     let switchMode = null
     let switcherNode = null
+    const switchSignal = createSignal(function () { return switchMode })
     const setSwitchMode = function (next) {
       if (switchMode === next) return
       switchMode = next
-      switchListeners.forEach(function (listener) { listener() })
+      switchSignal.notify()
     }
-    const useSwitchMode = function () {
-      const pair = React.useState(switchMode)
-      React.useEffect(function () {
-        const listener = function () { pair[1](switchMode) }
-        switchListeners.add(listener)
-        return function () { switchListeners.delete(listener) }
-      }, [])
-      return pair[0]
-    }
+    const useSwitchMode = switchSignal.use
 
     /* Hover is a promise the pointer can break at any moment, so opening waits
        (a pointer crossing the composer on its way somewhere else must not open
@@ -123,82 +229,34 @@ return {
       else delete sharedRepos[sessionId]
     }
 
-    /* Panel geometry. Zero means "follow the composer width / 74vh", which stays
-       the default; the first drag switches to explicit pixels, and the size is
-       remembered through localStorage when the page exposes one. */
+    /* ── panel geometry ──
+
+       Zero means "follow the composer width / 74vh", which stays the default;
+       the first drag switches to explicit pixels, and the size is remembered
+       through localStorage when the page exposes one. */
+    const PANEL_SIZE_KEY = 'dsh.git-idea.panel'
     let panelSize = { w: 0, h: 0 }
     let panelSizeLoaded = false
+    const panelSizeSignal = createSignal(function () { return panelSize })
 
-    function panelStore(doc) {
-      try {
-        const view = doc != null ? doc.defaultView : null
-        return view != null ? view.localStorage : null
-      } catch (error) {
-        return null
-      }
-    }
-
-    /* The plugin answered to "gitops" before it was named dsh-git-idea, and the
-       keys it wrote then are the same preferences this version reads now. A
-       rename must not silently reset someone's panel size, cadence or
-       favourites, so the old key is copied across once, on the first store the
-       page hands over, and only when the new one is still absent. */
-    const STORE_RENAMES = [
-      ['dsh.gitops.settings', 'dsh.git-idea.settings'],
-      ['dsh.gitops.panel', 'dsh.git-idea.panel'],
-      ['dsh.gitops.mru', 'dsh.git-idea.mru'],
-      ['dsh.gitops.stars', 'dsh.git-idea.stars'],
-      ['dsh.gitops.sort', 'dsh.git-idea.sort'],
-    ]
-    let storeMigrated = false
-    function migrateStore(doc) {
-      if (storeMigrated) return
-      storeMigrated = true
-      try {
-        const store = panelStore(doc)
-        if (store == null) return
-        for (let i = 0; i < STORE_RENAMES.length; i += 1) {
-          const from = STORE_RENAMES[i][0]
-          const to = STORE_RENAMES[i][1]
-          const previous = store.getItem(from)
-          if (previous != null && store.getItem(to) == null) store.setItem(to, previous)
-        }
-      } catch (error) {
-        /* nothing to carry over is not a failure */
-      }
+    function publishPanelSize(next) {
+      panelSize = next
+      panelSizeSignal.notify()
     }
 
     function loadPanelSize(doc) {
       if (panelSizeLoaded) return
       panelSizeLoaded = true
-      try {
-        const store = panelStore(doc)
-        if (store == null) return
-        const parsed = JSON.parse(store.getItem('dsh.git-idea.panel') || 'null')
-        if (parsed != null && typeof parsed.w === 'number' && typeof parsed.h === 'number') {
-          panelSize = { w: parsed.w, h: parsed.h }
-        }
-      } catch (error) {
-        panelSize = { w: 0, h: 0 }
+      localStore(doc)
+      const parsed = readStoredJSON(PANEL_SIZE_KEY, null)
+      if (parsed != null && typeof parsed.w === 'number' && typeof parsed.h === 'number') {
+        panelSize = { w: parsed.w, h: parsed.h }
       }
     }
 
-    const panelSizeListeners = new Set()
-
-    function publishPanelSize(next) {
-      panelSize = next
-      panelSizeListeners.forEach(function (listener) { listener() })
+    function savePanelSize() {
+      writeStoredJSON(PANEL_SIZE_KEY, panelSize)
     }
-
-    function savePanelSize(doc) {
-      try {
-        const store = panelStore(doc)
-        if (store != null) store.setItem('dsh.git-idea.panel', JSON.stringify(panelSize))
-      } catch (error) {
-        /* a refused preference is not worth breaking the panel over */
-      }
-    }
-
     /* ── preferences, layer one: this browser ──
 
        Appearance and cadence only. Anything that describes what Git should DO
@@ -219,8 +277,8 @@ return {
     }
     let gitSettings = Object.assign({}, SETTINGS_DEFAULTS)
     let settingsLoaded = false
-    let settingsDoc = null
-    const settingsListeners = new Set()
+    const settingsSignal = createSignal(function () { return gitSettings })
+    const useGitSettings = settingsSignal.use
 
     function clampInt(value, min, max, fallback) {
       const n = typeof value === 'number' && isFinite(value) ? Math.round(value) : NaN
@@ -242,40 +300,20 @@ return {
       return out
     }
 
-    function adoptSettingsDoc(doc) {
-      if (doc != null && settingsDoc == null) settingsDoc = doc
-      migrateStore(doc)
+    /* Called by every surface that has just been handed a document, so a later
+       save finds a store even if the surface that changed something is gone. */
+    function loadSettings(doc) {
+      localStore(doc)
       if (settingsLoaded) return
       settingsLoaded = true
-      try {
-        const store = panelStore(doc)
-        if (store == null) return
-        gitSettings = normalizeSettings(JSON.parse(store.getItem(SETTINGS_KEY) || 'null'))
-      } catch (error) {
-        gitSettings = Object.assign({}, SETTINGS_DEFAULTS)
-      }
+      gitSettings = normalizeSettings(readStoredJSON(SETTINGS_KEY, null))
     }
 
     function saveSettings(next) {
       gitSettings = normalizeSettings(next)
-      try {
-        const store = panelStore(settingsDoc)
-        if (store != null) store.setItem(SETTINGS_KEY, JSON.stringify(gitSettings))
-      } catch (error) {
-        /* a refused preference is not worth breaking the panel over */
-      }
-      settingsListeners.forEach(function (listener) { listener() })
+      writeStoredJSON(SETTINGS_KEY, gitSettings)
+      settingsSignal.notify()
       rescheduleWatchers()
-    }
-
-    function useGitSettings() {
-      const pair = React.useState(gitSettings)
-      React.useEffect(function () {
-        const listener = function () { pair[1](gitSettings) }
-        settingsListeners.add(listener)
-        return function () { settingsListeners.delete(listener) }
-      }, [])
-      return pair[0]
     }
 
     /* ── preferences, layer two: the plugin ──
@@ -287,68 +325,56 @@ return {
        half, so they travel across browsers and machines. As an ordinary plugin
        this is exactly what its config section would hold. */
 
-    let pluginConfig = { initBranch: 'main', cherryPickRecord: false }
+    const PLUGIN_CONFIG_DEFAULTS = { initBranch: 'main', cherryPickRecord: false }
+    let pluginConfig = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
     let pluginConfigPath = ''
     let pluginConfigLoaded = false
     let pluginConfigError = ''
-    const pluginConfigListeners = new Set()
+    const pluginConfigSignal = createSignal(function () { return pluginConfig })
+    const usePluginConfig = pluginConfigSignal.use
 
     function normalizePluginConfig(raw) {
-      const out = { initBranch: 'main', cherryPickRecord: false }
+      const out = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
       if (raw == null || typeof raw !== 'object') return out
       if (typeof raw.initBranch === 'string') out.initBranch = raw.initBranch.trim().slice(0, 120)
       out.cherryPickRecord = raw.cherryPickRecord === true
       return out
     }
 
-    function announcePluginConfig() {
-      pluginConfigListeners.forEach(function (listener) { listener() })
-    }
-
     function adoptPluginConfig(data) {
-      if (data == null) { announcePluginConfig(); return }
-      if (typeof data.path === 'string') pluginConfigPath = data.path
-      if (data.config !== undefined) pluginConfig = normalizePluginConfig(data.config)
-      pluginConfigError = ''
-      announcePluginConfig()
+      if (data != null) {
+        if (typeof data.path === 'string') pluginConfigPath = data.path
+        if (data.config !== undefined) pluginConfig = normalizePluginConfig(data.config)
+        pluginConfigError = ''
+      }
+      pluginConfigSignal.notify()
     }
 
     function loadPluginConfig() {
       if (pluginConfigLoaded) return
       pluginConfigLoaded = true
       host.call('git/config', {}).then(adoptPluginConfig).catch(function (failure) {
-        pluginConfigError = String(failure != null && failure.message !== undefined ? failure.message : failure)
-        announcePluginConfig()
+        pluginConfigError = failureText(failure)
+        pluginConfigSignal.notify()
       })
     }
 
     function savePluginConfig(next) {
       pluginConfig = normalizePluginConfig(next)
       pluginConfigError = ''
-      announcePluginConfig()
+      pluginConfigSignal.notify()
       host.call('git/config-save', { config: pluginConfig }).then(function (result) {
         if (result == null || result.ok !== true) {
           pluginConfigError = text(result != null ? result.error : '') || '保存失败'
-          announcePluginConfig()
+          pluginConfigSignal.notify()
           return
         }
         adoptPluginConfig(result)
       }).catch(function (failure) {
-        pluginConfigError = String(failure != null && failure.message !== undefined ? failure.message : failure)
-        announcePluginConfig()
+        pluginConfigError = failureText(failure)
+        pluginConfigSignal.notify()
       })
     }
-
-    function usePluginConfig() {
-      const pair = React.useState(pluginConfig)
-      React.useEffect(function () {
-        const listener = function () { pair[1](pluginConfig) }
-        pluginConfigListeners.add(listener)
-        return function () { pluginConfigListeners.delete(listener) }
-      }, [])
-      return pair[0]
-    }
-
     /* ── change monitoring ──
 
        Reads do not age out on the Host, so freshness comes from noticing that
@@ -1253,7 +1279,7 @@ textarea.gitops-input{resize:vertical}
         }).catch(function (failure) {
           setBusy(false)
           setArmed(false)
-          setProblem(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setProblem(failureText(failure))
         })
       }
 
@@ -1347,21 +1373,16 @@ textarea.gitops-input{resize:vertical}
     let starredBranches = []
     let branchSort = 'recent'
     let branchPrefsLoaded = false
-    const branchPrefListeners = new Set()
+    /* A counter rather than a value: the two consumers of this signal are the
+       switcher and the settings page, and both want a fresh render after any of
+       the three lists changed, not the list itself. */
     let branchPrefVersion = 0
+    const branchPrefSignal = createSignal(function () { return branchPrefVersion })
+    const useBranchPrefs = branchPrefSignal.use
 
     function bumpBranchPrefs() {
       branchPrefVersion += 1
-      branchPrefListeners.forEach(function (listener) { listener() })
-    }
-    function useBranchPrefs() {
-      const pair = React.useState(branchPrefVersion)
-      React.useEffect(function () {
-        const listener = function () { pair[1](branchPrefVersion) }
-        branchPrefListeners.add(listener)
-        return function () { branchPrefListeners.delete(listener) }
-      }, [])
-      return pair[0]
+      branchPrefSignal.notify()
     }
     function stringList(raw, max) {
       const out = []
@@ -1372,30 +1393,18 @@ textarea.gitops-input{resize:vertical}
       return out
     }
     function loadBranchPrefs(doc) {
+      localStore(doc)
       if (branchPrefsLoaded) return
       branchPrefsLoaded = true
-      try {
-        const store = panelStore(doc)
-        if (store == null) return
-        recentBranches = stringList(JSON.parse(store.getItem(MRU_KEY) || 'null'), MRU_MAX)
-        starredBranches = stringList(JSON.parse(store.getItem(STARS_KEY) || 'null'), STARS_MAX)
-        const sort = store.getItem(SORT_KEY)
-        if (sort === 'name' || sort === 'recent') branchSort = sort
-      } catch (error) {
-        recentBranches = []
-        starredBranches = []
-      }
+      recentBranches = stringList(readStoredJSON(MRU_KEY, null), MRU_MAX)
+      starredBranches = stringList(readStoredJSON(STARS_KEY, null), STARS_MAX)
+      const sort = readStored(SORT_KEY)
+      if (sort === 'name' || sort === 'recent') branchSort = sort
     }
     function saveBranchPrefs() {
-      try {
-        const store = panelStore(settingsDoc != null ? settingsDoc : (chipNode != null ? chipNode.ownerDocument : null))
-        if (store == null) return
-        store.setItem(MRU_KEY, JSON.stringify(recentBranches))
-        store.setItem(STARS_KEY, JSON.stringify(starredBranches))
-        store.setItem(SORT_KEY, branchSort)
-      } catch (error) {
-        /* a refused preference is not worth breaking the panel over */
-      }
+      writeStoredJSON(MRU_KEY, recentBranches)
+      writeStoredJSON(STARS_KEY, starredBranches)
+      writeStored(SORT_KEY, branchSort)
     }
     function rememberBranch(name) {
       if (name.length === 0) return
@@ -1643,7 +1652,7 @@ textarea.gitops-input{resize:vertical}
           setData(result)
           setIndex(0)
         }).catch(function (failure) {
-          if (alive) setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
       }, [props.repo, props.sessionId, version])
@@ -1684,7 +1693,7 @@ textarea.gitops-input{resize:vertical}
           props.onDone()
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
           bumpData()
         })
       }
@@ -1708,7 +1717,7 @@ textarea.gitops-input{resize:vertical}
           setNote(label + ' 完成')
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -1733,7 +1742,7 @@ textarea.gitops-input{resize:vertical}
           props.onDone()
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -1761,7 +1770,7 @@ textarea.gitops-input{resize:vertical}
           setNote('已删除分支 ' + name)
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -2161,7 +2170,7 @@ textarea.gitops-input{resize:vertical}
         host.call('git/panel', base(repo)).then(function (data) {
           setWork(data)
         }).catch(function (failure) {
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -2239,7 +2248,7 @@ textarea.gitops-input{resize:vertical}
           bump()
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -2306,7 +2315,7 @@ textarea.gitops-input{resize:vertical}
         host.call('git/refs', base(appliedRepo)).then(function (data) {
           if (alive) setRefs(data)
         }).catch(function (failure) {
-          if (alive) setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
       }, [appliedRepo, repoOk, freshAt, props.ready])
@@ -2366,7 +2375,7 @@ textarea.gitops-input{resize:vertical}
             if (alive) setDetail(chosen)
           }).catch(function () {})
         }).catch(function (failure) {
-          if (alive) setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
       }, [appliedRepo, activeRef, allRefs, search, author, datePreset, pathFilter, tab, repoOk, freshAt, props.ready])
@@ -2377,16 +2386,16 @@ textarea.gitops-input{resize:vertical}
         const node = panelNode
         const doc = node != null ? node.ownerDocument : null
         loadPanelSize(doc)
-        adoptSettingsDoc(doc)
+        loadSettings(doc)
         loadPluginConfig()
         if (panelSize.w > 0 || panelSize.h > 0) setSize({ w: panelSize.w, h: panelSize.h })
       }, [])
 
       /* the settings page can reset the geometry while this panel is open */
       React.useEffect(function () {
-        const listener = function () { setSize({ w: panelSize.w, h: panelSize.h }) }
-        panelSizeListeners.add(listener)
-        return function () { panelSizeListeners.delete(listener) }
+        return panelSizeSignal.subscribe(function () {
+          setSize({ w: panelSize.w, h: panelSize.h })
+        })
       }, [])
 
       /* The panel watches fast only while it is the thing on screen; closed, it
@@ -2404,7 +2413,7 @@ textarea.gitops-input{resize:vertical}
         host.call('git/commit-detail', request).then(function (data) {
           setDetail(data)
         }).catch(function (failure) {
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -2434,7 +2443,7 @@ textarea.gitops-input{resize:vertical}
           loadWork(appliedRepo)
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -2463,7 +2472,7 @@ textarea.gitops-input{resize:vertical}
           loadWork(appliedRepo)
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -2930,7 +2939,7 @@ textarea.gitops-input{resize:vertical}
       return h('div', {
         className: 'gitops-set',
         ref: function (node) {
-          adoptSettingsDoc(node != null ? node.ownerDocument : null)
+          loadSettings(node != null ? node.ownerDocument : null)
           loadPluginConfig()
         },
       },
@@ -3020,7 +3029,7 @@ textarea.gitops-input{resize:vertical}
               : '跟随输入框宽度 / 74vh'),
           h('button', {
             type: 'button', className: 'gitops-btn',
-            onClick: function () { publishPanelSize({ w: 0, h: 0 }); savePanelSize(settingsDoc) },
+            onClick: function () { publishPanelSize({ w: 0, h: 0 }); savePanelSize() },
           }, '恢复默认尺寸')),
 
         h('div', { className: 'gitops-set-row' },
@@ -3045,7 +3054,7 @@ textarea.gitops-input{resize:vertical}
       const sessionId = props.sessionId
 
       React.useEffect(function () {
-        adoptSettingsDoc(chipNode != null ? chipNode.ownerDocument : null)
+        loadSettings(chipNode != null ? chipNode.ownerDocument : null)
         loadPluginConfig()
       }, [])
 

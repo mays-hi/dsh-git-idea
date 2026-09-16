@@ -18,8 +18,8 @@
     }
     let gitSettings = Object.assign({}, SETTINGS_DEFAULTS)
     let settingsLoaded = false
-    let settingsDoc = null
-    const settingsListeners = new Set()
+    const settingsSignal = createSignal(function () { return gitSettings })
+    const useGitSettings = settingsSignal.use
 
     function clampInt(value, min, max, fallback) {
       const n = typeof value === 'number' && isFinite(value) ? Math.round(value) : NaN
@@ -41,40 +41,20 @@
       return out
     }
 
-    function adoptSettingsDoc(doc) {
-      if (doc != null && settingsDoc == null) settingsDoc = doc
-      migrateStore(doc)
+    /* Called by every surface that has just been handed a document, so a later
+       save finds a store even if the surface that changed something is gone. */
+    function loadSettings(doc) {
+      localStore(doc)
       if (settingsLoaded) return
       settingsLoaded = true
-      try {
-        const store = panelStore(doc)
-        if (store == null) return
-        gitSettings = normalizeSettings(JSON.parse(store.getItem(SETTINGS_KEY) || 'null'))
-      } catch (error) {
-        gitSettings = Object.assign({}, SETTINGS_DEFAULTS)
-      }
+      gitSettings = normalizeSettings(readStoredJSON(SETTINGS_KEY, null))
     }
 
     function saveSettings(next) {
       gitSettings = normalizeSettings(next)
-      try {
-        const store = panelStore(settingsDoc)
-        if (store != null) store.setItem(SETTINGS_KEY, JSON.stringify(gitSettings))
-      } catch (error) {
-        /* a refused preference is not worth breaking the panel over */
-      }
-      settingsListeners.forEach(function (listener) { listener() })
+      writeStoredJSON(SETTINGS_KEY, gitSettings)
+      settingsSignal.notify()
       rescheduleWatchers()
-    }
-
-    function useGitSettings() {
-      const pair = React.useState(gitSettings)
-      React.useEffect(function () {
-        const listener = function () { pair[1](gitSettings) }
-        settingsListeners.add(listener)
-        return function () { settingsListeners.delete(listener) }
-      }, [])
-      return pair[0]
     }
 
     /* ── preferences, layer two: the plugin ──
@@ -86,65 +66,53 @@
        half, so they travel across browsers and machines. As an ordinary plugin
        this is exactly what its config section would hold. */
 
-    let pluginConfig = { initBranch: 'main', cherryPickRecord: false }
+    const PLUGIN_CONFIG_DEFAULTS = { initBranch: 'main', cherryPickRecord: false }
+    let pluginConfig = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
     let pluginConfigPath = ''
     let pluginConfigLoaded = false
     let pluginConfigError = ''
-    const pluginConfigListeners = new Set()
+    const pluginConfigSignal = createSignal(function () { return pluginConfig })
+    const usePluginConfig = pluginConfigSignal.use
 
     function normalizePluginConfig(raw) {
-      const out = { initBranch: 'main', cherryPickRecord: false }
+      const out = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
       if (raw == null || typeof raw !== 'object') return out
       if (typeof raw.initBranch === 'string') out.initBranch = raw.initBranch.trim().slice(0, 120)
       out.cherryPickRecord = raw.cherryPickRecord === true
       return out
     }
 
-    function announcePluginConfig() {
-      pluginConfigListeners.forEach(function (listener) { listener() })
-    }
-
     function adoptPluginConfig(data) {
-      if (data == null) { announcePluginConfig(); return }
-      if (typeof data.path === 'string') pluginConfigPath = data.path
-      if (data.config !== undefined) pluginConfig = normalizePluginConfig(data.config)
-      pluginConfigError = ''
-      announcePluginConfig()
+      if (data != null) {
+        if (typeof data.path === 'string') pluginConfigPath = data.path
+        if (data.config !== undefined) pluginConfig = normalizePluginConfig(data.config)
+        pluginConfigError = ''
+      }
+      pluginConfigSignal.notify()
     }
 
     function loadPluginConfig() {
       if (pluginConfigLoaded) return
       pluginConfigLoaded = true
       host.call('git/config', {}).then(adoptPluginConfig).catch(function (failure) {
-        pluginConfigError = String(failure != null && failure.message !== undefined ? failure.message : failure)
-        announcePluginConfig()
+        pluginConfigError = failureText(failure)
+        pluginConfigSignal.notify()
       })
     }
 
     function savePluginConfig(next) {
       pluginConfig = normalizePluginConfig(next)
       pluginConfigError = ''
-      announcePluginConfig()
+      pluginConfigSignal.notify()
       host.call('git/config-save', { config: pluginConfig }).then(function (result) {
         if (result == null || result.ok !== true) {
           pluginConfigError = text(result != null ? result.error : '') || '保存失败'
-          announcePluginConfig()
+          pluginConfigSignal.notify()
           return
         }
         adoptPluginConfig(result)
       }).catch(function (failure) {
-        pluginConfigError = String(failure != null && failure.message !== undefined ? failure.message : failure)
-        announcePluginConfig()
+        pluginConfigError = failureText(failure)
+        pluginConfigSignal.notify()
       })
     }
-
-    function usePluginConfig() {
-      const pair = React.useState(pluginConfig)
-      React.useEffect(function () {
-        const listener = function () { pair[1](pluginConfig) }
-        pluginConfigListeners.add(listener)
-        return function () { pluginConfigListeners.delete(listener) }
-      }, [])
-      return pair[0]
-    }
-

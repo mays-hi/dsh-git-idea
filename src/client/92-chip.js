@@ -5,7 +5,7 @@
       const sessionId = props.sessionId
 
       React.useEffect(function () {
-        adoptSettingsDoc(chipNode != null ? chipNode.ownerDocument : null)
+        loadSettings(chipNode != null ? chipNode.ownerDocument : null)
         loadPluginConfig()
       }, [])
 

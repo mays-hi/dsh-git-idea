@@ -32,7 +32,7 @@
       return h('div', {
         className: 'gitops-set',
         ref: function (node) {
-          adoptSettingsDoc(node != null ? node.ownerDocument : null)
+          loadSettings(node != null ? node.ownerDocument : null)
           loadPluginConfig()
         },
       },
@@ -122,7 +122,7 @@
               : '跟随输入框宽度 / 74vh'),
           h('button', {
             type: 'button', className: 'gitops-btn',
-            onClick: function () { publishPanelSize({ w: 0, h: 0 }); savePanelSize(settingsDoc) },
+            onClick: function () { publishPanelSize({ w: 0, h: 0 }); savePanelSize() },
           }, '恢复默认尺寸')),
 
         h('div', { className: 'gitops-set-row' },

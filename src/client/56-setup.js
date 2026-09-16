@@ -46,7 +46,7 @@
         }).catch(function (failure) {
           setBusy(false)
           setArmed(false)
-          setProblem(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setProblem(failureText(failure))
         })
       }
 

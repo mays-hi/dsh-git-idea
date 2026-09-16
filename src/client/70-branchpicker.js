@@ -88,7 +88,7 @@
           setData(result)
           setIndex(0)
         }).catch(function (failure) {
-          if (alive) setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          if (alive) setError(failureText(failure))
         })
         return function () { alive = false }
       }, [props.repo, props.sessionId, version])
@@ -129,7 +129,7 @@
           props.onDone()
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
           bumpData()
         })
       }
@@ -153,7 +153,7 @@
           setNote(label + ' 完成')
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -178,7 +178,7 @@
           props.onDone()
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
@@ -206,7 +206,7 @@
           setNote('已删除分支 ' + name)
         }).catch(function (failure) {
           setBusy(false)
-          setError(String(failure != null && failure.message !== undefined ? failure.message : failure))
+          setError(failureText(failure))
         })
       }
 
