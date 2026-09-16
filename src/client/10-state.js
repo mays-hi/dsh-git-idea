@@ -224,9 +224,17 @@
         if (switchMode === null) setSwitchMode('hover')
       }, 180)
     }
+    /* Set by the switcher while one of its operations is in flight. Clicking
+       "check out" collapses the flyout under the pointer, which counts as
+       leaving the card — without this the card closed itself 200ms later and
+       the checkout's own answer (the new branch, or why it failed) was thrown
+       away unread, which looks exactly like the click doing nothing. */
+    let switchBusy = false
+
     function hoverCloseSoon() {
       clearHoverTimer()
       if (switchMode !== 'hover') return
+      if (switchBusy === true) return
       const timer = ctx.get('timer')
       if (timer === undefined) { setSwitchMode(null); return }
       hoverTimer = timer.timeout(function () {

@@ -51,6 +51,12 @@
       const [error, setError] = React.useState(null)
       const [note, setNote] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
+      /* Mirrored outside React because the decision to close the card is taken
+         above this component, in the popover's pointer handling. */
+      switchBusy = busy
+      React.useEffect(function () {
+        return function () { switchBusy = false }
+      }, [])
       const [query, setQuery] = React.useState('')
       const [index, setIndex] = React.useState(0)
       const [stash, setStash] = React.useState(false)
@@ -144,6 +150,9 @@
         setNote(null)
         setPending('')
         setFly(null)
+        /* Said out loud, because the flyout collapsing under the pointer makes
+           it look as if the click was never heard. */
+        setNote(useStash === true ? '正在暂存改动并切到 ' + name + '…' : '正在切到 ' + name + '…')
         rpc('git/checkout', request({ name: name, stash: useStash === true }), '切换失败').then(function (result) {
           setBusy(false)
           bumpData()

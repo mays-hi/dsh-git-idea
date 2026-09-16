@@ -484,3 +484,60 @@ byClass(t, 'dsh-git-bs-list')[0].props.onScroll()
 await wait(10)
 t = await settle('pop')
 ok('滚动后收起', flyPanel(t) === undefined)
+
+console.log('')
+console.log('== 点了检出之后：卡片不能先把自己收掉（这是「点了没反应」的另一半）==')
+
+/* 让 git/checkout 挂住，模拟慢盘上的一次真实切换 */
+const plainCheckout = host.call
+let held = null
+host.call = function (method, args) {
+  if (method === 'git/checkout' && held === null) {
+    calls.push({ method, args })
+    held = { args: args }
+    return new Promise(function (resolve) { held.resolve = resolve })
+  }
+  return plainCheckout.call(host, method, args)
+}
+
+let slowChip = await chipTree()
+if (slowChip.props.className.indexOf('dsh-git-chip-open') >= 0) { slowChip.props.onClick(); await wait(10) }
+slowChip = await chipTree()
+slowChip.props.onPointerEnter()
+fireTimers()
+await wait(15)
+let slow = await settle('pop')
+byClass(slow, 'dsh-git-bs-row').find((r) => textOf(r).indexOf('solo') >= 0).props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
+fireTimers()
+await wait(15)
+slow = await settle('pop')
+const slowFly = flyPanel(slow)
+ok('慢切换前：卡片与子菜单都在', byClass(slow, 'dsh-git-switch-hover').length === 1 && slowFly !== undefined)
+
+calls.length = 0
+buttons(slowFly).find((b) => textOf(b) === '检出').props.onClick({ stopPropagation() {} })
+await wait(15)
+slow = await settle('pop')
+ok('点下去立刻说「正在切到 …」', textOf(slow).indexOf('正在切到') >= 0)
+ok('请求确实发出去了', held !== null && held.args.name === 'solo')
+/* 子菜单收起后指针就落在卡片外面了，卡片自己那个 200ms 收起计时器会开始跑 */
+byClass(slow, 'dsh-git-switch-hover')[0].props.onPointerLeave()
+fireTimers()
+await wait(15)
+const during = await settle('pop')
+ok('切换还没回来时，卡片不会被自己收掉', byClass(during, 'dsh-git-switch-hover').length === 1)
+
+/* 现在让这次切换失败（工作区脏，正是最常见的失败） */
+const pending = held
+held = null
+pending.resolve({
+  ok: false, repo: '/tmp/ws', stashed: false, dirty: 1, popConflict: false,
+  stdout: '', stderr: 'error: Your local changes to the following files would be overwritten by checkout:\n\tf.txt',
+  exitCode: 1,
+})
+await wait(20)
+const failedCard = await settle('pop')
+ok('失败之后卡片仍在原地（错误不会被丢掉）', byClass(failedCard, 'dsh-git-switch-hover').length === 1)
+ok('错误信息看得见', textOf(failedCard).indexOf('overwritten') >= 0)
+ok('并且给出「先暂存再切」的补救按钮', buttons(failedCard).some((b) => textOf(b).indexOf('先暂存') >= 0))
+host.call = plainCheckout

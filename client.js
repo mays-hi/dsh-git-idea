@@ -250,9 +250,17 @@ return {
         if (switchMode === null) setSwitchMode('hover')
       }, 180)
     }
+    /* Set by the switcher while one of its operations is in flight. Clicking
+       "check out" collapses the flyout under the pointer, which counts as
+       leaving the card — without this the card closed itself 200ms later and
+       the checkout's own answer (the new branch, or why it failed) was thrown
+       away unread, which looks exactly like the click doing nothing. */
+    let switchBusy = false
+
     function hoverCloseSoon() {
       clearHoverTimer()
       if (switchMode !== 'hover') return
+      if (switchBusy === true) return
       const timer = ctx.get('timer')
       if (timer === undefined) { setSwitchMode(null); return }
       hoverTimer = timer.timeout(function () {
@@ -1906,6 +1914,12 @@ textarea.dsh-git-input{resize:vertical}
       const [error, setError] = React.useState(null)
       const [note, setNote] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
+      /* Mirrored outside React because the decision to close the card is taken
+         above this component, in the popover's pointer handling. */
+      switchBusy = busy
+      React.useEffect(function () {
+        return function () { switchBusy = false }
+      }, [])
       const [query, setQuery] = React.useState('')
       const [index, setIndex] = React.useState(0)
       const [stash, setStash] = React.useState(false)
@@ -1999,6 +2013,9 @@ textarea.dsh-git-input{resize:vertical}
         setNote(null)
         setPending('')
         setFly(null)
+        /* Said out loud, because the flyout collapsing under the pointer makes
+           it look as if the click was never heard. */
+        setNote(useStash === true ? '正在暂存改动并切到 ' + name + '…' : '正在切到 ' + name + '…')
         rpc('git/checkout', request({ name: name, stash: useStash === true }), '切换失败').then(function (result) {
           setBusy(false)
           bumpData()
