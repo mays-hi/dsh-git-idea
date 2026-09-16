@@ -88,6 +88,10 @@
 .dsh-git-crow{display:flex;align-items:center;gap:8px;height:26px;box-sizing:border-box;padding:0 8px;cursor:pointer;white-space:nowrap;-webkit-user-select:none;user-select:none}
 .dsh-git-crow:hover{background:var(--dsw-alias-bg-layer-2)}
 .dsh-git-crow-sel{background:var(--dsw-alias-interactive-bg-hover)}
+/* 选中的那一行悬浮上去仍然是选中色：两条规则权重一样（一个类 + 一个伪类），
+   谁写在后面谁赢 —— 少了这一条，鼠标一放上去选中色就被悬停色顶掉，看起来
+   就像选中丢了。分支树的行一直是这个规矩。 */
+.dsh-git-crow-sel:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-subject{flex:1;overflow:hidden;text-overflow:ellipsis}
 .dsh-git-author{flex:none;width:84px;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary);font-size:11px}
 .dsh-git-date{flex:none;width:82px;text-align:right;color:var(--dsw-alias-label-secondary);font-size:11px}

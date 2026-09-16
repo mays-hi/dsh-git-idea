@@ -598,3 +598,71 @@ await wait(15)
 fresh = await settle('pop')
 ok('选中那行被筛掉后，没有自动改选别的', crowSel().length === 0)
 ok('右栏回到空态', textOf(byClass(fresh, 'dsh-git-detail')[0]).indexOf('选择一个提交') >= 0)
+
+console.log('')
+console.log('== 悬浮与选中：谁的底色说了算 ==')
+
+/* 行是同一个元素：`.dsh-git-crow` 管悬停、`.dsh-git-crow-sel` 管选中，两条规则的
+   权重一样（一个类 + 一个伪类），所以谁写在后面谁赢。选中之后再悬浮上去，选中色
+   被悬停色顶掉，看起来就像「选中没了」。这里按级联规则算出真正的胜者，而不是只
+   看某条规则在不在 —— 写反了顺序也算得出来。 */
+const cssFrom = sourceCss.indexOf('.dsh-git-chip{')
+const cssText = cssFrom < 0 ? '' : sourceCss.slice(cssFrom, sourceCss.indexOf('`', cssFrom))
+ok('拿到了样式表本身', cssText.indexOf('.dsh-git-crow{') > 0)
+
+function cssRules(raw) {
+  /* 注释先去掉：它夹在两条规则之间，会被当成选择器的一部分（浏览器不会，
+     这里会），结果就是把规则整条跳过 —— 那正是「假绿」的来源。 */
+  const css = raw.replace(/\/\*[\s\S]*?\*\//g, '')
+  const out = []
+  const re = /([^{}]+)\{([^{}]*)\}/g
+  let m
+  while ((m = re.exec(css)) !== null) out.push({ selectors: m[1].split(',').map((s) => s.trim()), body: m[2] })
+  return out
+}
+function cssTokens(selector) {
+  return selector.match(/^[a-z]+|\.[A-Za-z0-9_-]+|::?[a-z-]+/g) || []
+}
+function cssApplies(selector, classes, hovered) {
+  if (/[\s>+~]/.test(selector)) return false
+  const tokens = cssTokens(selector)
+  if (tokens.length === 0) return false
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]
+    if (token.charAt(0) === '.') { if (classes.indexOf(token.slice(1)) < 0) return false }
+    else if (token === ':hover') { if (hovered !== true) return false }
+    else if (token.charAt(0) === ':') return false
+  }
+  return true
+}
+/* 同级里后面的赢，和浏览器一样 */
+function cssWinner(css, classes, hovered, property) {
+  const rules = cssRules(css)
+  let best = null
+  for (let i = 0; i < rules.length; i += 1) {
+    for (let k = 0; k < rules[i].selectors.length; k += 1) {
+      const selector = rules[i].selectors[k]
+      if (cssApplies(selector, classes, hovered) !== true) continue
+      const decl = rules[i].body.split(';').map((d) => d.trim()).find((d) => d.indexOf(property + ':') === 0)
+      if (decl === undefined) continue
+      /* 一个类 = 一个伪类 = 一级权重（元素名不算）：所以 hover 那条本来就比
+         单纯的 `-sel` 权重高 —— 必须如实算，否则两条都算成 1，靠「后面的赢」
+         也能碰巧算对，测出来的就是假的。 */
+      const weight = cssTokens(selector).filter((t) => t.charAt(0) === '.' || t.charAt(0) === ':').length
+      if (best === null || weight >= best.weight) best = { weight: weight, value: decl.slice(property.length + 1), selector: selector }
+    }
+  }
+  return best
+}
+const CROW = ['dsh-git-crow']
+const CROW_SEL = ['dsh-git-crow', 'dsh-git-crow-sel']
+const bg = (classes, hovered) => { const w = cssWinner(cssText, classes, hovered, 'background'); return w === null ? '' : w.value + '   ← ' + w.selector }
+console.log('  选中行悬浮:', bg(CROW_SEL, true))
+console.log('  选中行静止:', bg(CROW_SEL, false))
+console.log('  普通行悬浮:', bg(CROW, true))
+ok('选中的行悬浮上去仍然是选中色（悬停色顶不掉它）',
+  bg(CROW_SEL, true).indexOf('--dsw-alias-interactive-bg-hover') >= 0)
+ok('没悬浮的时候选中行也是选中色', bg(CROW_SEL, false).indexOf('--dsw-alias-interactive-bg-hover') >= 0)
+ok('没选中的行悬浮上去还是有悬停色', bg(CROW, true).indexOf('--dsw-alias-bg-layer-2') >= 0)
+ok('左侧分支树的行一直是这个规矩（对照）',
+  bg(['dsh-git-trow', 'dsh-git-trow-sel'], true).indexOf('--dsw-alias-interactive-bg-hover') >= 0)
