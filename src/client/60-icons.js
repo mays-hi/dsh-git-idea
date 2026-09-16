@@ -6,7 +6,6 @@
          rather than only that it can be changed. */
       sortName: ['M2.4 12.2 L5.2 4.2 L8 12.2', 'M3.4 9.6 H7', 'M11.2 3.8 V12.2', 'M9.3 10.3 L11.2 12.2 L13.1 10.3'],
       sortRecent: ['M8 2.8 A5.2 5.2 0 1 0 8 13.2 A5.2 5.2 0 1 0 8 2.8', 'M8 5.4 V8.4 L10.3 9.7'],
-      star: ['M8 2.2 L9.85 6.15 L14.2 6.65 L11 9.6 L11.85 13.9 L8 11.85 L4.15 13.9 L5 9.6 L1.8 6.65 L6.15 6.15 Z'],
       right: ['M6.4 3.8 L10.6 8 L6.4 12.2'],
       down: ['M3.8 6.4 L8 10.6 L12.2 6.4'],
       plus: ['M8 3.4 V12.6', 'M3.4 8 H12.6'],
@@ -49,7 +48,7 @@
       for (let i = 0; i < paths.length; i += 1) shapes.push(h('path', { key: 'p' + i, d: paths[i] }))
       return h('svg', {
         width: size, height: size, viewBox: '0 0 16 16',
-        fill: props.filled === true ? 'currentColor' : 'none',
+        fill: 'none',
         stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round',
         style: { flex: 'none', display: 'block' },
       }, shapes)
