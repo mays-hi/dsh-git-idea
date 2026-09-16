@@ -820,7 +820,9 @@ return {
 .dsh-git-trow-scope .dsh-git-tname{color:var(--dsw-alias-brand-primary)}
 .dsh-git-tw{flex:none;width:10px;color:var(--dsw-alias-label-secondary);font-size:9px;cursor:pointer}
 .dsh-git-tname{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.dsh-git-tdim{margin-left:auto;padding-right:6px;color:var(--dsw-alias-label-secondary);font-size:11px}
+/* The count belongs to the name it counts, not to the right-hand edge of the
+   row: "本地 5" reads as one thing, "本地 … 5" makes the eye travel. */
+.dsh-git-tdim{flex:none;padding-right:6px;color:var(--dsw-alias-label-secondary);font-size:11px}
 .dsh-git-st{flex:none;width:12px;font-family:ui-monospace,monospace;font-weight:700}
 .dsh-git-st-M{color:var(--dsw-alias-state-warn-primary)}
 .dsh-git-st-A{color:var(--dsw-alias-state-success-primary)}
