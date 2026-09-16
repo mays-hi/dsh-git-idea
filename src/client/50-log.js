@@ -184,10 +184,27 @@
       }
       const rows = []
 
-      rows.push(h('div', { className: 'dsh-git-trow', key: 'head-title', style: { paddingLeft: '6px' },
-        onClick: function () { props.onToggle('@head') } },
-        h('span', { className: 'dsh-git-tw' }, collapsed['@head'] === true ? '▶' : '▼'),
-        h('span', { className: 'dsh-git-tname dsh-git-dim' }, 'HEAD（当前分支）')))
+      /* ── 分组标题也是一行 ──
+         HEAD、本地、远程 · x 都曾经是「单击就折叠」：那是这一棵树里唯一不服从树行
+         手势的地方，而它的症状和别处一样 —— 想只选中这一行的人点下去，树动了，选中
+         没动，看起来像点错了东西。现在它和目录行共用同一条规矩：单击只选中，双击整行
+         或点左边的三角才折叠，三角也用上了目录行那一个（会拦住冒泡，所以点三角不会
+         顺手把选中挪过来）。 */
+      const groupTitle = function (label, key, count) {
+        return h('div', {
+          className: 'dsh-git-trow' + (props.selectedKey === key + ':title' ? ' dsh-git-trow-sel' : ''),
+          key: key + ':title',
+          style: { paddingLeft: '6px' },
+          title: label + '（双击展开/折叠）',
+          onClick: function () { props.onSelect(key + ':title') },
+          onDoubleClick: function () { props.onToggle(key) },
+        },
+          twisty({ collapsed: collapsed[key] === true, onToggle: function () { props.onToggle(key) } }),
+          h('span', { className: 'dsh-git-tname dsh-git-dim' }, label),
+          count === undefined ? null : h('span', { className: 'dsh-git-tdim' }, count))
+      }
+
+      rows.push(groupTitle('HEAD（当前分支）', '@head'))
       const headNames = matching(refs.current.map(function (name) { return { data: name } })).map(function (entry) { return entry.data })
       if (collapsed['@head'] !== true) {
         if (headNames.length === 0) {
@@ -231,11 +248,7 @@
 
       const section = function (title, key, entries) {
         const shown = matching(entries)
-        rows.push(h('div', { className: 'dsh-git-trow', key: key + ':title', style: { paddingLeft: '6px' },
-          onClick: function () { props.onToggle(key) } },
-          h('span', { className: 'dsh-git-tw' }, collapsed[key] === true ? '▶' : '▼'),
-          h('span', { className: 'dsh-git-tname dsh-git-dim' }, title),
-          h('span', { className: 'dsh-git-tdim' }, needle.length === 0 ? String(entries.length) : String(shown.length))))
+        rows.push(groupTitle(title, key, needle.length === 0 ? String(entries.length) : String(shown.length)))
         if (collapsed[key] === true) return
         const tree = buildTree(shown)
         const flat = flattenTree(tree, 2, key, collapsed, [], key)

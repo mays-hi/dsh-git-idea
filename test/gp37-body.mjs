@@ -132,6 +132,48 @@ ok('双击后分支筛选触发器显示该分支', textOf(byClass(t, 'dsh-git-l
 ok('别的分支没有被标成范围', String(trowWith(t, 'stable').props.className).indexOf('dsh-git-trow-scope') < 0)
 
 console.log('')
+console.log('== 分组标题也是一行：单击只选中，双击或点三角才折叠 ==')
+/* 分组标题（HEAD / 本地 / 远程）原来是这一棵树里唯一单击就折叠的行：点一下树就动，
+   选中却没动，看起来像点错了东西。它现在和目录行同一条规矩。 */
+const groupRow = (tree, label) => byClass(tree, 'dsh-git-trow').filter((r) => textOf(r).indexOf(label) >= 0)[0]
+const localTitle = groupRow(t, '本地')
+ok('本地分组有一行标题，带自己的三角',
+  localTitle !== undefined && byClass(localTitle, 'dsh-git-tw').length === 1)
+ok('标题行也给了「双击」提示', String(localTitle.props.title).indexOf('双击') > 0)
+const beforeTitleClick = graphCalls().length
+localTitle.props.onClick()
+await wait(15)
+t = await settle('pop')
+ok('单击标题：这一组的分支行都还在（树没有折）',
+  trowWith(t, 'stable') !== undefined && trowWith(t, 'feature') !== undefined)
+ok('单击标题：变成这一行选中', String(groupRow(t, '本地').props.className).indexOf('dsh-git-trow-sel') >= 0)
+ok('单击标题没有重新读历史', graphCalls().length === beforeTitleClick)
+ok('同时只有一行是选中的（分支行让位给标题行）', byClass(t, 'dsh-git-trow-sel').length === 1)
+
+console.log('')
+console.log('== 双击标题 / 点三角：这才折叠 ==')
+/* 手势要是退回「单击就折叠」，这里不该抛异常，只该是一排 ✗：抛出去会把后面
+   所有段落一起带走，回归信号就只剩一个栈。 */
+const titleAgain = groupRow(t, '本地')
+if (titleAgain !== undefined && typeof titleAgain.props.onDoubleClick === 'function') titleAgain.props.onDoubleClick()
+await wait(15)
+t = await settle('pop')
+ok('双击标题：本地这一组折起来了', trowWith(t, 'stable') === undefined)
+ok('折起来之后标题行还在，而且照样是选中的',
+  groupRow(t, '本地') !== undefined
+  && String(groupRow(t, '本地').props.className).indexOf('dsh-git-trow-sel') >= 0)
+let titleTwistyStopped = false
+const titleTwisty = byClass(groupRow(t, '本地'), 'dsh-git-tw')[0]
+if (titleTwisty !== undefined && typeof titleTwisty.props.onClick === 'function') {
+  titleTwisty.props.onClick({ stopPropagation: function () { titleTwistyStopped = true } })
+}
+await wait(15)
+t = await settle('pop')
+ok('点三角会拦住冒泡（所以它顺手改不了选中）', titleTwistyStopped)
+ok('点三角：这一组又展开了', trowWith(t, 'stable') !== undefined)
+ok('点三角之后选中的还是标题行', String(groupRow(t, '本地').props.className).indexOf('dsh-git-trow-sel') >= 0)
+
+console.log('')
 console.log('== 每个筛选自己带 × 清除 ==')
 const clearBranch = byClass(t, 'dsh-git-lf')[0].props.children.filter((c) => c != null && c.type === 'button')[0]
 ok('分支筛选上有 ×', clearBranch !== undefined)
