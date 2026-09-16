@@ -146,6 +146,49 @@ const deep = await H('git/watch')({ repo: S, deep: true })
 check('轮询签名默认不读工作区', cheap.ok === true && cheap.sig.indexOf('# branch.head') < 0 && cheap.sig.indexOf('F:') >= 0)
 check('deep 的轮询才带上工作区状态', deep.sig.indexOf('# branch.head') >= 0)
 
+/* 在终端里（或者 IDEA 里）自己切分支，插件必须看得见 —— 它靠的就是上面这条
+   签名。签名里如果只有引用表 + HEAD 的 sha，那「两个分支指向同一个提交」就完全
+   看不出来：`git switch -c` 永远是这样，快进合并之后也是这样。 */
+console.log('')
+console.log('=== 外面自己切分支，轮询签名必须看得见 ===')
+const W = '/tmp/gp41-switch'
+await sh('rm -rf ' + W + ' && mkdir -p ' + W, '/tmp')
+await sh('git init -q -b main . && git config user.email t@t && git config user.name t && echo 1 > a.txt && git add -A && git commit -qm one && echo 2 > b.txt && git add -A && git commit -qm two', W)
+await sh('git branch other main~1', W)
+const sigOf = async () => (await H('git/watch')({ repo: W })).sig
+const sigLine = (sig, key) => (sig.split('\n').find((l) => l.indexOf(key + ':') === 0) || '')
+
+let moved = await sigOf()
+await sh('git switch -q other', W)
+const afterOther = await sigOf()
+console.log('  ' + sigLine(afterOther, 'R'))
+check('换到另一个提交上的分支：签名变了', moved !== afterOther)
+check('签名里带着当前分支的名字', sigLine(afterOther, 'R').indexOf('ref: refs/heads/other') > 0)
+const identAfter = await (async () => { await H('git/flush')({ repo: W }); return await H('git/panel')({ repo: W, quick: true }) })()
+check('身份读跟着给出新分支（chip 显示的就是它）', identAfter.branch === 'other')
+
+/* 同一个提交上的两个等长分支名，并且把 HEAD 的时间戳按住不动 —— 也就是
+   「同一秒内切换」在签名上留下的全部痕迹。只有 HEAD 文件的内容能分辨它们。 */
+await sh('git switch -q main && git branch aa && git branch bb && git switch -q aa', W)
+const sameA = await sigOf()
+await sh('touch -r .git/index .git/HEAD && git switch -q bb && touch -r .git/index .git/HEAD', W)
+const sameB = await sigOf()
+console.log('  aa → bb 前后的 R 行：\n    ' + sigLine(sameA, 'R') + '\n    ' + sigLine(sameB, 'R'))
+check('同一个提交、等长名字、同一秒：签名仍然变了', sameA !== sameB)
+
+/* `git switch -c` 是最常见的一种：新分支和原分支指向同一个提交。 */
+const beforeNew = await sigOf()
+await sh('git switch -q -c fresh', W)
+const afterNew = await sigOf()
+check('git switch -c 新分支（同一个提交）：签名变了', beforeNew !== afterNew)
+const detachBefore = await sigOf()
+await sh('git switch -q --detach main', W)
+const detachAfter = await sigOf()
+check('切到游离 HEAD：签名变了', detachBefore !== detachAfter)
+await H('git/flush')({ repo: W })
+const detached = await H('git/panel')({ repo: W, quick: true })
+check('游离 HEAD 时身份读说 detached，chip 显示 HEAD', detached.branch === null && detached.detached === true)
+
 console.log('')
 console.log('=== 分支树需要的领先/落后 ===')
 await H('git/flush')({ repo: R })

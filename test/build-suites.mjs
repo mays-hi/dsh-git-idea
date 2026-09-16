@@ -14,6 +14,7 @@ const SUITES = [
   ['gp38-body.mjs', 'gp38-flyout-test.mjs'],
   ['gp39-body.mjs', 'gp39-session-test.mjs'],
   ['gp40-body.mjs', 'gp40-refactor-test.mjs'],
+  ['gp41-body.mjs', 'gp41-watch-test.mjs'],
   ['bench-body.mjs', 'bench.mjs'],
   ['bench-branch-body.mjs', 'bench-branch.mjs'],
 ]

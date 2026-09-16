@@ -29,10 +29,11 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（280 条断言）
+node test/run-all.mjs     # 全部套件（356 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
-node test/build-suites.mjs# 改了 harness/body 之后重新拼出 gp37~gp40 与基准文件
+node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）
+node test/build-suites.mjs# 改了 harness/body 之后重新拼出 gp37~gp41 与基准文件
 ```
 
 改了源码之后要让它生效：`node build.mjs`，然后把这个动态插件 **停止再运行**
@@ -62,7 +63,7 @@ Client（`src/client/`）：
 | `10-state` | 唯一的 signal 工厂、唯一的 localStorage 出口、`rpc()` 与 `failureText()` |
 | `12-window` | 长列表的窗口化 |
 | `20-prefs` | 两层偏好：本浏览器 / 跟随插件 |
-| `30-watch` | 仓库变更轮询（面板 3s，chip 15s，页面隐藏时不轮询） |
+| `30-watch` | 仓库变更轮询（面板 3s，chip 15s；页面隐藏时不轮询，切回页面立刻对一次） |
 | `40-format` … `62-branchstate` | 日期、状态、图标、树、缓存等无状态辅助 |
 | `70-branchpicker` | 分支切换器（含 IDEA 式子菜单） |
 | `80-panel` | 主面板 |
@@ -126,6 +127,22 @@ Client（`src/client/`）：
 cherry-pick」—— 那是 0.13 秒的事。所以现在读两段：身份先回来、面板立刻出来，
 工作区状态（改动列表、徽标数字）随后补上，两段用不同的缓存键。轮询同理，
 只有变更页在看着工作区时才用带 status 的签名。
+
+### 在终端里自己切了分支，插件怎么知道
+
+轮询签名里带着 **`.git/HEAD` 文件的内容**，不只是它的 mtime。这一点是必须的：两个
+分支指向同一个提交时（`git switch -c` 永远如此，快进合并之后也一样），引用表、`HEAD`
+的 sha、索引都可以逐字节相同，只有那行 `ref: refs/heads/<名字>` 能区分它们；而 mtime
+只有秒级分辨率，**同一秒**里的两次切换在签名上等于什么都没发生 —— 而且此后再也不会
+补上。多读一个小文件等于零成本：`holox_cloud` 上中位数 97ms → 101ms。
+
+发现之后：**先** `git/flush` 掉主机那侧的读缓存，**再**通知每个界面重读。顺序反了
+chip 读到的还是缓存里的旧分支。面板开着时快车道 3 秒，只剩 chip 时慢车道 15 秒
+（两个界面共用同一个仓库的轮询器，不重复起）；页面切到后台时不轮询，切回来的
+那一刻立刻对一次签名，仓库没动就一个请求都不发。
+
+自己切的这一路和外面切的那一路，最后都汇到同一个 `dataVersion` 计数器上，
+所以 chip 和面板不会各说各的分支。
 
 ## 动态插件的来历与恢复
 

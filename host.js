@@ -1143,9 +1143,10 @@ function panelCommand(target) {
 /* One lightweight spawn answers "did anything change?" for the client watcher.
    It deliberately uses --untracked-files=normal: the per-file walk of `all` is
    the expensive part on a large tree, and a collapsed untracked directory still
-   changes the signature when its contents do. File stamps cover what the status
-   walk cannot see (a new commit with no worktree change, a branch switch that
-   leaves the worktree alone).
+   changes the signature when its contents do. The ref table and the HEAD file
+   cover what the status walk cannot see: a new commit with no worktree change,
+   and — the one the working tree is silent about — a branch switch, whether it
+   was made here or in a terminal next to us.
 
    --no-optional-locks is load-bearing, not decoration: a plain `git status`
    refreshes the index cache and takes .git/index.lock to do it, so a background
@@ -1155,7 +1156,7 @@ function panelCommand(target) {
 /* What "did anything move?" costs. The status is the expensive part — seconds
    on a slow mount, every tick — and it is only worth paying while something is
    showing the working tree, which is what `deep` asks for. Everything else in
-   the signature is four stats and one for-each-ref. */
+   the signature is three stats, one for-each-ref and one small file read. */
 function watchCommand(target, deep) {
   const quoted = shq(target)
   const out = [
@@ -1169,7 +1170,14 @@ function watchCommand(target, deep) {
     "printf 'F:%s\\n' \"$(git -C " + quoted + " for-each-ref --format='%(refname):%(objectname)' refs/heads refs/remotes 2>/dev/null)\"",
     "printf 'H:%s\\n' \"$(git -C " + quoted + " rev-parse -q --verify HEAD 2>/dev/null)\"",
     "printf 'I:%s\\n' \"$(st \"$gd/index\")\"",
-    "printf 'R:%s\\n' \"$(st \"$gd/HEAD\")\"",
+    /* The HEAD *file*, not just its stamp. Two branches can point at the same
+       commit — `git switch -c` always does, and so does any pair left level by a
+       fast-forward — and then the ref table, the HEAD sha and often the index are
+       byte-identical, so the branch name written in this file is the only thing
+       that tells them apart. A stamp is not enough on its own either: it carries
+       second resolution, so a switch made in the same second as the previous read
+       looks like nothing happened — and then never becomes visible at all. */
+    "printf 'R:%s\\n' \"$(cat \"$gd/HEAD\" 2>/dev/null) $(st \"$gd/HEAD\")\"",
     "printf 'P:%s\\n' \"$(st \"$gd/packed-refs\")\"",
   )
   return out.join('\n')
