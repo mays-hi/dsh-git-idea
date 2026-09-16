@@ -29,7 +29,7 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（579 条断言）
+node test/run-all.mjs     # 全部套件（582 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
 node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）
@@ -211,6 +211,30 @@ IDEA 的提交窗不是这样：勾选框在**固定的一列**里，缩进留�
 
 `test/gp34a` 里对着真仓库守这一条，并且留着对照：面板那一次读对同一个目录**只有一行、
 末尾带斜杠、没有内容**。
+
+### 展开未跟踪目录的那一帧会崩（真崩过一次）
+
+`untrackedFiles[dir]` 在一次读回来之前是 **undefined** —— 展开时先把缓存的那份列表删掉，
+好让行说「正在读取…」，而不是拿上一次的旧列表糊弄。但那之后循环照旧跑：
+
+```js
+const list = props.untrackedFiles[file.path]   // undefined，读还在飞
+if (list === undefined) rows.push(正在读取…)
+else if (list.length === 0) rows.push(（没有文件）)
+for (let k = 0; k < list.length; k += 1)       // ← undefined.length
+```
+
+真实的面板就是这么掉下来的：`Cannot read properties of undefined (reading 'length')`
+at `ChangesPane`，整块面板从 slot `conversation.input.overlay` 上被摘掉。窗口有多长，就是
+那台机器上 `ls-files --others --exclude-standard -z -- <dir>` 有多长 —— 在 `holox_cloud`
+上量：`holox-as2/` 41ms、`…/risk/eval/` 141ms、`fonts/` 77ms。短，但每一次展开都要穿过它。
+
+测试为什么一直没看见：mock 是**立刻**回答的，`await wait(10)` 之后列表早就回来了，那
+一帧从来没被渲染过一次 —— **mock 越快，越看不见这条缝**。现在 gp42 第 9 节把
+`git/untracked` 扣住不回答，专门渲染那一帧（不抛异常、那一行写着「正在读取…」、松开之后
+文件行照常出现），三个分支也改成了互斥（undefined / 空 / 有内容），所以这一帧再没有第二
+条路可以掉下去。同一类的窗户也顺手查了一遍：会先清空再读的状态图只有这一个
+（`untrackedFiles`），别处都是 `null` + `== null` 守卫。
 
 ## 树行的手势
 

@@ -86,6 +86,21 @@
             h('span', { key: 'ico', className: 'dsh-git-tdir' }, h(Icon, { name: 'folder', size: 12 })),
             h('span', { className: 'dsh-git-tname' }, node.name)))
           if (open) {
+            /* ── 这一帧是中间态，不是终点 ──
+               Opening a collapsed directory clears the cached listing first, so
+               the rows can say「正在读取…」 instead of showing yesterday's files.
+               That means `list` is **undefined** for as long as the read is in
+               flight — and the loop below used to run anyway:
+
+                 for (let k = 0; k < list.length; k += 1)
+                 TypeError: Cannot read properties of undefined (reading 'length')
+
+               In the real panel that one frame took the whole panel off its
+               slot. In the tests it never happened: the mock answers
+               immediately, so by the time a render was taken the listing was
+               already there. The faster the mock, the blinder the test — so the
+               three cases below are now exclusive, and gp42 section 9 holds the
+               read open on purpose to render this exact frame. */
             const list = props.untrackedFiles[file.path]
             if (list === undefined) {
               rows.push(h('div', { key: node.id + ':wait', className: 'dsh-git-trow dsh-git-dim' },
@@ -93,22 +108,23 @@
             } else if (list.length === 0) {
               rows.push(h('div', { key: node.id + ':none', className: 'dsh-git-trow dsh-git-dim' },
                 indentPad(node.depth + 1), h('span', { className: 'dsh-git-tname' }, '（没有文件，可能都被 .gitignore 排除了）')))
-            }
-            for (let k = 0; k < list.length; k += 1) {
-              const inside = list[k]
-              const prefix = text(file.path).replace(/\/+$/, '') + '/'
-              const label = inside.indexOf(prefix) === 0 ? inside.slice(prefix.length) : inside
-              rows.push(h('div', {
-                className: 'dsh-git-trow',
-                key: node.id + ':f:' + inside,
-                title: inside + '（点开看差异）',
-                onClick: function () { props.onOpenDiff({ path: inside, workCode: '??', untracked: true, staged: false, displayCode: '?' }) },
-              },
-                stageBox('box', 'none', '暂存', function () { props.onSetStaged([{ path: inside, untracked: true }], true) }),
-                indentPad(node.depth + 1),
-                h('span', { className: 'dsh-git-tw' }),
-                h('span', { className: 'dsh-git-st dsh-git-st-U' }, '?'),
-                h('span', { className: 'dsh-git-tname' }, label)))
+            } else {
+              for (let k = 0; k < list.length; k += 1) {
+                const inside = list[k]
+                const prefix = text(file.path).replace(/\/+$/, '') + '/'
+                const label = inside.indexOf(prefix) === 0 ? inside.slice(prefix.length) : inside
+                rows.push(h('div', {
+                  className: 'dsh-git-trow',
+                  key: node.id + ':f:' + inside,
+                  title: inside + '（点开看差异）',
+                  onClick: function () { props.onOpenDiff({ path: inside, workCode: '??', untracked: true, staged: false, displayCode: '?' }) },
+                },
+                  stageBox('box', 'none', '暂存', function () { props.onSetStaged([{ path: inside, untracked: true }], true) }),
+                  indentPad(node.depth + 1),
+                  h('span', { className: 'dsh-git-tw' }),
+                  h('span', { className: 'dsh-git-st dsh-git-st-U' }, '?'),
+                  h('span', { className: 'dsh-git-tname' }, label)))
+              }
             }
           }
         } else {

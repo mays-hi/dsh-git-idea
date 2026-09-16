@@ -285,7 +285,8 @@ const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + 
    5. 提交下的文件读的是那次提交（重命名的旧路径一起带上）
    6. 勾选框在固定的一列；git 折叠掉的未跟踪目录也有行
    7. 点一下勾选框：立刻画出来，不会被迟到的读抹掉
-   8. 树行的手势：单击只选中，双击或点三角才展开 */
+   8. 树行的手势：单击只选中，双击或点三角才展开
+   9. 展开未跟踪目录的那一瞬间：读还没回来时列表是 undefined，不能崩 */
 
 const L = function () {
   let out = ''
@@ -816,3 +817,60 @@ await wait(10)
 tree = await settle()
 ok('返回后还是那棵树，目录的展开状态也还在',
   changeRow(tree, 'app.js') !== undefined && changeRow(tree, 'a.txt') !== undefined)
+
+/* ── 9. 展开未跟踪目录的那一瞬间：读还在飞的时候，列表是 undefined ──
+
+   真实的面板在这里崩过一次，整块面板因此从 slot 上掉下来：
+
+     Cannot read properties of undefined (reading 'length')
+     at ChangesPane
+
+   原因是一秒钟的窗口：单击展开 → `untrackedFiles[dir]` 立刻被清掉（好让行说
+   「正在读取…」）→ 读回来之前它是 **undefined**。代码先把「正在读取…」画上
+   去，然后**照旧**去跑 `for (k < list.length)` —— 那就是 undefined.length。
+
+   为什么以前没发现：测试里的 mock 是立刻回答的，`await wait(10)` 之后列表早就
+   在了，这一帧从来没被渲染过。**mock 越快，越看不见这条缝。** 所以这一节把
+   `git/untracked` 扣住不回答，专门渲染那一帧。 */
+
+console.log('')
+console.log('== 展开未跟踪目录，读还没回来 ==')
+
+const beforeHeld = host.call
+let releaseHeld = null
+host.call = function (method, args) {
+  if (method === 'git/untracked') {
+    untrackedCalls.push(args)
+    return new Promise(function (resolve) { releaseHeld = resolve })
+  }
+  return beforeHeld(method, args)
+}
+/* 先收起来，才能再展开一次（展开的那一下就是这一节的被测对象） */
+byClass(newdirRow(tree), 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+tree = await settle()
+byClass(newdirRow(tree), 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () {} })
+await wait(10)
+let paneCrash = null
+try {
+  tree = await settle()
+} catch (error) {
+  paneCrash = error
+}
+ok('读还在飞的时候渲染这一棵树不会抛异常'
+  + (paneCrash === null ? '' : '：' + String(paneCrash && paneCrash.message)),
+  paneCrash === null)
+ok('这一帧里那一行说的是「正在读取…」',
+  paneCrash === null && tree !== null && textOf(tree).indexOf('正在读取') >= 0)
+if (releaseHeld !== null) {
+  releaseHeld({ ok: true, dir: 'newdir/', files: ['newdir/a.txt', 'newdir/deep/b.txt'], truncated: false })
+}
+host.call = beforeHeld
+let afterCrash = null
+try {
+  tree = await settle()
+} catch (error) {
+  afterCrash = error
+}
+ok('读回来之后文件行照常出现（那一帧只是中间态，不是终点）',
+  afterCrash === null && changeRow(tree, 'a.txt') !== undefined && changeRow(tree, 'deep/b.txt') !== undefined)
