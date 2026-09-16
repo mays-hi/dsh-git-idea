@@ -320,3 +320,111 @@ await wait(10)
 await settle()
 ok('目录那一行的勾选框暂存整个目录（git add -- dir 不需要先列出内容）',
   calls.some(function (c) { return c.method === 'git/stage' && c.args.paths[0] === 'newdir/' }))
+
+/* ── 7. 点一下勾选框：立刻有反应，而且不会被迟到的读抹掉 ──
+
+   在读者那台机器上量过：`git add` 是 98–236ms，而面板原来要等一次整棵树的
+   `git status` 才把框画出来 —— 那里是 7.4s（冷的时候 13.6s）。点一下等七秒，
+   和点一下没反应是同一件事，所以框现在从点击本身画出来，随后的读只确认它。
+   下面盯的就是这条链的四件事：立刻画、只问这些路径、失败就还原、旧读不许翻盘。 */
+
+console.log('')
+console.log('== 点一下勾选框 ==')
+
+const savedCall = host.call
+const glyphOf = function (row) {
+  const box = row === undefined ? undefined : byClass(row, 'dsh-git-cbox')[0]
+  return box === undefined ? null : textOf(box)
+}
+const stagedLine = function (tree) {
+  const line = collect(tree).filter(function (n) { return String(textOf(n)).indexOf('已暂存 ') >= 0 })[0]
+  return line === undefined ? '' : textOf(line)
+}
+const clickBox = async function (label) {
+  const row = changeRow(tree, label)
+  byClass(row, 'dsh-git-cbox')[0].props.onClick({ stopPropagation: function () {} })
+  await wait(10)
+  return await settle()
+}
+
+/* 7a. git 还没回话，框就得动 */
+const beforeTick = changeRow(tree, 'notes.md')
+ok('点之前 notes.md 是没暂存的空框', glyphOf(beforeTick) === '☐' && stagedLine(tree).indexOf('已暂存 1 ') >= 0)
+let releaseStage = null
+host.call = function (method, args) {
+  if (method === 'git/stage') {
+    calls.push({ method: method, args: args })
+    return new Promise(function (resolve) { releaseStage = resolve })
+  }
+  return savedCall(method, args)
+}
+const tickCalls = calls.length
+tree = await clickBox('notes.md')
+ok('git 还没回话，框就已经是已暂存（不再等那一次整树读）', glyphOf(changeRow(tree, 'notes.md')) === '☑')
+ok('「已暂存 N」跟着动（还是没等 git）', stagedLine(tree).indexOf('已暂存 2 ') >= 0)
+ok('这一下确实发出去了', calls.length > tickCalls
+  && calls.some(function (c) { return c.method === 'git/stage' && c.args.paths[0] === 'notes.md' }))
+
+/* 7b. 确认读只问这些路径 —— 整棵树 7.4s，这些路径 0.5s */
+const targetReads = function () {
+  return calls.filter(function (c) {
+    return c.method === 'git/panel' && c.args.quick !== true && Array.isArray(c.args.paths)
+  })
+}
+if (releaseStage !== null) releaseStage({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
+host.call = savedCall
+tree = await settle()
+const confirmAsk = targetReads()[targetReads().length - 1]
+ok('确认读按路径问（不是整棵树）', confirmAsk !== undefined && confirmAsk.args.paths.length === 1
+  && confirmAsk.args.paths[0] === 'notes.md')
+ok('确认读仍带着这个会话', confirmAsk.args.sessionId === 's-1' && confirmAsk.args.repo === undefined)
+
+/* 7c. 一次正在飞的整树读，不许把刚点的框擦回去 */
+let releaseFull = null
+host.call = function (method, args) {
+  if (method === 'git/panel' && args != null && args.quick !== true) {
+    calls.push({ method: method, args: args })
+    if (Array.isArray(args.paths)) {
+      /* 这一节里 mock 照刚才那次点击回答，这样确认读真的是「确认」 */
+      return Promise.resolve({
+        ok: true, partial: true, paths: args.paths, repo: '/tmp/ws', branch: 'main', detached: false,
+        upstream: '', ahead: 0, behind: 0, sequencer: null,
+        staged: [{ path: 'notes.md', code: 'M' }], unstaged: [], untracked: [], unmerged: [],
+      })
+    }
+    return new Promise(function (resolve) { releaseFull = resolve })
+  }
+  return savedCall(method, args)
+}
+toolByTitle(tree, '重新读取仓库（忽略缓存）').props.onClick()
+await wait(10)
+tree = await settle()
+ok('刷新键发出的是一次整树读，它还没回来', releaseFull !== null)
+tree = await clickBox('notes.md')
+ok('在读还没回来的时候点：框照样立刻是已暂存', glyphOf(changeRow(tree, 'notes.md')) === '☑')
+if (releaseFull !== null) {
+  /* 这份回答描述的是点击之前的工作区：它要是画上去，刚点的那一下就没了 */
+  releaseFull({
+    ok: true, repo: '/tmp/ws', branch: 'main', detached: false, upstream: '', ahead: 0, behind: 0, sequencer: null,
+    staged: [], unstaged: [{ path: 'notes.md', code: 'M' }, { path: 'stale.txt', code: 'M' }], untracked: [], unmerged: [],
+  })
+}
+host.call = savedCall
+tree = await settle()
+ok('迟到的旧读被丢掉，框还在（这就是「点一下又丢失」的那个 bug）', glyphOf(changeRow(tree, 'notes.md')) === '☑')
+ok('旧读里的别的改动也没被画上去', changeRow(tree, 'stale.txt') === undefined)
+
+/* 7d. git 拒绝的时候：还原，并且说清楚 */
+const failBefore = host.call
+host.call = function (method, args) {
+  if (method === 'git/stage') {
+    calls.push({ method: method, args: args })
+    return Promise.resolve({ ok: false, repo: '/tmp/ws', stdout: '', stderr: 'fatal: pathspec did not match', exitCode: 1, command: 'git add -- tmp.bin' })
+  }
+  return failBefore(method, args)
+}
+tree = await clickBox('tmp.bin')
+ok('git 拒绝了：框退回原样', glyphOf(changeRow(tree, 'tmp.bin')) === '☐')
+ok('并且把 git 的话显示出来', byClass(tree, 'dsh-git-error').length > 0 && textOf(tree).indexOf('pathspec did not match') >= 0)
+host.call = failBefore
+await settle()

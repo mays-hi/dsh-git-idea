@@ -28,13 +28,16 @@ onRpc('git/config-save', function (input) {
   return writeConfigFile(input != null ? input.config : null)
 })
 
-/* Never cached: its whole purpose is to observe change. */
+/* Never cached: its whole purpose is to observe change. `paths` narrows the
+   working-tree half of the signature to what is on screen — see watchCommand for
+   what a whole-tree status costs on a slow mount. */
 onRpc('git/watch', function (input) {
   const target = repoFrom(input, null)
   if (target === undefined) return { ok: false, repo: null, sig: '' }
   const deep = input != null && input.deep === true
-  return probeShell(input, watchCommand(target, deep)).then(function (probe) {
-    return { ok: true, repo: target, sig: probe.stdout }
+  const paths = deep ? readPaths(input) : []
+  return probeShell(input, watchCommand(target, deep, paths)).then(function (probe) {
+    return { ok: true, repo: target, sig: probe.stdout, paths: paths }
   })
 })
 

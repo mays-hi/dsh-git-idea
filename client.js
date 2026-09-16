@@ -219,6 +219,29 @@ return {
     }
     const useDataVersion = dataSignal.use
 
+    /* ── a read that is no longer wanted ──
+
+       A read takes as long as the mount makes it take — seconds, on the reader's
+       — and the reader can act while it is in flight. The reply that lands
+       afterwards describes the repository as it was BEFORE that action, so
+       painting it undoes what the reader just did: the box they ticked goes back
+       to empty, which reads as "点一下没反应" and then as the tick being lost.
+
+       Every mutation bumps this counter for its workspace, and a read remembers
+       the number it started with. A reply whose number has moved on is dropped;
+       the read that replaces it starts after the mutation and is wanted. */
+    const repoEpochs = {}
+    function repoEpochKey(repo, sessionId) {
+      return text(repo) + '\u0000' + text(sessionId)
+    }
+    function repoEpoch(repo, sessionId) {
+      const value = repoEpochs[repoEpochKey(repo, sessionId)]
+      return value === undefined ? 0 : value
+    }
+    function bumpRepoEpoch(repo, sessionId) {
+      repoEpochs[repoEpochKey(repo, sessionId)] = repoEpoch(repo, sessionId) + 1
+    }
+
     /* Which switcher is showing, if either: the dropdown hanging off the panel
        header's branch chip ('panel'), or the card the composer chip opens on
        hover ('hover'). One at a time, never both with the panel. */
@@ -572,10 +595,24 @@ return {
              two registrations collapsed into one — so whichever surface was torn
              down first deleted the other's notification AND, once the count
              reached zero, stopped the poller the other one was still on. */
-          listeners: new Map(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
+          listeners: new Map(), fast: 0, deep: 0, stop: null, sig: null, busy: false, paths: null,
         }
       }
       return repoWatchers[key]
+    }
+
+    /* What a deep tick asks about. The surface that shows the working tree says
+       which paths it is showing (`pathsOfInterest`), and the tick turns that into
+       a pathspec: measured on the reader's repository, a whole-tree `git status`
+       is 7.4s and the same command over the 36 paths the changes tree was showing
+       is 0.5s. A tick longer than the interval between ticks never lets the mount
+       rest, and everything beside it — the branch list, the log — waits.
+       A watcher that has not been told stays out of the working tree until the
+       reader's own full read has something to watch. */
+    function setWatchPaths(repo, sessionId, paths) {
+      const entry = repoWatchers[watcherKey(repo, sessionId)]
+      if (entry === undefined) return
+      entry.paths = paths != null && paths.length > 0 ? paths.slice() : null
     }
 
     function watcherInterval(entry) {
@@ -597,10 +634,16 @@ return {
       entry.busy = true
       const request = entry.repo.length > 0 ? { repo: entry.repo } : {}
       if (request.repo === undefined && entry.sessionId !== undefined) request.sessionId = entry.sessionId
-      /* Only while something is showing the working tree: the deep signature
-         is the one that notices edits inside files, and it is the expensive
-         one — seconds on a slow mount, every tick. */
-      if (entry.deep > 0) request.deep = true
+      /* Only while something is showing the working tree, and only about the
+         paths it is showing: the deep signature is the one that notices edits
+         inside files, and asked for the whole tree it is seconds on a slow
+         mount, every tick. With nothing to watch the deep half stays out of it
+         — the panel reads the whole tree on its own, slower clock — and the
+         cheap signature above still carries commits, switches and the index. */
+      if (entry.deep > 0 && entry.paths != null) {
+        request.deep = true
+        request.paths = entry.paths
+      }
       callHost('git/watch', request).then(function (data) {
         entry.busy = false
         if (data == null || data.ok !== true) return
@@ -1555,6 +1598,136 @@ textarea.dsh-git-input{resize:vertical}
           h('div', { className: 'dsh-git-msg' }, fullMessage)))
     }
 
+    /* ── the tick, before git has answered ──
+
+       Staging one path is a tenth of a second of git (`git add`: 98–236ms on the
+       reader's repository) followed by a whole `git status` before the box moved
+       (7.4s there). Clicking a box and watching nothing happen for seven seconds
+       is the same experience as clicking a box that does nothing. So the tree is
+       repainted from the click itself, with the lists git is about to report, and
+       the read that follows only confirms it — 0.5s, because it asks about these
+       paths.
+
+       It is a prediction, not a fiction: it is built from what the row already
+       says (whether the path was staged, what its index and worktree codes were),
+       and a failed command puts the previous snapshot back. */
+    function stageLocally(status, files, staged) {
+      if (status == null || status.ok !== true || files.length === 0) return null
+      const list = function (value) { return Array.isArray(value) ? value.slice() : [] }
+      const next = {
+        ok: true, repo: status.repo, branch: status.branch, detached: status.detached,
+        upstream: status.upstream, ahead: status.ahead, behind: status.behind,
+        sequencer: status.sequencer,
+        staged: list(status.staged), unstaged: list(status.unstaged),
+        untracked: list(status.untracked), unmerged: list(status.unmerged),
+      }
+      const drop = function (entries, path) {
+        for (let i = entries.length - 1; i >= 0; i -= 1) {
+          const other = text(entries[i].path)
+          /* A directory git collapsed answers for everything under it too. */
+          if (other === path || (path.slice(-1) === '/' && other.indexOf(path) === 0)) entries.splice(i, 1)
+        }
+      }
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i]
+        const path = text(file.path)
+        if (path.length === 0) continue
+        drop(next.staged, path)
+        drop(next.unstaged, path)
+        drop(next.untracked, path)
+        drop(next.unmerged, path)
+        const indexCode = text(file.indexCode)
+        const workCode = text(file.workCode)
+        if (staged === true) {
+          /* A path the index has never seen is an addition, whatever it looked
+             like before; anything else keeps the index code it had. */
+          next.staged.push({ path: path, code: indexCode.length > 0 ? indexCode : (file.untracked === true ? 'A' : 'M') })
+        } else if (indexCode === 'A' || file.untracked === true) {
+          /* Unstaging an addition does not make it modified: HEAD has no such
+             path, so it goes back to being untracked. */
+          next.untracked.push({ path: path, code: '??' })
+        } else {
+          next.unstaged.push({ path: path, code: workCode.length > 0 ? workCode : (indexCode.length > 0 ? indexCode : 'M') })
+        }
+      }
+      return next
+    }
+
+    /* ── folding a pathspec answer into the snapshot on screen ──
+
+       A partial read covers the paths it was asked about and nothing else, so it
+       replaces exactly those entries and leaves the rest of the tree alone: the
+       lists stay the whole working tree's, and the counts on the tab keep meaning
+       what they meant. The paths it names are the ones it answered for — including
+       paths under an asked directory, which is how a staged untracked directory
+       turns into the file rows inside it. */
+    function mergePanelStatus(current, partial) {
+      if (partial == null || partial.ok !== true) return current
+      if (partial.partial !== true) return partial
+      if (current == null || current.ok !== true) return current
+      const asked = Array.isArray(partial.paths) ? partial.paths : []
+      if (asked.length === 0) return current
+      const covered = function (path) {
+        for (let i = 0; i < asked.length; i += 1) {
+          const one = text(asked[i])
+          if (one.length === 0) continue
+          if (path === one) return true
+          if (one.slice(-1) === '/' && path.indexOf(one) === 0) return true
+          if (path.indexOf(one + '/') === 0) return true
+        }
+        return false
+      }
+      const keep = function (value) {
+        const entries = Array.isArray(value) ? value : []
+        const out = []
+        for (let i = 0; i < entries.length; i += 1) if (!covered(text(entries[i].path))) out.push(entries[i])
+        return out
+      }
+      const list = function (value) { return Array.isArray(value) ? value : [] }
+      return {
+        ok: true, repo: partial.repo, branch: partial.branch, detached: partial.detached,
+        upstream: partial.upstream, ahead: partial.ahead, behind: partial.behind,
+        sequencer: partial.sequencer,
+        staged: keep(current.staged).concat(list(partial.staged)),
+        unstaged: keep(current.unstaged).concat(list(partial.unstaged)),
+        untracked: keep(current.untracked).concat(list(partial.untracked)),
+        unmerged: keep(current.unmerged).concat(list(partial.unmerged)),
+      }
+    }
+
+    /* ── what a cheap read of the working tree is about ──
+
+       The paths this snapshot is showing, plus the directory each one lives in:
+       a new file beside a changed one is then noticed by the same read. The
+       repository root is deliberately not one of them — naming it would ask for
+       the whole tree again, which is the cost this is here to avoid. */
+    const PATHS_MAX = 200
+
+    function pathsOfInterest(status) {
+      if (status == null || status.ok !== true) return []
+      const seen = {}
+      const out = []
+      const add = function (path) {
+        if (path.length === 0 || seen[path] === true || out.length >= PATHS_MAX) return
+        seen[path] = true
+        out.push(path)
+      }
+      const lists = [status.staged, status.unstaged, status.untracked, status.unmerged]
+      for (let i = 0; i < lists.length; i += 1) {
+        const entries = Array.isArray(lists[i]) ? lists[i] : []
+        for (let k = 0; k < entries.length; k += 1) {
+          const path = text(entries[k].path)
+          if (path.length === 0) continue
+          const bare = path.slice(-1) === '/' ? path.slice(0, -1) : path
+          add(bare)
+          const cut = bare.lastIndexOf('/')
+          if (cut > 0) add(bare.slice(0, cut))
+        }
+      }
+      out.sort()
+      return out
+    }
+
     function mergeChanges(work) {
       const byPath = {}
       const order = []
@@ -1695,7 +1868,7 @@ textarea.dsh-git-input{resize:vertical}
                 title: inside + '（点开看差异）',
                 onClick: function () { props.onOpenDiff({ path: inside, workCode: '??', untracked: true, staged: false, displayCode: '?' }) },
               },
-                stageBox('box', 'none', '暂存', function () { props.onSetStaged([{ path: inside }], true) }),
+                stageBox('box', 'none', '暂存', function () { props.onSetStaged([{ path: inside, untracked: true }], true) }),
                 indentPad(node.depth + 1),
                 h('span', { className: 'dsh-git-tw' }),
                 h('span', { className: 'dsh-git-st dsh-git-st-U' }, '?'),
@@ -3088,6 +3261,29 @@ textarea.dsh-git-input{resize:vertical}
          on the click that opens one, never for the whole tree up front. */
       const [untrackedOpen, setUntrackedOpen] = React.useState({})
       const [untrackedFiles, setUntrackedFiles] = React.useState({})
+      /* ── the working tree, read by pathspec ──
+
+         `git status` stats every tracked file and walks every untracked
+         directory. Measured on this reader's repository (a Windows-mounted
+         worktree): 7.4s for the whole tree, 13.6s cold, 13.0s with
+         `--untracked-files=all` — and **0.5s** for the same command asked about
+         the 36 paths the changes tree was showing. They are the same answer for
+         everything that is on screen.
+
+         So the whole tree is read on its own clock (opening the panel, the
+         refresh button, a repository-level operation, and once every
+         FULL_STATUS_MS), and everything the reader does between those — a tick,
+         an edit to a file that is already listed, a stage — is confirmed by a
+         read of the paths involved. A file that was clean and is now modified is
+         the one thing a pathspec read cannot see; the whole-tree read is what
+         catches it, which is why it still happens on a clock.
+
+         The latest snapshot and the last whole-tree read live in one object
+         rather than in the state alone: an effect keeps the render it was created
+         in, so a callback registered once would otherwise read a stale
+         `status` for as long as its dependencies do not move. */
+      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '' } })
+      panelBox.status = status
 
       /* work is the only truth about whether this path is a usable repository.
          Everything that reads refs, history or the index is gated on it, so a
@@ -3105,22 +3301,63 @@ textarea.dsh-git-input{resize:vertical}
       /* Identity first, working tree after. The identity answer is what decides
          whether this path is a repository at all, so waiting for `git status`
          before drawing anything made every switch to an unused workspace feel
-         like the panel had hung. */
-      const loadWork = function (repo) {
+         like the panel had hung. `paths` names the paths a partial read is
+         about; null asks for the whole working tree. */
+      const loadWork = function (repo, paths) {
         const request = base(repo)
         const asked = request.repo === undefined ? '' : request.repo
+        const epoch = repoEpoch(asked, sessionId)
         callHost('git/panel', Object.assign({ quick: true }, request)).then(function (data) {
+          /* A mutation since this read started makes the answer describe the
+             repository before it — see repoEpoch. */
+          if (epoch !== repoEpoch(asked, sessionId)) return
           setWork(data)
           if (data == null || data.ok !== true) { setStatus(null); return }
-          callHost('git/panel', request).then(function (full) {
+          const full = paths == null || paths.length === 0
+          const work = Object.assign({}, request)
+          if (!full) work.paths = paths
+          callHost('git/panel', work).then(function (reply) {
             /* A read that came back after the path changed is not this path's
                answer; the effect below will load the new one anyway. */
             if (asked !== appliedRepo && asked.length > 0) return
-            setStatus(full != null && full.ok === true ? full : null)
+            if (epoch !== repoEpoch(asked, sessionId)) return
+            if (full) {
+              panelBox.fullAt = Date.now()
+              setStatus(reply != null && reply.ok === true ? reply : null)
+              return
+            }
+            /* A partial answer says nothing about the rest of the tree: it is
+               folded into the snapshot on screen, never put in its place. */
+            setStatus(function (previous) { return mergePanelStatus(previous, reply) })
           }).catch(function () { setStatus(null) })
         }).catch(function (failure) {
           setError(failureText(failure))
         })
+      }
+
+      /* How long a snapshot may stand before the whole tree is read again. The
+         cheap signature and the pathspec read between them cover everything that
+         touches a path the tree is already showing; this is the backstop for the
+         one thing they cannot see. Seconds of walking on a slow mount, so it is
+         on a clock rather than on every tick. */
+      const FULL_STATUS_MS = 30000
+
+      /* Whether this read may be about the paths on screen instead of the whole
+         tree: only when there is a snapshot to fold it into, and only while one
+         is recent enough to be worth trusting for the rest. */
+      const readChanges = function () {
+        const snapshot = panelBox.status
+        const recent = panelBox.fullAt > 0 && (Date.now() - panelBox.fullAt) < FULL_STATUS_MS
+        const touch = recent && snapshot != null && snapshot.ok === true
+        loadWork(appliedRepo, touch ? pathsOfInterest(snapshot) : null)
+      }
+
+      /* Read the whole tree again, now. The flush is what makes it a read rather
+         than a repaint of the Host's cache; the refresh button and the clock both
+         go through here. */
+      const reloadChanges = function () {
+        panelBox.fullAt = 0
+        callHost('git/flush', base(appliedRepo)).then(bump, bump)
       }
 
       const resetFilters = function () {
@@ -3140,6 +3377,9 @@ textarea.dsh-git-input{resize:vertical}
         rememberRepo(sessionId, next)
         setAppliedRepo(next)
         setStatus(null)
+        panelBox.status = null
+        panelBox.fullAt = 0
+        panelBox.scope = ''
         setMaxCount(PAGE_COMMITS)
         resetFilters()
         setSelected(null)
@@ -3178,7 +3418,7 @@ textarea.dsh-git-input{resize:vertical}
          it would repaint stale data and look like nothing happened. */
       const refresh = function () {
         setArmed('')
-        callHost('git/flush', base(appliedRepo)).then(bump, bump)
+        reloadChanges()
       }
 
       /* One path for every panel operation. A failed operation still re-reads,
@@ -3190,6 +3430,10 @@ textarea.dsh-git-input{resize:vertical}
         setArmed('')
         setError(null)
         setNeedsUpstream(false)
+        /* A repository-level operation can move anything — a checkout rewrites
+           the working tree, a commit empties it — so what follows it is a read of
+           the whole tree, not of the paths that were on screen before it. */
+        panelBox.fullAt = 0
         const request = base(appliedRepo)
         if (payload != null) Object.assign(request, payload)
         rpc(method, request).then(function () {
@@ -3287,9 +3531,31 @@ textarea.dsh-git-input{resize:vertical}
 
       React.useEffect(function () {
         if (props.ready !== true) return undefined
-        loadWork(appliedRepo)
+        /* A different repository, or a different tab, is a different question:
+           the snapshot on screen is not an answer to it, so the read is a whole
+           one. A bump with the same scope is the repository having moved under
+           what is already on screen, which the pathspec read answers. */
+        const scope = appliedRepo + '\u0000' + tab
+        if (panelBox.scope !== scope) {
+          panelBox.scope = scope
+          panelBox.fullAt = 0
+        }
+        readChanges()
         return undefined
       }, [appliedRepo, tab, freshAt, props.ready])
+
+      /* ── the whole tree, on a clock ──
+
+         Nothing else notices a file that was clean and has just been modified,
+         or a new file in a directory with nothing changed in it. That read is
+         seconds on a slow mount, so it happens while the changes tab is the thing
+         on screen and nowhere else. */
+      React.useEffect(function () {
+        if (!repoOk || props.ready !== true || props.active !== true || tab !== 'changes') return undefined
+        const timer = ctx.get('timer')
+        if (timer === undefined) return undefined
+        return timer.interval(function () { reloadChanges() }, FULL_STATUS_MS)
+      }, [appliedRepo, repoOk, props.active, props.ready, tab])
 
       React.useEffect(function () {
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
@@ -3363,6 +3629,16 @@ textarea.dsh-git-input{resize:vertical}
         return watchRepo(appliedRepo, sessionId, bump, props.active === true, tab === 'changes')
       }, [appliedRepo, repoOk, sessionId, props.active, props.ready, tab])
 
+      /* The watcher's deep tick asks about the paths on screen, so it has to be
+         told which ones they are. Nothing else drives this: a snapshot that
+         changed is exactly a change in what is worth watching. Declared after the
+         registration above, so on the render where it first fires there is an
+         entry to write into. */
+      React.useEffect(function () {
+        if (status == null || status.ok !== true) return
+        setWatchPaths(appliedRepo, sessionId, pathsOfInterest(status))
+      }, [status, appliedRepo, sessionId])
+
       /* One identity for as long as the repository does not change: the commit
          rows are memoised, and a handler rebuilt on every render would defeat
          every one of them — including for the rows whose own state did not move. */
@@ -3425,20 +3701,54 @@ textarea.dsh-git-input{resize:vertical}
         })
       }
 
+      /* The mutation's own answer. Asked about the paths that changed, it costs a
+         fraction of a whole-tree read, so the tick the reader just made is
+         confirmed while they are still looking at it — and if another click has
+         happened since, this reply is not about the state on screen any more and
+         is dropped. */
+      const confirmStaged = function (paths) {
+        const request = base(appliedRepo)
+        request.paths = paths
+        const epoch = repoEpoch(appliedRepo, sessionId)
+        callHost('git/panel', request).then(function (reply) {
+          if (epoch !== repoEpoch(appliedRepo, sessionId)) return
+          if (reply == null || reply.ok !== true) return
+          setStatus(function (previous) { return mergePanelStatus(previous, reply) })
+        }).catch(function () {})
+      }
+
       const setStaged = function (files, staged) {
         if (files.length === 0) return
         const paths = []
-        for (let i = 0; i < files.length; i += 1) paths.push(files[i].path)
+        for (let i = 0; i < files.length; i += 1) {
+          const path = text(files[i].path)
+          if (path.length > 0) paths.push(path)
+        }
+        if (paths.length === 0) return
+        /* Everything already in flight describes the index before this call; one
+           of those replies landing after it would paint the tick back to empty. */
+        bumpRepoEpoch(appliedRepo, sessionId)
+        const before = panelBox.status
+        const patched = stageLocally(before, files, staged)
+        if (patched !== null) {
+          panelBox.status = patched
+          setStatus(patched)
+        }
         setBusy(true)
         const request = base(appliedRepo)
         request.paths = paths
         rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
           setBusy(false)
           setError(null)
-          loadWork(appliedRepo)
+          confirmStaged(paths)
         }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
+          /* git did not do it, so the tree goes back to what git last said. */
+          if (before !== undefined) {
+            panelBox.status = before
+            setStatus(before)
+          }
         })
       }
 
@@ -3459,7 +3769,9 @@ textarea.dsh-git-input{resize:vertical}
           setBusy(false)
           setError(null)
           setMessage('')
-          loadWork(appliedRepo)
+          /* A commit empties the index and the list it was showing: the answer is
+             a read of the whole tree, not of the paths that were on it. */
+          reloadChanges()
         }, function (failure) {
           setBusy(false)
           setError(failureText(failure))

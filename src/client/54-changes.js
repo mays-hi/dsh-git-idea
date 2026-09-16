@@ -104,7 +104,7 @@
                 title: inside + '（点开看差异）',
                 onClick: function () { props.onOpenDiff({ path: inside, workCode: '??', untracked: true, staged: false, displayCode: '?' }) },
               },
-                stageBox('box', 'none', '暂存', function () { props.onSetStaged([{ path: inside }], true) }),
+                stageBox('box', 'none', '暂存', function () { props.onSetStaged([{ path: inside, untracked: true }], true) }),
                 indentPad(node.depth + 1),
                 h('span', { className: 'dsh-git-tw' }),
                 h('span', { className: 'dsh-git-st dsh-git-st-U' }, '?'),

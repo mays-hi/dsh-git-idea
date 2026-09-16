@@ -58,6 +58,29 @@
          on the click that opens one, never for the whole tree up front. */
       const [untrackedOpen, setUntrackedOpen] = React.useState({})
       const [untrackedFiles, setUntrackedFiles] = React.useState({})
+      /* ── the working tree, read by pathspec ──
+
+         `git status` stats every tracked file and walks every untracked
+         directory. Measured on this reader's repository (a Windows-mounted
+         worktree): 7.4s for the whole tree, 13.6s cold, 13.0s with
+         `--untracked-files=all` — and **0.5s** for the same command asked about
+         the 36 paths the changes tree was showing. They are the same answer for
+         everything that is on screen.
+
+         So the whole tree is read on its own clock (opening the panel, the
+         refresh button, a repository-level operation, and once every
+         FULL_STATUS_MS), and everything the reader does between those — a tick,
+         an edit to a file that is already listed, a stage — is confirmed by a
+         read of the paths involved. A file that was clean and is now modified is
+         the one thing a pathspec read cannot see; the whole-tree read is what
+         catches it, which is why it still happens on a clock.
+
+         The latest snapshot and the last whole-tree read live in one object
+         rather than in the state alone: an effect keeps the render it was created
+         in, so a callback registered once would otherwise read a stale
+         `status` for as long as its dependencies do not move. */
+      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '' } })
+      panelBox.status = status
 
       /* work is the only truth about whether this path is a usable repository.
          Everything that reads refs, history or the index is gated on it, so a
@@ -75,22 +98,63 @@
       /* Identity first, working tree after. The identity answer is what decides
          whether this path is a repository at all, so waiting for `git status`
          before drawing anything made every switch to an unused workspace feel
-         like the panel had hung. */
-      const loadWork = function (repo) {
+         like the panel had hung. `paths` names the paths a partial read is
+         about; null asks for the whole working tree. */
+      const loadWork = function (repo, paths) {
         const request = base(repo)
         const asked = request.repo === undefined ? '' : request.repo
+        const epoch = repoEpoch(asked, sessionId)
         callHost('git/panel', Object.assign({ quick: true }, request)).then(function (data) {
+          /* A mutation since this read started makes the answer describe the
+             repository before it — see repoEpoch. */
+          if (epoch !== repoEpoch(asked, sessionId)) return
           setWork(data)
           if (data == null || data.ok !== true) { setStatus(null); return }
-          callHost('git/panel', request).then(function (full) {
+          const full = paths == null || paths.length === 0
+          const work = Object.assign({}, request)
+          if (!full) work.paths = paths
+          callHost('git/panel', work).then(function (reply) {
             /* A read that came back after the path changed is not this path's
                answer; the effect below will load the new one anyway. */
             if (asked !== appliedRepo && asked.length > 0) return
-            setStatus(full != null && full.ok === true ? full : null)
+            if (epoch !== repoEpoch(asked, sessionId)) return
+            if (full) {
+              panelBox.fullAt = Date.now()
+              setStatus(reply != null && reply.ok === true ? reply : null)
+              return
+            }
+            /* A partial answer says nothing about the rest of the tree: it is
+               folded into the snapshot on screen, never put in its place. */
+            setStatus(function (previous) { return mergePanelStatus(previous, reply) })
           }).catch(function () { setStatus(null) })
         }).catch(function (failure) {
           setError(failureText(failure))
         })
+      }
+
+      /* How long a snapshot may stand before the whole tree is read again. The
+         cheap signature and the pathspec read between them cover everything that
+         touches a path the tree is already showing; this is the backstop for the
+         one thing they cannot see. Seconds of walking on a slow mount, so it is
+         on a clock rather than on every tick. */
+      const FULL_STATUS_MS = 30000
+
+      /* Whether this read may be about the paths on screen instead of the whole
+         tree: only when there is a snapshot to fold it into, and only while one
+         is recent enough to be worth trusting for the rest. */
+      const readChanges = function () {
+        const snapshot = panelBox.status
+        const recent = panelBox.fullAt > 0 && (Date.now() - panelBox.fullAt) < FULL_STATUS_MS
+        const touch = recent && snapshot != null && snapshot.ok === true
+        loadWork(appliedRepo, touch ? pathsOfInterest(snapshot) : null)
+      }
+
+      /* Read the whole tree again, now. The flush is what makes it a read rather
+         than a repaint of the Host's cache; the refresh button and the clock both
+         go through here. */
+      const reloadChanges = function () {
+        panelBox.fullAt = 0
+        callHost('git/flush', base(appliedRepo)).then(bump, bump)
       }
 
       const resetFilters = function () {
@@ -110,6 +174,9 @@
         rememberRepo(sessionId, next)
         setAppliedRepo(next)
         setStatus(null)
+        panelBox.status = null
+        panelBox.fullAt = 0
+        panelBox.scope = ''
         setMaxCount(PAGE_COMMITS)
         resetFilters()
         setSelected(null)
@@ -148,7 +215,7 @@
          it would repaint stale data and look like nothing happened. */
       const refresh = function () {
         setArmed('')
-        callHost('git/flush', base(appliedRepo)).then(bump, bump)
+        reloadChanges()
       }
 
       /* One path for every panel operation. A failed operation still re-reads,
@@ -160,6 +227,10 @@
         setArmed('')
         setError(null)
         setNeedsUpstream(false)
+        /* A repository-level operation can move anything — a checkout rewrites
+           the working tree, a commit empties it — so what follows it is a read of
+           the whole tree, not of the paths that were on screen before it. */
+        panelBox.fullAt = 0
         const request = base(appliedRepo)
         if (payload != null) Object.assign(request, payload)
         rpc(method, request).then(function () {
@@ -257,9 +328,31 @@
 
       React.useEffect(function () {
         if (props.ready !== true) return undefined
-        loadWork(appliedRepo)
+        /* A different repository, or a different tab, is a different question:
+           the snapshot on screen is not an answer to it, so the read is a whole
+           one. A bump with the same scope is the repository having moved under
+           what is already on screen, which the pathspec read answers. */
+        const scope = appliedRepo + '\u0000' + tab
+        if (panelBox.scope !== scope) {
+          panelBox.scope = scope
+          panelBox.fullAt = 0
+        }
+        readChanges()
         return undefined
       }, [appliedRepo, tab, freshAt, props.ready])
+
+      /* ── the whole tree, on a clock ──
+
+         Nothing else notices a file that was clean and has just been modified,
+         or a new file in a directory with nothing changed in it. That read is
+         seconds on a slow mount, so it happens while the changes tab is the thing
+         on screen and nowhere else. */
+      React.useEffect(function () {
+        if (!repoOk || props.ready !== true || props.active !== true || tab !== 'changes') return undefined
+        const timer = ctx.get('timer')
+        if (timer === undefined) return undefined
+        return timer.interval(function () { reloadChanges() }, FULL_STATUS_MS)
+      }, [appliedRepo, repoOk, props.active, props.ready, tab])
 
       React.useEffect(function () {
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
@@ -333,6 +426,16 @@
         return watchRepo(appliedRepo, sessionId, bump, props.active === true, tab === 'changes')
       }, [appliedRepo, repoOk, sessionId, props.active, props.ready, tab])
 
+      /* The watcher's deep tick asks about the paths on screen, so it has to be
+         told which ones they are. Nothing else drives this: a snapshot that
+         changed is exactly a change in what is worth watching. Declared after the
+         registration above, so on the render where it first fires there is an
+         entry to write into. */
+      React.useEffect(function () {
+        if (status == null || status.ok !== true) return
+        setWatchPaths(appliedRepo, sessionId, pathsOfInterest(status))
+      }, [status, appliedRepo, sessionId])
+
       /* One identity for as long as the repository does not change: the commit
          rows are memoised, and a handler rebuilt on every render would defeat
          every one of them — including for the rows whose own state did not move. */
@@ -395,20 +498,54 @@
         })
       }
 
+      /* The mutation's own answer. Asked about the paths that changed, it costs a
+         fraction of a whole-tree read, so the tick the reader just made is
+         confirmed while they are still looking at it — and if another click has
+         happened since, this reply is not about the state on screen any more and
+         is dropped. */
+      const confirmStaged = function (paths) {
+        const request = base(appliedRepo)
+        request.paths = paths
+        const epoch = repoEpoch(appliedRepo, sessionId)
+        callHost('git/panel', request).then(function (reply) {
+          if (epoch !== repoEpoch(appliedRepo, sessionId)) return
+          if (reply == null || reply.ok !== true) return
+          setStatus(function (previous) { return mergePanelStatus(previous, reply) })
+        }).catch(function () {})
+      }
+
       const setStaged = function (files, staged) {
         if (files.length === 0) return
         const paths = []
-        for (let i = 0; i < files.length; i += 1) paths.push(files[i].path)
+        for (let i = 0; i < files.length; i += 1) {
+          const path = text(files[i].path)
+          if (path.length > 0) paths.push(path)
+        }
+        if (paths.length === 0) return
+        /* Everything already in flight describes the index before this call; one
+           of those replies landing after it would paint the tick back to empty. */
+        bumpRepoEpoch(appliedRepo, sessionId)
+        const before = panelBox.status
+        const patched = stageLocally(before, files, staged)
+        if (patched !== null) {
+          panelBox.status = patched
+          setStatus(patched)
+        }
         setBusy(true)
         const request = base(appliedRepo)
         request.paths = paths
         rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
           setBusy(false)
           setError(null)
-          loadWork(appliedRepo)
+          confirmStaged(paths)
         }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
+          /* git did not do it, so the tree goes back to what git last said. */
+          if (before !== undefined) {
+            panelBox.status = before
+            setStatus(before)
+          }
         })
       }
 
@@ -429,7 +566,9 @@
           setBusy(false)
           setError(null)
           setMessage('')
-          loadWork(appliedRepo)
+          /* A commit empties the index and the list it was showing: the answer is
+             a read of the whole tree, not of the paths that were on it. */
+          reloadChanges()
         }, function (failure) {
           setBusy(false)
           setError(failureText(failure))

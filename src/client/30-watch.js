@@ -31,10 +31,24 @@
              two registrations collapsed into one — so whichever surface was torn
              down first deleted the other's notification AND, once the count
              reached zero, stopped the poller the other one was still on. */
-          listeners: new Map(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
+          listeners: new Map(), fast: 0, deep: 0, stop: null, sig: null, busy: false, paths: null,
         }
       }
       return repoWatchers[key]
+    }
+
+    /* What a deep tick asks about. The surface that shows the working tree says
+       which paths it is showing (`pathsOfInterest`), and the tick turns that into
+       a pathspec: measured on the reader's repository, a whole-tree `git status`
+       is 7.4s and the same command over the 36 paths the changes tree was showing
+       is 0.5s. A tick longer than the interval between ticks never lets the mount
+       rest, and everything beside it — the branch list, the log — waits.
+       A watcher that has not been told stays out of the working tree until the
+       reader's own full read has something to watch. */
+    function setWatchPaths(repo, sessionId, paths) {
+      const entry = repoWatchers[watcherKey(repo, sessionId)]
+      if (entry === undefined) return
+      entry.paths = paths != null && paths.length > 0 ? paths.slice() : null
     }
 
     function watcherInterval(entry) {
@@ -56,10 +70,16 @@
       entry.busy = true
       const request = entry.repo.length > 0 ? { repo: entry.repo } : {}
       if (request.repo === undefined && entry.sessionId !== undefined) request.sessionId = entry.sessionId
-      /* Only while something is showing the working tree: the deep signature
-         is the one that notices edits inside files, and it is the expensive
-         one — seconds on a slow mount, every tick. */
-      if (entry.deep > 0) request.deep = true
+      /* Only while something is showing the working tree, and only about the
+         paths it is showing: the deep signature is the one that notices edits
+         inside files, and asked for the whole tree it is seconds on a slow
+         mount, every tick. With nothing to watch the deep half stays out of it
+         — the panel reads the whole tree on its own, slower clock — and the
+         cheap signature above still carries commits, switches and the index. */
+      if (entry.deep > 0 && entry.paths != null) {
+        request.deep = true
+        request.paths = entry.paths
+      }
       callHost('git/watch', request).then(function (data) {
         entry.busy = false
         if (data == null || data.ok !== true) return

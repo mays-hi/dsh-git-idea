@@ -415,6 +415,81 @@ console.log('  源码里读状态的调用:', statusLines.length, '条，没带�
 for (const x of unguarded) console.log('    L' + x.n + ': ' + x.l.trim().slice(0, 80))
 check('每一条读状态的 git 调用都带 --no-optional-locks', statusLines.length >= 3 && unguarded.length === 0)
 
+/* ── 按路径读，而不是按整棵树读 ──
+
+   `git status` 会 stat 每一个被跟踪的文件、走遍每一个未跟踪目录，而在一个
+   Windows 挂载的工作区上这就是它全部的开销。在读者那台机器上量到的（同一个仓库，
+   同一个时刻）：整棵树 7.4s（冷的时候 13.6s），`-uno` 5.3s，`--untracked-files=all`
+   13.0s —— 而**同一条命令只问变更页正在显示的那 36 个路径是 0.5s**。所以读可以
+   带上它要问的路径，答案只说这些路径（并自报 partial），客户端把它们折进屏幕上
+   那份快照里。路径来自客户端，所以每一个都过 diff 用的那道关卡，条数也有上限。 */
+console.log('')
+console.log('=== 按路径读（pathspec），而不是整棵树 ===')
+const pathCommands = []
+const realRunForPaths = shellService.run
+shellService.run = function (spec) { pathCommands.push(spec.command); return realRunForPaths(spec) }
+await sh("printf 'more\\n' >> f && git add -- f", LOCK)
+const targeted = await H('git/panel')({ repo: LOCK, paths: ['f'] })
+shellService.run = realRunForPaths
+console.log('  只问 f 的那次:', JSON.stringify({ partial: targeted.partial, paths: targeted.paths, branch: targeted.branch }))
+console.log('  它说 f 的状态:', targeted.staged.map((e) => e.code + ' ' + e.path).join(',') || '(不在索引里)',
+  '| 未跟踪:', JSON.stringify(targeted.untracked))
+console.log('  命令:', pathCommands[pathCommands.length - 1])
+check('按路径的读自报 partial，并且把问的路径原样带回来',
+  targeted.ok === true && targeted.partial === true && targeted.paths.length === 1 && targeted.paths[0] === 'f')
+check('命令里确实带着 pathspec（在 -- 之后）',
+  pathCommands.length >= 1 && /status --porcelain=v2 --branch --untracked-files=normal -- 'f'/.test(pathCommands[pathCommands.length - 1]))
+check('答案只说这些路径（整树读里有的 untr.txt 不在这里）',
+  targeted.untracked.length === 0 && targeted.staged.length === 1 && targeted.staged[0].path === 'f')
+check('分支、领先落后照旧作答（路径不影响身份那半边）',
+  targeted.branch !== null && typeof targeted.ahead === 'number' && typeof targeted.behind === 'number')
+
+/* 每个路径都过 diff 那道关卡：绝对路径、往上走、NUL 一律丢掉，留下合法的那个 */
+const guarded = await H('git/panel')({ repo: LOCK, paths: ['/etc/hostname', '../outside', 'a\u0000b', 'f'] })
+check('越界的路径被丢掉，合法的那个留下',
+  guarded.paths.length === 1 && guarded.paths[0] === 'f' && guarded.partial === true)
+const capped = await H('git/panel')({ repo: LOCK, paths: Array.from({ length: 250 }, (_, i) => 'p' + i) })
+check('路径条数有上限（pathspec 列表就是一条命令行）', capped.paths.length === 200 && capped.partial === true)
+
+/* 两份答案不共用缓存键：先读便宜的，再读整棵树，整棵树不能变成那一次的部分答案 */
+await H('git/flush')({ repo: LOCK })
+const partialFirst = await H('git/panel')({ repo: LOCK, paths: ['f'] })
+const wholeAfter = await H('git/panel')({ repo: LOCK })
+console.log('  先按路径读 f，再读整棵树 —— 整棵树的 untracked:', JSON.stringify(wholeAfter.untracked))
+check('按路径的读不会污染整棵树的读（整棵树仍然给出 untr.txt）',
+  partialFirst.partial === true && wholeAfter.partial === undefined
+  && wholeAfter.untracked.length === 1 && wholeAfter.untracked[0].path === 'untr.txt')
+
+/* 轮询签名同样按路径问：整棵树的签名 53 行，这些路径 30 行（读者仓库实测） */
+const watchCommands = []
+const realRunForWatch = shellService.run
+shellService.run = function (spec) { watchCommands.push(spec.command); return realRunForWatch(spec) }
+const watchFew = await H('git/watch')({ repo: LOCK, deep: true, paths: ['f'] })
+const watchAll = await H('git/watch')({ repo: LOCK, deep: true })
+shellService.run = realRunForWatch
+console.log('  只问 f 的签名行数:', watchFew.sig.trim().split('\n').length, ' 整棵树:', watchAll.sig.trim().split('\n').length)
+check('轮询的深读也带着 pathspec', /status --porcelain=v2 --branch --untracked-files=normal -- 'f'/.test(watchCommands[0])
+  && watchCommands[1].indexOf('status --porcelain=v2 --branch --untracked-files=normal -- ') < 0)
+check('按路径的签名只说这些路径（untr.txt 不在里面），整棵树的签名说全部',
+  watchFew.sig.indexOf('untr.txt') < 0 && watchAll.sig.indexOf('untr.txt') >= 0)
+check('同一个问题同一个签名（不然每个 tick 都像变了）',
+  (await H('git/watch')({ repo: LOCK, deep: true, paths: ['f'] })).sig === watchFew.sig)
+
+/* 按路径问，仍然必须看得见「列出来的那个文件又被改了」—— 这是深读存在的理由；
+   而看不见别的文件，正是它省下来的开销（别的由面板自己的整树时钟兜住）。 */
+await sh("printf 'one\\n' > other.txt && git add -- other.txt && git commit -qm other -- other.txt", LOCK)
+const sigF1 = (await H('git/watch')({ repo: LOCK, deep: true, paths: ['f'] })).sig
+const wholeF1 = (await H('git/watch')({ repo: LOCK, deep: true })).sig
+await sh("printf 'again\\n' >> f", LOCK)
+const sigF2 = (await H('git/watch')({ repo: LOCK, deep: true, paths: ['f'] })).sig
+const wholeF2 = (await H('git/watch')({ repo: LOCK, deep: true })).sig
+await sh("printf 'more\\n' >> other.txt", LOCK)
+const sigF3 = (await H('git/watch')({ repo: LOCK, deep: true, paths: ['f'] })).sig
+const wholeF3 = (await H('git/watch')({ repo: LOCK, deep: true })).sig
+check('列在里面的文件被改动 → 按路径的签名就变（深读还是深读）', sigF1 !== sigF2 && wholeF1 !== wholeF2)
+check('别的文件被改动 → 按路径的签名不变（省下的就是这一次走树），整棵树的签名照变',
+  sigF2 === sigF3 && wholeF2 !== wholeF3)
+
 
 /* ── 值是值，不是选项 ──
 

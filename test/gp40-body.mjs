@@ -402,7 +402,12 @@ const changesTab = await settle()
 const panelAsks = calls.filter((c) => c.method === 'git/panel')
 ok('切到变更页时先发便宜的身份读', panelAsks.length >= 1 && panelAsks[0].args.quick === true)
 
-/* 轮询：历史页用便宜的签名，变更页才加深 */
+/* ── 轮询：历史页用便宜的签名；变更页的深读只问屏幕上那些路径 ──
+
+   整棵树的 `git status` 在慢挂载上是 7.4s（README 里那组数字），而这个 tick 隔
+   几秒就跑一次：探针比间隔还长，挂载就没有休息的时候，旁边的分支列表和日志都
+   在排队。所以深读带的是 pathspec，路径来自面板正在显示的那份快照；一份什么都
+   没有的快照没有可看的路径，深读就交给面板自己的整树时钟（见「深读问哪些路径」）。 */
 buttons(changesTab).find((b) => textOf(b) === '历史').props.onClick()
 await wait(20)
 let logTab = await settle()
@@ -416,6 +421,18 @@ await tickIntervals()
 const watchLog = lastWatch()
 ok('历史页的轮询不带 deep', watchLog !== undefined && watchLog.args.deep === undefined)
 
+/* 让面板看到一处改动，它才有路径可交给深读 */
+const panelBeforePaths = host.call
+host.call = function (method, args) {
+  if (method === 'git/panel' && args != null && args.quick !== true) {
+    calls.push({ method: method, args: args })
+    return Promise.resolve({
+      ok: true, repo: '/tmp/ws', branch: 'main', detached: false, upstream: '', ahead: 0, behind: 0, sequencer: null,
+      staged: [], unstaged: [{ path: 'src/app.js', code: 'M' }], untracked: [], unmerged: [],
+    })
+  }
+  return panelBeforePaths(method, args)
+}
 calls.length = 0
 buttons(logTab).find((b) => textOf(b) === '变更').props.onClick()
 await wait(20)
@@ -423,6 +440,11 @@ const backToChanges = await settle()
 await tickIntervals()
 const watchChanges = lastWatch()
 ok('变更页的轮询带 deep（要看工作区）', watchChanges !== undefined && watchChanges.args.deep === true)
+ok('深读带着屏幕上那些路径（整棵树 7.4s，这些路径 0.5s）',
+  Array.isArray(watchChanges.args.paths) && watchChanges.args.paths.indexOf('src/app.js') >= 0)
+ok('路径里还有它所在的目录（旁边新出现的文件同样被看见）',
+  watchChanges.args.paths.indexOf('src') >= 0 && watchChanges.args.paths.length === 2)
+host.call = panelBeforePaths
 buttons(backToChanges).find((b) => textOf(b) === '历史').props.onClick()
 await wait(20)
 await settle()

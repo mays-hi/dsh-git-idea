@@ -1334,11 +1334,46 @@ function panelIdentityCommand(target) {
   ].join('\n'))
 }
 
-function panelCommand(target) {
+/* ── reading by pathspec instead of by tree ──
+
+   `git status` stats every tracked file and walks every untracked directory, and
+   on a Windows-mounted worktree that is the whole cost of every read this plugin
+   makes. Measured on the reader's repository, one whole-tree status: 7.4s
+   (13.6s cold), 5.3s with `-uno`, 13.0s with `--untracked-files=all`. The same
+   command asked about the 36 paths the changes tree was showing: **0.5s**. The
+   working tree is what the panel is showing, so the reads that keep it fresh ask
+   about those paths, and only a read that has to answer for the whole tree pays
+   for the whole tree.
+
+   The paths come from the client, so each one passes the guard the diff read
+   uses (relative, inside the repository, no NUL), and the list is capped: a
+   pathspec list is a command line, and a command line has a length. */
+const READ_PATHS_MAX = 200
+
+function readPaths(input) {
+  if (input == null || !Array.isArray(input.paths)) return []
+  const out = []
+  for (let i = 0; i < input.paths.length && out.length < READ_PATHS_MAX; i += 1) {
+    const path = input.paths[i]
+    if (!isStr(path) || path.length === 0) continue
+    if (repoRelativePath(path) !== '') continue
+    if (out.indexOf(path) >= 0) continue
+    out.push(path)
+  }
+  return out
+}
+
+function pathspecSuffix(paths) {
+  if (paths.length === 0) return ''
+  return ' -- ' + paths.map(shq).join(' ')
+}
+
+function panelCommand(target, paths) {
   const quoted = shq(target)
+  const asked = paths == null ? [] : paths
   return pathShell(target, [
     '  if ' + repoHere(target) + '; then',
-    "    out=$(git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1); rc=$?",
+    "    out=$(git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal" + pathspecSuffix(asked) + " 2>&1); rc=$?",
     '  else',
     "    out='fatal: not a git repository'; rc=1",
     '  fi',
@@ -1374,8 +1409,9 @@ function panelCommand(target) {
    on a slow mount, every tick — and it is only worth paying while something is
    showing the working tree, which is what `deep` asks for. Everything else in
    the signature is three stats, one for-each-ref and one small file read. */
-function watchCommand(target, deep) {
+function watchCommand(target, deep, paths) {
   const quoted = shq(target)
+  const asked = paths == null ? [] : paths
   /* Every git call below is inside `[ -n "$gd" ]`: on a directory that is not a
      repository, git would happily answer for one of its parents, and the
      signature would then follow a tree this workspace does not own. */
@@ -1391,7 +1427,15 @@ function watchCommand(target, deep) {
     'fi',
   ]
   if (deep === true) {
-    out.push('if [ -n "$gd" ]; then git -C ' + quoted + ' --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1; fi')
+    /* ── the tick asks about the paths on screen ──
+       This runs every few seconds while the changes tab is open, and a
+       whole-tree status is 7.4s on the reader's mount: the tick then takes
+       longer than the interval between ticks, so the poller never stops and
+       every cheap read beside it (for-each-ref went 50ms → 143ms) waits behind
+       it. The same command over the paths the tree was showing is 0.5s. A file
+       that was clean and is now modified is the one thing this cannot see; the
+       panel reads the whole tree for that on its own clock. */
+    out.push('if [ -n "$gd" ]; then git -C ' + quoted + ' --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal' + pathspecSuffix(asked) + ' 2>&1; fi')
   }
   out.push(
     "printf 'F:%s\\n' \"" + whenRepo("git -C " + quoted + " for-each-ref --format='%(refname):%(objectname)' refs/heads refs/remotes 2>/dev/null") + "\"",
@@ -1461,8 +1505,9 @@ async function readPanelIdentity(input, target) {
   }
 }
 
-async function readPanel(input, target) {
-  const probe = await probeShell(input, panelCommand(target))
+async function readPanel(input, target, paths) {
+  const asked = paths == null ? [] : paths
+  const probe = await probeShell(input, panelCommand(target, asked))
   const lines = probe.stdout.split('\n')
   const kind = lines.length > 0 ? lines[0] : ''
   if (kind === 'K:file') return missingPanel(target, 'file')
@@ -1490,12 +1535,21 @@ async function readPanel(input, target) {
   const parsed = parseStatusV2(output)
   const untracked = []
   for (let i = 0; i < parsed.untracked.length; i += 1) untracked.push({ path: parsed.untracked[i], code: '??' })
-  return {
+  const reply = {
     ok: true, repo: target, branch: parsed.detached ? null : parsed.branch, detached: parsed.detached,
     upstream: parsed.upstream, ahead: parsed.ahead, behind: parsed.behind,
     sequencer: sequencer,
     staged: parsed.staged, unstaged: parsed.unstaged, untracked: untracked, unmerged: parsed.unmerged,
   }
+  /* A pathspec answer is about those paths and nothing else. It says so, and it
+     names them, so the client can fold it into the snapshot it already has
+     instead of mistaking it for the whole working tree. The whole-tree answer
+     carries neither key — the same convention the identity read uses. */
+  if (asked.length > 0) {
+    reply.partial = true
+    reply.paths = asked
+  }
+  return reply
 }
 
 async function panelSnapshot(input) {
@@ -1506,7 +1560,13 @@ async function panelSnapshot(input) {
   if (input != null && input.quick === true) {
     return await cached(target, 'panel-ident', function () { return readPanelIdentity(input, target) })
   }
-  return await cached(target, 'panel', function () { return readPanel(input, target) })
+  const paths = readPaths(input)
+  if (paths.length > 0) {
+    /* A partial answer is cached under the question it answered: same paths, same
+       tag. Any mutation drops it with the rest of this repository's entries. */
+    return await cached(target, 'panel|' + paths.join('\u0001'), function () { return readPanel(input, target, paths) })
+  }
+  return await cached(target, 'panel', function () { return readPanel(input, target, []) })
 }
 
 async function readGraph(input, repo) {
@@ -2222,13 +2282,16 @@ onRpc('git/config-save', function (input) {
   return writeConfigFile(input != null ? input.config : null)
 })
 
-/* Never cached: its whole purpose is to observe change. */
+/* Never cached: its whole purpose is to observe change. `paths` narrows the
+   working-tree half of the signature to what is on screen — see watchCommand for
+   what a whole-tree status costs on a slow mount. */
 onRpc('git/watch', function (input) {
   const target = repoFrom(input, null)
   if (target === undefined) return { ok: false, repo: null, sig: '' }
   const deep = input != null && input.deep === true
-  return probeShell(input, watchCommand(target, deep)).then(function (probe) {
-    return { ok: true, repo: target, sig: probe.stdout }
+  const paths = deep ? readPaths(input) : []
+  return probeShell(input, watchCommand(target, deep, paths)).then(function (probe) {
+    return { ok: true, repo: target, sig: probe.stdout, paths: paths }
   })
 })
 

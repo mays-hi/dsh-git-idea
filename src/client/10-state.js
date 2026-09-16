@@ -193,6 +193,29 @@
     }
     const useDataVersion = dataSignal.use
 
+    /* ── a read that is no longer wanted ──
+
+       A read takes as long as the mount makes it take — seconds, on the reader's
+       — and the reader can act while it is in flight. The reply that lands
+       afterwards describes the repository as it was BEFORE that action, so
+       painting it undoes what the reader just did: the box they ticked goes back
+       to empty, which reads as "点一下没反应" and then as the tick being lost.
+
+       Every mutation bumps this counter for its workspace, and a read remembers
+       the number it started with. A reply whose number has moved on is dropped;
+       the read that replaces it starts after the mutation and is wanted. */
+    const repoEpochs = {}
+    function repoEpochKey(repo, sessionId) {
+      return text(repo) + '\u0000' + text(sessionId)
+    }
+    function repoEpoch(repo, sessionId) {
+      const value = repoEpochs[repoEpochKey(repo, sessionId)]
+      return value === undefined ? 0 : value
+    }
+    function bumpRepoEpoch(repo, sessionId) {
+      repoEpochs[repoEpochKey(repo, sessionId)] = repoEpoch(repo, sessionId) + 1
+    }
+
     /* Which switcher is showing, if either: the dropdown hanging off the panel
        header's branch chip ('panel'), or the card the composer chip opens on
        hover ('hover'). One at a time, never both with the panel. */
