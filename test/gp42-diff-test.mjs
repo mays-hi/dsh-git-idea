@@ -286,7 +286,8 @@ const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + 
    6. 勾选框在固定的一列；git 折叠掉的未跟踪目录也有行
    7. 点一下勾选框：立刻画出来，不会被迟到的读抹掉
    8. 树行的手势：单击只选中，双击或点三角才展开
-   9. 展开未跟踪目录的那一瞬间：读还没回来时列表是 undefined，不能崩 */
+   9. 展开未跟踪目录的那一瞬间：读还没回来时列表是 undefined，不能崩
+   10. 两个分组（默认变更列表 / 未跟踪的文件）和两个视图（树 / 扁平） */
 
 const L = function () {
   let out = ''
@@ -536,11 +537,21 @@ buttons(tree).find(function (b) { return textOf(b).indexOf('变更') >= 0 }).pro
 await wait(10)
 tree = await settle()
 
-const listRows = byClass(tree, 'dsh-git-trow').filter(function (r) { return String(r.props.className).indexOf('dsh-git-trow-head') < 0 })
+/* 分组标题（默认变更列表 / 未跟踪的文件）是树里的一行，但它不是文件：它没有勾选框，
+   所以「每个文件行的第一个孩子都是勾选框」这条把它排除在外，另有一条专门说它。 */
+const groupRows = byClass(tree, 'dsh-git-cgroup')
+const listRows = byClass(tree, 'dsh-git-trow').filter(function (r) {
+  const cls = String(r.props.className)
+  return cls.indexOf('dsh-git-trow-head') < 0 && cls.indexOf('dsh-git-cgroup') < 0
+})
 ok('每一行的第一个孩子都是勾选框（框在最左边一列）',
   listRows.length >= 4 && listRows.every(function (r) {
     const kids = r.props.children || []
     return kids.length > 0 && String(kids[0].props.className).indexOf('dsh-git-cbox') >= 0
+  }))
+ok('分组标题自己在，而且没有勾选框（它不是文件）',
+  groupRows.length === 2 && groupRows.every(function (r) {
+    return byClass(r, 'dsh-git-cbox').length === 0 && byClass(r, 'dsh-git-tw').length === 1
   }))
 ok('行自己不再带缩进（缩进是行内的空块，所以框不会被推着走）',
   listRows.every(function (r) { return r.props.style === undefined || r.props.style.paddingLeft === undefined }))
@@ -874,3 +885,124 @@ try {
 }
 ok('读回来之后文件行照常出现（那一帧只是中间态，不是终点）',
   afterCrash === null && changeRow(tree, 'a.txt') !== undefined && changeRow(tree, 'deep/b.txt') !== undefined)
+
+/* ── 10. 两个分组，两个视图 ──
+
+   IDEA 的提交窗不是一个「git 看到的东西」的大列表：它有一个变更列表（git 管着的
+   改动），下面另起一个 **Unversioned Files** 节点（git 还没见过的路径）。以前这个
+   面板把两者混在一棵树里 —— 未跟踪的目录就夹在被跟踪的目录中间，唯一能分辨的办法
+   是去读每一行的状态字母。
+
+   另一条轴是 IDEA 的另一个开关：按目录折叠的树，还是每个文件一行的扁平列表。同一批
+   行、同样的框、同样的手势，差别只在标签和缩进（扁平视图按路径排序）。 */
+
+console.log('')
+console.log('== 两组：默认变更列表 / 未跟踪的文件 ==')
+
+const groupTitleRow = function (t, label) {
+  return byClass(t, 'dsh-git-cgroup').filter(function (r) { return textOf(r).indexOf(label) >= 0 })[0]
+}
+/* 每个文件行属于哪一组：按行序走，遇到分组标题就换组 */
+const membersOf = function (t, label) {
+  const rows = byClass(t, 'dsh-git-trow')
+  const out = []
+  let current = ''
+  for (let i = 0; i < rows.length; i += 1) {
+    if (String(rows[i].props.className).indexOf('dsh-git-cgroup') >= 0) { current = textOf(rows[i]); continue }
+    if (current.indexOf(label) >= 0) out.push(textOf(rows[i]))
+  }
+  return out
+}
+const trackedDirRow = function (t) {
+  return byClass(t, 'dsh-git-trow').filter(function (r) {
+    return textOf(r).indexOf('个文件') >= 0 && String(r.props.className).indexOf('dsh-git-cgroup') < 0
+  })[0]
+}
+
+const groupTitles = byClass(tree, 'dsh-git-cgroup').map(function (r) { return textOf(r) })
+ok('两个分组都在，各带自己的条数（变更 2 / 未跟踪 2）', groupTitles.length === 2
+  && groupTitles[0].indexOf('默认变更列表') >= 0 && groupTitles[0].indexOf('2') >= 0
+  && groupTitles[1].indexOf('未跟踪的文件') >= 0 && groupTitles[1].indexOf('2') >= 0)
+ok('变更列表排在未跟踪的文件前面（IDEA 的顺序）', groupTitles.length === 2
+  && groupTitles[0].indexOf('默认变更列表') >= 0 && groupTitles[1].indexOf('未跟踪的文件') >= 0)
+
+const inTracked = membersOf(tree, '默认变更列表')
+const inUnversioned = membersOf(tree, '未跟踪的文件')
+ok('未跟踪的目录和未跟踪的文件都落在未跟踪这一组',
+  inUnversioned.some(function (x) { return x.indexOf('newdir/') >= 0 })
+  && inUnversioned.some(function (x) { return x.indexOf('tmp.bin') >= 0 }))
+ok('被跟踪的文件一个都不在未跟踪组里（以前它们混在一棵树里）',
+  inUnversioned.every(function (x) { return x.indexOf('app.js') < 0 && x.indexOf('notes.md') < 0 }))
+ok('目录树在变更列表这一组里', inTracked.some(function (x) { return x.indexOf('src') >= 0 })
+  && inTracked.some(function (x) { return x.indexOf('app.js') >= 0 }))
+ok('未跟踪目录里列出来的文件也算未跟踪组的（它们跟着自己的目录）',
+  inUnversioned.some(function (x) { return x.indexOf('a.txt') >= 0 }))
+
+console.log('')
+console.log('== 两个视图：树 / 扁平 ==')
+const viewBtn = function (t, label) {
+  return buttons(t).filter(function (b) {
+    return textOf(b) === label && String(b.props.className).indexOf('dsh-git-cview') >= 0
+  })[0]
+}
+/* 这一节剩下的断言都要点控件：分组或开关要是退回去了，这里该报 ✗ 而不是抛栈 ——
+   抛出去会把这一节剩下的断言一起带走，回归信号就只剩一个栈。 */
+const press = function (node, name, extra) {
+  if (node !== undefined && typeof node.props[name] === 'function') node.props[name](extra)
+}
+ok('工具条上有两个视图按钮', viewBtn(tree, '树') !== undefined && viewBtn(tree, '扁平') !== undefined)
+ok('默认是树视图（src/ 带条数的那一行在）',
+  trackedDirRow(tree) !== undefined && textOf(trackedDirRow(tree)).indexOf('src') >= 0)
+
+press(viewBtn(tree, '扁平'), 'onClick')
+await wait(10)
+tree = await settle()
+const flatTexts = byClass(tree, 'dsh-git-trow').map(function (r) { return textOf(r) })
+ok('扁平视图：目录行没有了（每个文件一行）', trackedDirRow(tree) === undefined)
+ok('扁平视图：文件行的名字是整条路径',
+  flatTexts.some(function (x) { return x.indexOf('src/app.js') >= 0 })
+  && flatTexts.some(function (x) { return x.indexOf('notes.md') >= 0 }))
+ok('扁平视图：按路径排序（notes.md 在 src/app.js 前面）',
+  flatTexts.findIndex(function (x) { return x.indexOf('notes.md') >= 0 })
+  < flatTexts.findIndex(function (x) { return x.indexOf('src/app.js') >= 0 }))
+ok('扁平视图：未跟踪目录行还在，展开的列表也给完整路径',
+  changeRow(tree, 'newdir/') !== undefined
+  && flatTexts.some(function (x) { return x.indexOf('newdir/a.txt') >= 0 }))
+ok('扁平视图里分组照样是两组', byClass(tree, 'dsh-git-cgroup').length === 2)
+
+const stored = JSON.parse(store['dsh.git-idea.settings'] || '{}')
+ok('视图选择被记住了（写进这个浏览器的偏好）', stored.changesView === 'flat')
+
+/* 重新挂载一遍：偏好是「记住」，不是「这一次会话里凑巧还在」 */
+fibers.clear()
+tree = await openPanel()
+buttons(tree).find(function (b) { return textOf(b).indexOf('变更') >= 0 }).props.onClick()
+await wait(10)
+tree = await settle()
+ok('重开面板仍然是扁平视图（偏好真的生效）',
+  trackedDirRow(tree) === undefined
+  && byClass(tree, 'dsh-git-trow').some(function (r) { return textOf(r).indexOf('src/app.js') >= 0 }))
+
+press(viewBtn(tree, '树'), 'onClick')
+await wait(10)
+tree = await settle()
+ok('切回树视图：目录行回来了', trackedDirRow(tree) !== undefined)
+ok('偏好跟着改回 tree', JSON.parse(store['dsh.git-idea.settings']).changesView === 'tree')
+
+console.log('')
+console.log('== 分组标题守同一条手势 ==')
+const unvTitle = groupTitleRow(tree, '未跟踪的文件')
+ok('分组标题给了「双击」提示', unvTitle !== undefined && String(unvTitle.props.title).indexOf('双击') > 0)
+press(unvTitle, 'onClick')
+await wait(10)
+tree = await settle()
+ok('单击分组标题：只选中，组里的行都还在',
+  changeRow(tree, 'tmp.bin') !== undefined
+  && groupTitleRow(tree, '未跟踪的文件') !== undefined
+  && String(groupTitleRow(tree, '未跟踪的文件').props.className).indexOf('dsh-git-trow-sel') >= 0)
+press(groupTitleRow(tree, '未跟踪的文件'), 'onDoubleClick')
+await wait(10)
+tree = await settle()
+ok('双击分组标题：这一组折起来（行不见了，标题还在）',
+  changeRow(tree, 'tmp.bin') === undefined && groupTitleRow(tree, '未跟踪的文件') !== undefined)
+ok('另一组不受影响（变更列表还在）', changeRow(tree, 'app.js') !== undefined)
