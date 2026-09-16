@@ -13,7 +13,7 @@ Host 侧另外注册了 8 个模型工具和 24 个 RPC。
 host.js              构建产物：Host 半侧（被桥读取并求值）—— 不要直接改
 client.js            构建产物：Client 半侧（被桥读取并求值）—— 不要直接改
 build.mjs            源码树 → 上面两个文件的按序拼接
-src/host/*.js        Host 源码片段（9 个）
+src/host/*.js        Host 源码片段（13 个）
 src/client/*.js      Client 源码片段（23 个）
 test/                断言套件 + 性能基准
 dsh-git-idea.json    （运行时生成）插件配置，默认 {initBranch:'main', cherryPickRecord:false}
@@ -24,16 +24,21 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 `build.mjs` 里那份清单顺序拼起来的结果，没有转译、没有打包、没有压缩 ——
 片段之间共享同一个作用域，和当初的单文件完全一样。改代码请改 `src/`。
 
+测试文件也是同一套道理：`test/gp3?-body.mjs` 加上 `test/gp37-harness.part`，
+由 `test/build-suites.mjs` 拼成真正被运行的 `test/gp3?-*-test.mjs`。**两个产物
+都有 `--check`**，而且是 `test/run-all.mjs` 在跑任何一条断言之前先问的。
+
 ## 常用命令
 
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（668 条断言）
+node test/run-all.mjs     # 全部套件（676 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
 node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）
 node test/build-suites.mjs# 改了 harness/body 之后重新拼出 gp37~gp42 与基准文件
+node test/build-suites.mjs --check   # 同上，只检查（run-all 也会先查这个）
 ```
 
 改了源码之后要让它生效：`node build.mjs`，然后把这个动态插件 **停止再运行**
@@ -41,36 +46,72 @@ node test/build-suites.mjs# 改了 harness/body 之后重新拼出 gp37~gp42 与
 
 ## 源码片段
 
-Host（`src/host/`）：
+一个片段 = 一件事。片段的边界不是「文件多大」，而是「这个功能从哪儿开始、到哪儿结束」，
+`build.mjs` 里那份顺序就是全部的结构：上面的片段可以被下面的用，反过来不行。
+
+Host（`src/host/`，13 个片段，2577 行）：
 
 | 片段 | 内容 |
 |---|---|
 | `00-plugin` | `return { apply(ctx) {` 与服务检查 |
-| `10-shell` | shell 原语、`git` / `gitNet` / `gitC` 三个调用姿势 |
+| `10-shell` | 原语：`shq` / `isStr` / `field`、cwd 与沙箱、`invoke`，以及 `git` / `gitNet` / `gitC` 三个调用姿势 |
 | `20-safety` | 只读子命令、受保护分支、`classify` 对 argv 的危险度判定 |
 | `30-render` | 工具返回值的人类可读渲染、`status --porcelain=v2` 解析 |
 | `40-tools` | 8 个模型工具的 `define` |
 | `50-graph` | 历史图的泳道布局：`layoutGraph`（不加过滤的读）和 `layoutVisible`（有过滤时按真实 DAG 排道，见「过滤之后的图：按真实历史排道」） |
-| `60-reads` | 每仓库读缓存、路径解析、panel/graph/refs/branches/commit-detail 的读与写，以及一个文件的差异（`git/diff`，四种状态）；panel/watch 都可以带 `paths`，按路径读而不是走整棵树 |
+| `60-reads` | 请求说的是哪个仓库（`sessionWorkdir` / `repoFrom` / `argsAt`），以及每仓库读缓存 `cached` / `invalidateRepo` |
+| `62-panel` | 身份读：`pathShell`、`panelIdentityCommand`、`repoHere`、半途操作；以及**按路径读**（`readPaths` / `pathspecSuffix`）和轮询签名 `watchCommand` |
+| `64-history` | panel 的那次读（`readPanel` / `readPanelIdentity` / `panelSnapshot`），以及历史图（`readGraph` / `graphTag` / `graphSnapshot`） |
+| `66-refs` | 作者、引用与分支：`readAuthors`、`readRefs`、`readBranches`、`trackCounts`、`previousBranch`、`switchBranch`（带着本地改动切分支） |
+| `68-detail` | 一个提交的详情、一个文件的差异（四种状态）、未跟踪目录里有什么，以及**唯一那条写路径** `panelMutate` |
 | `70-config` | 插件配置文件与 `init` |
 | `80-rpc` | 24 个 `onRpc(...)` 注册 |
 
-Client（`src/client/`）：
+Client（`src/client/`，23 个片段，5067 行）：
 
 | 片段 | 内容 |
 |---|---|
 | `00-plugin` | 服务与 React 能力垫片（`memo` / `useCallback` / `useLayoutEffect`） |
 | `10-state` | 唯一的 signal 工厂、唯一的 localStorage 出口、`rpc()` 与 `failureText()` |
-| `12-window` | 长列表的窗口化 |
+| `12-window` | 长列表的窗口化：`useVirtualWindow` 只画视口里的行，并按 id 记住滚动位置 |
 | `20-prefs` | 两层偏好：本浏览器 / 跟随插件 |
 | `30-watch` | 仓库变更轮询（面板 3s，chip 15s；深读只问面板交来的那些路径；页面隐藏时不轮询，切回页面立刻对一次） |
-| `40-format` … `62-branchstate` | 日期、状态、图标、树（`42-tree` 的折叠/展平、`44-twisty` 的三角）、缓存等无状态辅助；`40-format` 的 `addedInIndex()` 是「这个路径是新增吗」唯一那一处读法（分组和取消勾选都用它，见「勾一下，只动那一行」）；`54-changes` 是变更页（两组 + 树/扁平两个视图，开关在面板头部，见「变更页：两组，两个视图」；树行的手势见「树行的手势」一节） |
-| `52-detail` | 提交详情；以及 `mergeChanges` / `stageLocally` / `mergePanelStatus` / `pathsOfInterest` 这一组关于工作区快照的函数（未跟踪条目的两种形状都走同一个 `entryPath()`，见同名小节） |
+| `40-format` | 常量与格式化：行高 `ROW_H` / 泳道宽 `LANE_W` / 每页 `PAGE_COMMITS`、日期、状态字母与类名、引用名的拆分与分类，以及 `addedInIndex()`（「这个路径是新增吗」唯一那一处读法，分组和取消勾选都用它，见「勾一下，只动那一行」） |
+| `42-tree` | 树本身：`buildTree` 折叠、`countLeaves`、`annotateStaged`、`squeeze`、`flattenTree` 展平（纯数据，不碰 DOM），以及 `BranchIcon` |
+| `44-treerow` | 树行的两个零件：三角 `twisty`，以及目录行 `treeDirRow`（左侧引用树与提交的文件列表共用同一份，见「树行的手势」） |
+| `46-css` | 样式表：一个字符串，按页分成几段 |
+| `50-log` | 历史页：图 `GraphCanvas`、提交行 `CommitRow`、提交列表 `CommitList`、左侧引用树 `RefTree`（后三个都 `memo` 过） |
+| `52-detail` | 提交详情；以及 `mergeChanges` / `stageLocally` / `mergePanelStatus` / `pathsOfInterest` 这一组关于工作区快照的函数（两种条目形状都走同一个 `entryPath()`，见「未跟踪的条目有两种形状」） |
+| `54-changes` | 变更页：两组（默认变更列表 / 新增的文件）+ 两个视图（树 / 扁平），开关在面板头部 |
 | `55-diff` | 一个文件的差异：patch → 带两列行号的行、两段（已暂存 / 未暂存）、窗口化 |
+| `56-setup` | 不是仓库时的那一页：`RepoSetup` 与它能说清的那几种原因 |
+| `58-branchinfo` | 分支的说明文字（`commandDetail` / `branchRelative` / `trackTitle`）与切换器的记忆（最近用过、星标、排序） |
+| `60-icons` | 图标：内联 SVG 表 `ICON_PATHS`、`Icon`，以及输入框里那个 `clearable` |
+| `62-branchstate` | 跨组件共享的小状态与计时：`stopEvent`、分支列表的缓存 `rememberBranches`、悬浮卡的开关计时、chip 上那几行字 |
 | `70-branchpicker` | 分支切换器（含 IDEA 式子菜单） |
-| `80-panel` | 主面板；改动在这里排队（`panelBox.mutations`，见「勾一下，只动那一行」） |
-| `90-settings` / `92-chip` / `94-popover` | 设置页、输入框 chip、浮层 |
+| `80-panel` | 主面板：状态、读、改动队列（`panelBox.mutations`）、工具条与整棵元素树 |
+| `90-settings` | 设置页 |
+| `92-chip` | 输入框左侧的 chip：分支名、领先/落后、未提交数，以及每个仓库还没落地的操作 |
+| `94-popover` | 浮层的通用壳：测量位置、点外面关掉、Esc |
 | `98-register` | 四个 slot 的注册 |
+
+### 一次整理：抄了两遍的行、问了四十遍的问题、和一条没人跑过的检查
+
+包里的东西是长出来的，不是设计出来的 —— 每次都是「量到一个具体的毛病，修那一处」。
+攒到一定程度就值得回头看一遍，但整理也得有量出来的理由，不然只是把文件挪来挪去：
+
+| 量到了什么 | 处置 |
+|---|---|
+| `fields[n] === undefined ? '' : fields[n]` 这个惯用法在 Host 里写了 **43 遍**（40-tools 13、50-graph 7、读的三个片段 23）—— 其中 42 遍一模一样，第 43 遍是 stash 的日期，右边多套了一层 `.slice()` | 一句话问一次：`10-shell` 的 `field(split, index)`。43 处全部走它，之后没有第二处判据 |
+| 目录行（元素、类名、单击选中 / 双击折叠的手势、缩进公式）在 `50-log` 和 `52-detail` 各写了一遍，只有右边的条数不同 | `44-treerow` 一份构造，两个调用点。`44-twisty` 因此改名：它本来就是「树行的零件」 |
+| `60-reads.js` **1102 行**，里面是五件不相干的事（缓存 / 身份读 / panel 与图 / refs 与分支 / 详情与差异） | 拆成 `60` / `62` / `64` / `66` / `68`。**搬完之后 `host.js` 与搬之前只差 9 行插入、1 行删除** —— 全都是横幅注释和产物第一行的片段数，没有一行代码改动 |
+| 提交的文件列表在所有套件里拿到的都是**一层**的文件（`files: []`，或 gp42 里那一个 `new.txt`） | 它的目录行从没被画出来过。gp42 第 14 节给它一棵 `deep/inner/app.js`，钉住那行的类名、条数、逐层缩进、手势，以及「构造只有一份、调用点只有两个」|
+| 产物 `host.js` / `client.js` 有 `--check`，**生成的套件文件没有** | `build-suites.mjs --check` + `run-all.mjs` 两个都查。实测过的洞：往 `gp41-body` 里追加一条注定失败的断言，不改套件文件，`node test/gp41-watch-test.mjs` 照旧 **31 ✓ exit=0** —— 它跑的那个文件里根本没有这一行 |
+| `80-panel.js` **1143 行**，一个函数 | **没拆**。它的每一段（读、改动队列、拖拽、工具条、过滤条、几条横幅与提示条、整棵元素树）都闭包在同一份状态上；按行切开只能得到一个「跨两个文件才读得完的函数」，那是把导航变差而不是变好。它是一件事：主面板 |
+
+这次整理没有改任何一处行为：前三步跑完，668 条断言一条不落地还是绿的；搬片段
+那一步还额外验了产物的 diff。新加的是第 14 节那 8 条（护住刚统一的目录行）与
+`--check` 那条检查，一共 676 条。
 
 ## 界面：照 IDEA 的 Git Log 摆
 
@@ -386,7 +427,7 @@ File exists`。面板每点一个框就是一条 `git add`，所以快速连点�
 
 | 行 | 单击 | 双击 / 三角 | 钉在哪 |
 |---|---|---|---|
-| 目录行（变更树、提交详情的文件树） | 只选中 | 展开/折叠 | `gp42` 第 8 节 20 条 |
+| 目录行（历史页的引用树、变更树、提交详情的文件树） | 只选中 | 展开/折叠 | `gp42` 第 8 节 20 条 + 第 14 节 8 条 |
 | 未跟踪目录行（git 折叠掉的那种） | 只选中，**一次 `git/untracked` 都不发** | 读一次并列出文件 | 同上 |
 | 分支行（历史页左边） | 只选中 | 双击才把历史切到它 | `gp37` |
 | **分组标题（HEAD / 本地 / 远程 · x）** | 只选中 | 展开/折叠 | `gp37` 新增 11 条 |
@@ -394,8 +435,8 @@ File exists`。面板每点一个框就是一条 `git add`，所以快速连点�
 | **分组标题最左边的那个框** | 整组进/出索引（半选 → 全选） | —— | `gp42` 第 11 节 12 条 |
 
 第四行是这次唯一改掉的行为：它原来是整棵树里唯一「单击就折叠」的行 —— 点了树就动、选中
-却没动。现在它和目录行共用同一个三角控件（`44-twisty`，它自己会 `stopPropagation`，所以
-点三角不会顺手把选中挪过来）。
+却没动。现在它和目录行共用同一个三角控件（`44-treerow` 里的 `twisty`，它自己会
+`stopPropagation`，所以点三角不会顺手把选中挪过来）。
 
 两处刻意留着不动，因为它们没有「选中」这个状态可言：**文件行**的单击就是看差异（IDEA 的
 提交窗口也是选中即预览），**切换分支卡片**里的分组头是菜单项，单击折叠是它唯一的动作。
