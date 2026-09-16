@@ -1076,7 +1076,8 @@ textarea.dsh-git-input{resize:vertical}
    list: they cost no vertical space that way, and they stay reachable while the
    branch tree is scrolled. */
 .dsh-git-bs-head-acts{display:flex;align-items:center;flex-wrap:wrap;gap:4px;flex:none}
-.dsh-git-bs-chip{display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap}
+/* 图标按钮，不带文字：文字进了 title。宽度按图标定，几个按钮一排刚好和搜索框同高。 */
+.dsh-git-bs-chip{display:inline-flex;align-items:center;justify-content:center;gap:3px;height:22px;min-width:24px;padding:0 5px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap}
 .dsh-git-bs-chip:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l2)}
 .dsh-git-bs-chip-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-brand-primary)}
 .dsh-git-bs-chip:disabled{opacity:.45;cursor:default}
@@ -1097,14 +1098,16 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-git-bs-up{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .dsh-git-bs-ab{flex:none;font-size:11px;font-weight:600}
-.dsh-git-bs-star{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
-.dsh-git-bs-row:hover .dsh-git-bs-star{color:var(--dsw-alias-label-secondary)}
-.dsh-git-bs-star-on,.dsh-git-bs-row:hover .dsh-git-bs-star-on{color:var(--dsw-alias-state-warn-primary)}
-.dsh-git-bs-more{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
-.dsh-git-bs-row:hover .dsh-git-bs-more{color:var(--dsw-alias-label-secondary)}
+/* 收藏：一个按钮，指的是高亮那一行。选中态用 warn 色，和别处的「已收藏」一致。 */
+.dsh-git-bs-fav-on{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}
+.dsh-git-bs-glyph-star{width:13px;font-size:12px}
+/* 「这个分支能做的事」。原来和收藏并排、都是 border 色（几乎是看不见的），现在
+   它一个按钮独占行尾，用可读的次级色，hover 再亮一档并有一块底色。 */
+.dsh-git-bs-more{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dsh-git-bs-more:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dsh-git-bs-group{display:flex;align-items:center;gap:5px;padding:6px 8px 3px 6px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer;user-select:none}
 /* 动作 chip 的记号：和面板头部的同步组一样是字符（⇣ ↓ ↑ +），11px */
-.dsh-git-bs-glyph{display:inline-flex;align-items:center;justify-content:center;flex:none;width:11px;font-size:11px;line-height:1}
+.dsh-git-bs-glyph{display:inline-flex;align-items:center;justify-content:center;flex:none;width:13px;font-size:13px;line-height:1}
 /* 行首那一列：当前分支的 ★，和面板左栏的 twisty 槽同宽（10px） */
 .dsh-git-bs-cur{flex:none;width:10px;font-size:9px;line-height:1;text-align:center;color:var(--dsw-alias-label-secondary)}
 .dsh-git-bs-count{flex:none;color:var(--dsw-alias-border-l2)}
@@ -1988,7 +1991,6 @@ textarea.dsh-git-input{resize:vertical}
       const row = props.row
       const name = text(row.name)
       const isCurrent = props.current === true
-      const starred = props.starred === true
       const ahead = typeof row.ahead === 'number' ? row.ahead : 0
       const behind = typeof row.behind === 'number' ? row.behind : 0
       const upstream = text(row.upstream)
@@ -2016,19 +2018,14 @@ textarea.dsh-git-input{resize:vertical}
         ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
         upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
           : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
-        /* 收藏挪到行尾，和 › 并排：行首那一列留给「当前分支」，两处都用同一套
-           小图标按钮，不再让两个星号在同一个位置表示两件事。 */
-        h('button', {
-          key: 's', type: 'button',
-          className: 'dsh-git-bs-star' + (starred ? ' dsh-git-bs-star-on' : ''),
-          title: starred ? '取消收藏' : '收藏这个分支',
-          onClick: function (event) { props.onStar(name, event) },
-        }, h(Icon, { name: 'star', size: 12, filled: starred })),
+        /* 行尾只剩下「这个分支能做的事」。收藏挪到了上面那排动作里（一行一个
+           星，浅底上几乎看不见；而且它和行首表示「当前分支」的 ★ 是两个意思，
+           挤在同一行里更容易读错）。 */
         h('button', {
           key: 'm', type: 'button', className: 'dsh-git-bs-more',
           title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
           onClick: function (event) { props.onMenu(props.rowKey, event) },
-        }, h(Icon, { name: 'right', size: 12 })))
+        }, h(Icon, { name: 'right', size: 14 })))
     }
     const BranchRowMemo = memo(BranchRow)
 
@@ -2323,7 +2320,14 @@ textarea.dsh-git-input{resize:vertical}
         if (collapsed[groups[g].id] === true) continue
         for (let i = 0; i < groups[g].rows.length; i += 1) {
           navAt.set(groups[g].rows[i], nav.length)
-          nav.push({ kind: 'row', row: groups[g].rows[i], remote: groups[g].remote, group: groups[g].id })
+          const rowName = text(groups[g].rows[i].name)
+          nav.push({
+            kind: 'row', row: groups[g].rows[i], remote: groups[g].remote, group: groups[g].id,
+            /* The highlight is an index, the list is re-ordered by favourites and
+               sort order, and a row that moves takes its index with it. The key is
+               how the panel finds the same row again afterwards. */
+            key: (groups[g].remote === true ? 'r:' : 'l:') + rowName,
+          })
         }
       }
 
@@ -2345,7 +2349,6 @@ textarea.dsh-git-input{resize:vertical}
       const [live] = React.useState(function () { return {} })
       live.setIndex = setIndex
       live.choose = choose
-      live.toggleStar = toggleStar
       live.rowTop = rowTop
       live.flyOpenSoon = flyOpenSoon
       live.flyCloseSoon = flyCloseSoon
@@ -2364,10 +2367,6 @@ textarea.dsh-git-input{resize:vertical}
            hovering. */
         if (isCurrent === true) { live.flyPin(rowKey, live.rowTop(event)); return }
         live.choose(name, live.stash)
-      }, [])
-      const onRowStar = useCallback(function (name, event) {
-        stopEvent(event)
-        live.toggleStar(name)
       }, [])
       const onRowMenu = useCallback(function (rowKey, event) {
         stopEvent(event)
@@ -2422,13 +2421,31 @@ textarea.dsh-git-input{resize:vertical}
 
       /* The chips own the same nav slots the action rows used to, so arrow-key
          order still runs top to bottom: chips, then every visible group row. */
+      /* 收藏哪一个：列表里当前高亮的那一行。跟着指针/键盘走，所以「不切过去
+         也能收藏」这条能力还在，而按钮只有一个。 */
+      const picked = nav[index] !== undefined && nav[index].kind === 'row' ? nav[index] : null
+      const pickedName = picked === null ? '' : text(picked.row.name)
+      const pickedStarred = pickedName.length > 0 && starredBranches.indexOf(pickedName) >= 0
+      const pickedKey = picked === null ? '' : text(picked.key)
+      /* 收藏会把那一行排到最前面，而高亮记的是序号：不按名字重新对一次，收藏完
+         高亮就落到别的分支上 —— 这个按钮（还有下面展开的那一栏）跟着改了主语。 */
+      const [reveal, setReveal] = React.useState(null)
+      React.useEffect(function () {
+        if (reveal === null) return
+        for (let i = 0; i < nav.length; i += 1) {
+          if (nav[i].kind === 'row' && nav[i].key === reveal) { setIndex(i); break }
+        }
+        setReveal(null)
+      })
+
       const chips = []
       for (let i = 0; i < actions.length; i += 1) {
         const def = actions[i]
         const on = nav[index] !== undefined && nav[index].kind === 'action' && nav[index].def === def
+        /* 只留记号（⇣/↓/↑/+），文字进了 title：面板头部那几个 tool 就是这么画
+           的，两处一致，也省下一整行宽度。 */
         const parts = [
           h('span', { key: 'i', className: 'dsh-git-bs-glyph' }, def.glyph),
-          h('span', { key: 'n', className: 'dsh-git-bs-name' }, def.short),
         ]
         /* 面板那几个 tool 的角标就是一个数字药丸，这里也照那个样子：记号已经
            是 ⇣/↓/↑ 了，角标再带一个箭头就成了「↓拉取↓1」。 */
@@ -2444,6 +2461,20 @@ textarea.dsh-git-input{resize:vertical}
           onClick: function (event) { stopEvent(event); def.run() },
         }, parts))
       }
+      chips.push(h('button', {
+        key: 'a:fav', type: 'button',
+        className: 'dsh-git-bs-chip dsh-git-bs-fav' + (pickedStarred ? ' dsh-git-bs-fav-on' : ''),
+        title: pickedName.length === 0
+          ? '把鼠标停在一个分支上（或用键盘移过去），这里就是收藏它的按钮'
+          : (pickedStarred ? '取消收藏 ' : '收藏 ') + pickedName,
+        disabled: pickedName.length === 0 || busy === true,
+        onClick: function (event) {
+          stopEvent(event)
+          if (pickedName.length === 0) return
+          toggleStar(pickedName)
+          setReveal(pickedKey)
+        },
+      }, h('span', { key: 'i', className: 'dsh-git-bs-glyph dsh-git-bs-glyph-star' }, pickedStarred ? '★' : '☆')))
       const items = []
 
       /* 分组头那一行的折叠：箭头和整行点哪都算。箭头本身是面板左栏那个 twisty，
@@ -2485,13 +2516,11 @@ textarea.dsh-git-input{resize:vertical}
             at: at,
             active: at >= 0 && at === index,
             current: row.current === true,
-            starred: starredBranches.indexOf(name) >= 0,
             busy: busy === true,
             flying: fly !== null && fly.key === rowKey,
             onEnter: onRowEnter,
             onLeave: onRowLeave,
             onPick: onRowClick,
-            onStar: onRowStar,
             onMenu: onRowMenu,
           }))
         }

@@ -93,9 +93,12 @@ const rows = (t) => byClass(t, 'dsh-git-bs-row')
 /* 仓库级操作已改成列表上方的 chip 条，.dsh-git-bs-row 现在只剩分支行 */
 const branchRows = (t) => rows(t)
 const chips = (t) => byClass(t, 'dsh-git-bs-chip')
+/* 收藏按钮也在同一排里，但它不是「仓库动作」，筛选动不了它 */
+const actionChips = (t) => chips(t).filter((c) => String(c.props.className).indexOf('dsh-git-bs-fav') < 0)
 const head = (t) => byClass(t, 'dsh-git-bs-head')[0]
 const headActs = (t) => byClass(t, 'dsh-git-bs-head-acts')[0]
-const chipWith = (t, label) => chips(t).find((c) => textOf(c).indexOf(label) >= 0)
+/* 记号按钮没有文字了，按 title 找（title 就是原来那行说明） */
+const chipWith = (t, label) => chips(t).find((c) => textOf(c).indexOf(label) >= 0 || String(c.props.title).indexOf(label) >= 0)
 const sortBtn = (t) => byClass(t, 'dsh-git-bs-sort')[0]
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
 const groups = (t) => byClass(t, 'dsh-git-bs-group')
@@ -252,6 +255,11 @@ console.log('== 操作区（IDEA 的 Update/Commit/Push 那一栏，chip 化）=
 const strip = chips(tree)
 console.log('  操作 chip:', JSON.stringify(strip.map(textOf)))
 console.log('  chip title:', JSON.stringify(strip.map((c) => c.props.title)))
+const stripText = strip.map(textOf).join('|')
+console.log('  strip 文本:', JSON.stringify(stripText))
+ok('chip 只有记号，没有文字（角标是数字，留着）',
+  strip.length === 5 && stripText.indexOf('⇣') === 0 && stripText.search(/[\u4e00-\u9fa5]/) < 0
+  && ['☆', '★'].indexOf(textOf(strip[4])) >= 0)
 ok('有 获取/拉取/推送 三个 chip', ['获取', '拉取', '推送'].every((l) => chipWith(tree, l) !== undefined))
 ok('「回到上一个分支」的 chip 已经去掉了', chipWith(tree, '回到') === undefined && chipWith(tree, '上一个分支') === undefined)
 ok('有「新建分支」chip', chipWith(tree, '新建分支') !== undefined)
@@ -333,9 +341,16 @@ ok('能切回按最近提交', store['dsh.git-idea.sort'] === 'recent')
 
 console.log('')
 console.log('== 收藏：星标置顶 ==')
-const soloRow = rowWith(tree, 'solo')
-const starBtn = collect(soloRow).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('dsh-git-bs-star') >= 0)
-starBtn.props.onClick({ stopPropagation() {} })
+/* 收藏的按钮在头部那排动作里，指的是列表里高亮的那一行 —— 先把高亮移到 solo */
+const favBtn = (t) => {
+  const acts = byClass(t, 'dsh-git-bs-head-acts')[0]
+  return acts === undefined ? undefined : buttons(acts).find((b) => String(b.props.className).indexOf('dsh-git-bs-fav') >= 0)
+}
+rowWith(tree, 'solo').props.onMouseEnter({ currentTarget: { offsetTop: 60 }, button: 0 })
+await wait(10)
+tree = await settle('pop')
+ok('收藏按钮此时说的是 solo', String(favBtn(tree).props.title).indexOf('solo') > 0)
+favBtn(tree).props.onClick({ stopPropagation() {} })
 await wait(10)
 tree = await settle('pop')
 ok('写进了 dsh.gitops.stars', (store['dsh.git-idea.stars'] || '').indexOf('solo') >= 0)
@@ -362,12 +377,12 @@ let box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'push' } })
 await wait(10)
 tree = await settle('pop')
-ok('输入 push 只剩推送 chip', chips(tree).length === 1 && textOf(chips(tree)[0]).indexOf('推送') >= 0)
+ok('输入 push 只剩推送 chip', actionChips(tree).length === 1 && String(actionChips(tree)[0].props.title).indexOf('push') >= 0)
 box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: '拉取' } })
 await wait(10)
 tree = await settle('pop')
-ok('输入「拉取」命中拉取 chip（中文短标签也能搜）', chips(tree).length === 1 && textOf(chips(tree)[0]).indexOf('拉取') >= 0)
+ok('输入「拉取」命中拉取 chip（中文短标签也能搜）', actionChips(tree).length === 1 && String(actionChips(tree)[0].props.title).indexOf('拉取') >= 0)
 box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'feat' } })
 await wait(10)
@@ -458,7 +473,7 @@ host.call = realCall
 console.log('')
 console.log('== 新建分支（内联输入）==')
 let t3 = await settle('pop')
-const newAction = chips(t3).find((r) => textOf(r).indexOf('新建分支') >= 0)
+const newAction = chips(t3).find((r) => String(r.props.title).indexOf('新建分支') >= 0)
 newAction.props.onClick({ stopPropagation() {} })
 await wait(10)
 t3 = await settle('pop')

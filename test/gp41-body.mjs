@@ -173,3 +173,67 @@ await wait(60)
 const clean = await renderUntilStable(makeElement(chip, { sessionId: 's-3' }), 'chip-s3')
 ok('改动清零后徽标消失', badgeOf(clean).length === 0)
 ok('tooltip 这时才说工作区干净', String(clean.props.title).indexOf('工作区干净') >= 0)
+
+console.log('')
+console.log('=== 一个页面里的两个会话：各自轮询自己的工作区 ===')
+/* 没有应用过仓库时，轮询问的是「这个会话自己的工作区」，而每个面板和 chip 都是
+   从这个状态开始的。按仓库路径当键的时候，这个状态只有一个条目：两个会话先后
+   把自己的 id 写进去，最后一个赢 —— 另一个会话于是去轮询别人的工作区，自己改
+   了看不见，别人改了自己重读。键里带上会话，一个 tick 就该问出两个 id。 */
+const beforeTwo = calls.length
+await renderUntilStable(makeElement('div', null,
+  makeElement(chip, { sessionId: 's-A', key: 'a' }),
+  makeElement(chip, { sessionId: 's-B', key: 'b' })), 'two-chips')
+tick()
+await wait(40)
+const askedSessions = since(beforeTwo).filter((c) => c.method === 'git/watch').map((c) => c.args.sessionId)
+console.log('  这一轮问过的会话:', JSON.stringify(askedSessions))
+ok('两个会话各问各的（不是同一个 id 问两遍）',
+  askedSessions.indexOf('s-A') >= 0 && askedSessions.indexOf('s-B') >= 0)
+
+console.log('')
+console.log('=== 轮询的监听者按「注册」记，不按「回调函数」记 ===')
+/* chip 和面板要的是同一个回调（bumpData），而以回调为键的 Set 会把两次注册并成
+   一条：先注销的那个把另一个的通知、以及以「还有没有人在看」为准的定时器一起带走。
+   面板不再认为这是仓库时必然如此；只是关掉面板时，谁先谁后取决于浏览器里两个 slot
+   root 的清理顺序，所以在真实使用里是「有时候」——面板反应过来了，对话框上的图标
+   一直不动。两个 root 的清理顺序在 mock-React 里复现不出来，所以这条守源码。 */
+const CLIENT_SRC = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+ok('每个注册有自己的键（token），注销只注销自己那一个',
+  CLIENT_SRC.indexOf('entry.listeners.set(token, listener)') >= 0
+  && CLIENT_SRC.indexOf('entry.listeners.delete(token)') >= 0
+  && CLIENT_SRC.indexOf('entry.listeners.add(listener)') < 0
+  && CLIENT_SRC.indexOf('entry.listeners.delete(listener)') < 0)
+ok('通知时把每个注册的回调都调一遍',
+  CLIENT_SRC.indexOf('entry.listeners.forEach(function (listener) { listener() })') >= 0)
+
+console.log('')
+console.log('=== 面板里打开另一个目录之后，chip 要看的是那个目录 ===')
+/* chip 的读和轮询都拿「会话自己的工作区」当入参，而这个入参以前不随面板里应用的
+   目录变化：面板已经在新仓库上按 3 秒轮询，chip 还在问一个不是仓库的目录，签名
+   永远不变 —— 面板反应过来了，对话框上的图标一直不动。 */
+/* 上面那一段把 host.call 换成了它自己的 git/panel 回答（都是「是仓库」）。这里
+   再套一层：这个会话自己的工作区不是仓库，而面板里打开的目录是 —— 这正是用户在
+   引导页上「打开这个目录」之后的状态。 */
+const beforeSetup = host.call
+const SETUP_REPLY = { ok: false, repo: '/tmp/applied', error: 'not-a-repository', reason: 'not-a-repo', stderr: '', staged: [], unstaged: [], untracked: [], unmerged: [] }
+host.call = function (method, args) {
+  if (method !== 'git/panel') return beforeSetup(method, args)
+  if (args != null && args.repo === '/tmp/applied') return Promise.resolve(Object.assign({}, OK_PANEL, { repo: '/tmp/applied' }))
+  if (args != null && args.repo !== undefined) return beforeSetup(method, args)
+  return Promise.resolve(SETUP_REPLY)
+}
+const forSetup = await chipTree()
+if (forSetup.props.className.indexOf('dsh-git-chip-open') < 0) { forSetup.props.onClick(); await wait(20) }
+const notRepo = await settle('setup-again')
+const openHere = byClass(notRepo, 'dsh-git-btn').find((b) => textOf(b) === '打开这个目录')
+console.log('  引导页上有「打开这个目录」:', openHere !== undefined)
+openHere.props.onClick()
+await wait(30)
+await chipTree()
+mark = calls.length
+tick()
+await wait(40)
+const askedAfterApply = since(mark).filter((c) => c.method === 'git/watch').map((c) => c.args)
+console.log('  chip 这一轮问的入参:', JSON.stringify(askedAfterApply))
+ok('chip 轮询的是面板里打开的那个目录', askedAfterApply.some((a) => a.repo === '/tmp/applied'))

@@ -441,12 +441,22 @@ const hoverB = await settle()
 ok('高亮跟着鼠标换到 zeta', byClass(hoverB, 'dsh-git-bs-row-on').length === 1 && textOf(byClass(hoverB, 'dsh-git-bs-row-on')[0]).indexOf('zeta') >= 0)
 ok('换行时 memo 跳过了其余分支行', memoSkips > skipsBeforeHover)
 
-/* 记忆的行要跟着状态走：收藏一颗星，只有那一行该变 */
-const star = buttons(rowWith(hoverB, 'zeta')).find((b) => String(b.props.className).indexOf('dsh-git-bs-star') >= 0)
-star.props.onClick({ stopPropagation() {}, preventDefault() {} })
+/* 收藏的按钮现在只有一个，在头部那排动作里，指的是高亮那一行 */
+const favIn = (t) => {
+  const acts = byClass(t, 'dsh-git-bs-head-acts')[0]
+  return acts === undefined ? undefined : buttons(acts).find((b) => String(b.props.className).indexOf('dsh-git-bs-fav') >= 0)
+}
+const favBefore = favIn(hoverB)
+console.log('  收藏按钮 title:', JSON.stringify(favBefore.props.title))
+ok('收藏按钮说的是高亮那一行', String(favBefore.props.title).indexOf('zeta') > 0 && favBefore.props.disabled !== true)
+favBefore.props.onClick({ stopPropagation() {}, preventDefault() {} })
 await wait(20)
 const starred = await settle()
-ok('收藏后只有该行亮起星标', byClass(starred, 'dsh-git-bs-star-on').length === 1 && byClass(rowWith(starred, 'zeta'), 'dsh-git-bs-star-on').length === 1)
+const favAfter = favIn(starred)
+ok('点一下就收藏了那一行（按钮自己变成已收藏）', String(favAfter.props.className).indexOf('dsh-git-bs-fav-on') >= 0)
+ok('收藏之后高亮还在同一个分支上（按钮的主语没有跟着排序跑）',
+  String(favAfter.props.title).indexOf('zeta') > 0 && byClass(starred, 'dsh-git-bs-row-on').length === 1
+  && textOf(byClass(starred, 'dsh-git-bs-row-on')[0]).indexOf('zeta') >= 0)
 
 /* ── 弹层里的记号要和面板左栏同一套 ──
 
@@ -473,16 +483,21 @@ ok('分组头里不再有自画的 SVG 箭头', group !== undefined && collect(g
 const chipsRow = byClass(starred, 'dsh-git-bs-head-acts')[0]
 const chipTexts = (chipsRow === undefined ? [] : buttons(chipsRow)).map((b) => textOf(b))
 console.log('  动作 chip:', JSON.stringify(chipTexts))
+ok('动作 chip 只有记号，没有文字（文字在 title 里；角标是数字，留着）',
+  chipTexts.length === 5 && chipTexts[0] === '⇣' && chipTexts[1].indexOf('↓') === 0 && chipTexts[2].indexOf('↑') === 0
+  && chipTexts[3] === '+' && ['☆', '★'].indexOf(chipTexts[4]) >= 0
+  && chipTexts.join('').search(/[\u4e00-\u9fa5]/) < 0)
 ok('动作 chip 用的是面板那几个字符，不是另画一套 SVG',
-  chipTexts.length === 4 && chipTexts.join('|').indexOf('⇣获取') === 0 && chipTexts.join('|').indexOf('+新建分支') > 0)
-ok('动作 chip 里没有 SVG', chipsRow !== undefined && collect(chipsRow).filter((n) => n.type === 'svg').length === 0)
+  chipsRow !== undefined && collect(chipsRow).filter((n) => n.type === 'svg').length === 0)
+ok('收藏按钮就在这排动作里', favIn(starred) !== undefined)
 
-const starBtn = buttons(rowWith(starred, 'zeta')).find((b) => String(b.props.className).indexOf('dsh-git-bs-star') >= 0)
 const zetaRow = rowWith(starred, 'zeta')
 const kids = zetaRow.props.children
 const nameAt = kids.findIndex((c) => String(c.props.className || '').indexOf('dsh-git-bs-name') >= 0)
-const starAt = kids.findIndex((c) => String(c.props.className || '').indexOf('dsh-git-bs-star') >= 0)
-ok('收藏星挪到行尾（行首那一列留给「当前分支」）', starBtn !== undefined && starAt > nameAt)
+const moreAt = kids.findIndex((c) => String(c.props.className || '').indexOf('dsh-git-bs-more') >= 0)
+ok('行里不再有星标按钮（收藏已经搬到上面那排）',
+  buttons(zetaRow).every((b) => String(b.props.className).indexOf('dsh-git-bs-star') < 0))
+ok('行尾那一个按钮是「这个分支能做的事」，在名字后面', moreAt > nameAt)
 
 /* 记忆的行也要跟着筛选走：列表变了，内容必须跟着变 */
 const filter = inputs(starred).find((n) => n.props.className !== undefined && String(n.props.className).indexOf('dsh-git-bs-search') >= 0)
