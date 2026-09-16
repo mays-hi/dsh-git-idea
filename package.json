@@ -1,0 +1,59 @@
+{
+  "name": "dsh-git-idea",
+  "version": "0.1.0",
+  "description": "A git panel inside the DSH session: a repository chip in the composer, a panel with the branch tree, commit graph, working tree and commit detail, a Settings page, and 8 git model tools.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.1"
+  },
+  "scripts": {
+    "build": "node build.mjs && node build-package.mjs",
+    "check": "node build.mjs --check && node build-package.mjs --check",
+    "test": "node test/run-all.mjs",
+    "prepack": "node build.mjs && node build-package.mjs"
+  },
+  "author": "mays-hi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mays-hi/dsh-git-idea.git"
+  },
+  "homepage": "https://github.com/mays-hi/dsh-git-idea#readme",
+  "bugs": {
+    "url": "https://github.com/mays-hi/dsh-git-idea/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "git",
+    "ui",
+    "commit-graph"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  }
+}
