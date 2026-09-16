@@ -64,6 +64,25 @@
           h('div', { className: 'dsh-git-msg' }, fullMessage)))
     }
 
+    /* ── one path, two shapes ──
+
+       git's untracked list reaches this half as objects (`{path, code}`) most of
+       the time — that is what the Host builds — but a bare string is still a
+       legal entry, and `mergeChanges` has always accepted both. The two helpers
+       that walk those lists did not: they read `entry.path` straight off, which
+       is `undefined` on a string, so a pathspec answer could never drop a string
+       entry from the snapshot on screen. The row stayed there *beside* the staged
+       file it had just become (measured: ticking an untracked directory left its
+       collapsed row in 未跟踪的文件 while its files sat staged in the changelist,
+       and the count said 6 files when the boxes said 5), and `pathsOfInterest`
+       silently answered "nothing to ask about" for a tree of nothing but
+       untracked paths, which turned the cheap pathspec read back into a whole-tree
+       `git status`. One reader, so the shapes cannot drift apart again. */
+    function entryPath(entry) {
+      if (typeof entry === 'string') return entry
+      return entry == null ? '' : text(entry.path)
+    }
+
     /* ── the tick, before git has answered ──
 
        Staging one path is a tenth of a second of git (`git add`: 98–236ms on the
@@ -89,7 +108,7 @@
       }
       const drop = function (entries, path) {
         for (let i = entries.length - 1; i >= 0; i -= 1) {
-          const other = text(entries[i].path)
+          const other = entryPath(entries[i])
           /* A directory git collapsed answers for everything under it too. */
           if (other === path || (path.slice(-1) === '/' && other.indexOf(path) === 0)) entries.splice(i, 1)
         }
@@ -146,7 +165,7 @@
       const keep = function (value) {
         const entries = Array.isArray(value) ? value : []
         const out = []
-        for (let i = 0; i < entries.length; i += 1) if (!covered(text(entries[i].path))) out.push(entries[i])
+        for (let i = 0; i < entries.length; i += 1) if (!covered(entryPath(entries[i]))) out.push(entries[i])
         return out
       }
       const list = function (value) { return Array.isArray(value) ? value : [] }
@@ -182,7 +201,7 @@
       for (let i = 0; i < lists.length; i += 1) {
         const entries = Array.isArray(lists[i]) ? lists[i] : []
         for (let k = 0; k < entries.length; k += 1) {
-          const path = text(entries[k].path)
+          const path = entryPath(entries[k])
           if (path.length === 0) continue
           const bare = path.slice(-1) === '/' ? path.slice(0, -1) : path
           add(bare)
@@ -212,11 +231,7 @@
       const unstaged = list(work.unstaged)
       for (let i = 0; i < unstaged.length; i += 1) put(text(unstaged[i].path), { workCode: text(unstaged[i].code) })
       const untracked = list(work.untracked)
-      for (let i = 0; i < untracked.length; i += 1) {
-        const entry = untracked[i]
-        const path = typeof entry === 'string' ? entry : text(entry.path)
-        put(path, { workCode: '??', untracked: true })
-      }
+      for (let i = 0; i < untracked.length; i += 1) put(entryPath(untracked[i]), { workCode: '??', untracked: true })
       const unmerged = list(work.unmerged)
       for (let i = 0; i < unmerged.length; i += 1) put(text(unmerged[i].path), { workCode: text(unmerged[i].code), conflict: true })
       const out = []

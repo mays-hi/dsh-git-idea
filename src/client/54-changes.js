@@ -105,6 +105,31 @@
           h('span', { key: 'b' }, parts.base),
           h('span', { key: 'd', className: 'dsh-git-tpath' }, parts.dir))
       }
+      /* ── what the boxes are, and how many of them there are ──
+
+         A row is not always a file: git collapses an untracked directory into one
+         entry ending in "/", and that entry is one box standing for however many
+         files are underneath it. Calling it "1 个文件" is what made the numbers
+         disagree with the column of boxes — the panel said "未跟踪的文件 7 个文件"
+         about four files and three directories, and "共 10 个文件" about the ten
+         boxes on screen, and staging those three directories would have reported
+         "已暂存 3 个文件" for a whole subtree. So the two are counted apart, and
+         the staged fraction counts **项** — the things the boxes actually are. */
+      const kindOf = function (entries) {
+        let files = 0
+        let dirs = 0
+        for (let i = 0; i < entries.length; i += 1) {
+          if (text(entries[i].path).slice(-1) === '/') dirs += 1
+          else files += 1
+        }
+        return { files: files, dirs: dirs }
+      }
+      const countText = function (kind) {
+        if (kind.dirs === 0) return String(kind.files) + ' 个文件'
+        if (kind.files === 0) return String(kind.dirs) + ' 个目录'
+        return String(kind.files) + ' 个文件 + ' + String(kind.dirs) + ' 个目录'
+      }
+
       const rowClass = function (key, extra) {
         return 'dsh-git-trow' + (extra === undefined ? '' : ' ' + extra)
           + (props.selectedKey === key ? ' dsh-git-trow-sel' : '')
@@ -245,10 +270,17 @@
       }
 
       /* A group title is a row of the tree, so it obeys the tree's gesture:
-         one click selects, the double click or the twisty folds. It has no box
-         of its own — IDEA's changelist node has none either; whole-group work is
-         what the two buttons in the commit pane are for. */
-      const groupTitle = function (label, key, count, hint) {
+         one click selects, the double click or the twisty folds. Its box is the
+         group's own — IDEA's changelist node carries one too — and it sits in the
+         same left gutter as every file row's, because it is the same act one
+         level up: tick it and the whole changelist goes into the index, untick it
+         and it comes back out. The untracked group's entries are by definition
+         never staged, so its box only ever reads empty. */
+      const groupTitle = function (label, key, hint, entries) {
+        let staged = 0
+        for (let i = 0; i < entries.length; i += 1) if (entries[i].staged === true) staged += 1
+        const allStaged = entries.length > 0 && staged === entries.length
+        const someStaged = staged > 0 && staged < entries.length
         return h('div', {
           className: rowClass(key + ':title', 'dsh-git-cgroup'),
           key: key + ':title',
@@ -256,9 +288,12 @@
           onClick: function () { props.onSelect(key + ':title') },
           onDoubleClick: function () { props.onToggle(key) },
         },
+          stageBox('box', allStaged ? 'all' : (someStaged ? 'some' : 'none'),
+            allStaged ? '把这一组全部撤出索引' : '把这一组全部暂存',
+            function () { props.onSetStaged(entries, !allStaged) }),
           twisty({ collapsed: props.collapsed[key] === true, onToggle: function () { props.onToggle(key) } }),
           h('span', { className: 'dsh-git-tname' }, label),
-          h('span', { className: 'dsh-git-tdim' }, String(count) + ' 个文件'))
+          h('span', { className: 'dsh-git-tdim' }, countText(kindOf(entries))))
       }
 
       const rows = []
@@ -269,17 +304,25 @@
       for (let g = 0; g < groups.length; g += 1) {
         const group = groups[g]
         if (group.entries.length === 0) continue
-        rows.push(groupTitle(group.label, group.key, group.entries.length, group.hint))
+        rows.push(groupTitle(group.label, group.key, group.hint, group.entries))
         if (props.collapsed[group.key] === true) continue
         rows.push.apply(rows, view === 'flat' ? flatRows(group.entries, group.key) : treeRows(group.entries, group.key))
       }
 
-      const stagedCount = props.stagedCount
+      const stagedEntries = []
+      for (let i = 0; i < changes.length; i += 1) if (changes[i].staged === true) stagedEntries.push(changes[i])
+      const stagedCount = stagedEntries.length
       const totalChanges = changes.length
+      const allKind = kindOf(changes)
       const canCommit = props.busy !== true && props.message.trim().length > 0 && totalChanges > 0
+      /* The count and the button say 项 because that is what the boxes are; the
+         breakdown of files against directories is in the tooltip and on the group
+         titles, where each number belongs to the rows under it. */
+      const kindsTitle = countText(allKind)
+        + (allKind.dirs > 0 ? '；目录要展开才知道里面有多少文件' : '')
       const label = stagedCount > 0
-        ? ('提交 ' + String(stagedCount) + ' 个文件')
-        : ('全部暂存并提交（' + String(totalChanges) + '）')
+        ? ('提交 ' + countText(kindOf(stagedEntries)))
+        : ('全部暂存并提交（' + String(totalChanges) + ' 项）')
 
       const side = h('div', { className: 'dsh-git-commitpane' },
         h('div', { className: 'dsh-git-group-title' }, '提交信息'),
@@ -290,7 +333,8 @@
           value: props.message,
           onChange: function (event) { props.onMessage(event.target.value) },
         }), props.message.length > 0, function () { props.onMessage('') }, 'dsh-git-clearable-area'),
-        h('div', { className: 'dsh-git-dim' }, '已暂存 ' + String(stagedCount) + ' / 共 ' + String(totalChanges) + ' 个文件'),
+        h('div', { key: 'k', className: 'dsh-git-dim', title: kindsTitle },
+          '已暂存 ' + String(stagedCount) + ' / 共 ' + String(totalChanges) + ' 项'),
         h('button', {
           type: 'button',
           className: 'dsh-git-btn dsh-git-primary',

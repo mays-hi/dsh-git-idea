@@ -1030,7 +1030,6 @@
           collapsed: collapsed,
           busy: busy,
           message: message,
-          stagedCount: stagedCount,
           selectedKey: selectedKey,
           onToggle: toggle,
           onSelect: function (key) { setSelectedKey(key) },
