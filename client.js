@@ -388,7 +388,6 @@ return {
       return {
         first: first,
         last: last,
-        windowed: win !== null,
         measure: measure,
         attach: attach,
       }
@@ -495,10 +494,14 @@ return {
       })
     }
 
-    function savePluginConfig(next) {
-      pluginConfig = normalizePluginConfig(next)
-      pluginConfigError = ''
-      pluginConfigSignal.notify()
+    /* What is on screen is the draft and updates at once; the file follows when
+       the typing stops. Every keystroke of a branch name used to be its own RPC
+       and its own write of the config file, and the settings page asks for one on
+       each `onChange`. */
+    const CONFIG_SAVE_MS = 400
+    let configSaveTimer = null
+
+    function writePluginConfig() {
       callHost('git/config-save', { config: pluginConfig }).then(function (result) {
         if (result == null || result.ok !== true) {
           pluginConfigError = text(result != null ? result.error : '') || '保存失败'
@@ -510,6 +513,19 @@ return {
         pluginConfigError = failureText(failure)
         pluginConfigSignal.notify()
       })
+    }
+
+    function savePluginConfig(next) {
+      pluginConfig = normalizePluginConfig(next)
+      pluginConfigError = ''
+      pluginConfigSignal.notify()
+      if (configSaveTimer != null) { configSaveTimer(); configSaveTimer = null }
+      const timer = ctx.get('timer')
+      if (timer === undefined) { writePluginConfig(); return }
+      configSaveTimer = timer.timeout(function () {
+        configSaveTimer = null
+        writePluginConfig()
+      }, CONFIG_SAVE_MS)
     }
     /* ── change monitoring ──
 
@@ -523,11 +539,26 @@ return {
     const repoWatchers = {}
     let watchPageDoc = null
 
-    function watcherFor(repo) {
-      if (repoWatchers[repo] === undefined) {
-        repoWatchers[repo] = { listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false, sessionId: undefined }
+    /* One watcher per *workspace*, and an empty path means "this session's own
+       workspace" — the state every panel and chip starts in. Keyed by the path
+       alone, that state was a single shared entry: two sessions in one page both
+       wrote their id into it, the last one won, and the other session then polled
+       a stranger's workspace — never noticing its own changes and reloading on
+       someone else's. The key says which workspace an entry is, and the entry
+       carries what a tick has to ask about, so no tick needs to be told. */
+    function watcherKey(repo, sessionId) {
+      return repo.length > 0 ? repo : 'session:' + text(sessionId)
+    }
+
+    function watcherFor(repo, sessionId) {
+      const key = watcherKey(repo, sessionId)
+      if (repoWatchers[key] === undefined) {
+        repoWatchers[key] = {
+          key: key, repo: repo, sessionId: sessionId,
+          listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
+        }
       }
-      return repoWatchers[repo]
+      return repoWatchers[key]
     }
 
     function watcherInterval(entry) {
@@ -535,22 +566,20 @@ return {
       return (sec > 0 ? sec : 3) * 1000
     }
 
-    function watcherSchedule(repo) {
-      const entry = repoWatchers[repo]
-      if (entry === undefined) return
+    function watcherSchedule(entry) {
       if (entry.stop != null) { entry.stop(); entry.stop = null }
       const timer = ctx.get('timer')
       if (timer === undefined) return
       if (gitSettings.watchEnabled !== true || entry.listeners.size === 0) return
-      entry.stop = timer.interval(function () { watcherTick(repo, entry) }, watcherInterval(entry))
+      entry.stop = timer.interval(function () { watcherTick(entry) }, watcherInterval(entry))
     }
 
-    function watcherTick(repo, entry) {
+    function watcherTick(entry) {
       if (entry.busy) return
       if (watchPageDoc != null && watchPageDoc.hidden === true) return
       entry.busy = true
-      const request = repo.length > 0 ? { repo: repo } : {}
-      if (request.repo === undefined) request.sessionId = entry.sessionId
+      const request = entry.repo.length > 0 ? { repo: entry.repo } : {}
+      if (request.repo === undefined && entry.sessionId !== undefined) request.sessionId = entry.sessionId
       /* Only while something is showing the working tree: the deep signature
          is the one that notices edits inside files, and it is the expensive
          one — seconds on a slow mount, every tick. */
@@ -574,21 +603,18 @@ return {
        the signature first, so a page that was hidden over lunch reads nothing
        unless the repository actually moved. */
     function watcherTickAll() {
-      const keys = Object.keys(repoWatchers)
-      for (let i = 0; i < keys.length; i += 1) {
-        const entry = repoWatchers[keys[i]]
-        if (entry.listeners.size > 0) watcherTick(keys[i], entry)
-      }
+      Object.keys(repoWatchers).forEach(function (key) {
+        const entry = repoWatchers[key]
+        if (entry.listeners.size > 0) watcherTick(entry)
+      })
     }
 
     function rescheduleWatchers() {
-      const keys = Object.keys(repoWatchers)
-      for (let i = 0; i < keys.length; i += 1) watcherSchedule(keys[i])
+      Object.keys(repoWatchers).forEach(function (key) { watcherSchedule(repoWatchers[key]) })
     }
 
     function watchRepo(repo, sessionId, listener, fast, deep) {
-      const entry = watcherFor(repo)
-      entry.sessionId = sessionId
+      const entry = watcherFor(repo, sessionId)
       entry.listeners.add(listener)
       if (fast === true) entry.fast += 1
       if (deep === true) entry.deep += 1
@@ -608,12 +634,16 @@ return {
           }
         }
       }
-      watcherSchedule(repo)
+      watcherSchedule(entry)
       return function () {
         entry.listeners.delete(listener)
         if (fast === true && entry.fast > 0) entry.fast -= 1
         if (deep === true && entry.deep > 0) entry.deep -= 1
-        watcherSchedule(repo)
+        /* Nobody watches this workspace any more: the entry goes with the last
+           listener, so a page that walks through many worktrees (the setup page
+           tries one path after another) does not keep every one of them. */
+        if (entry.listeners.size === 0 && entry.stop == null) delete repoWatchers[entry.key]
+        else watcherSchedule(entry)
       }
     }
 
@@ -1091,8 +1121,15 @@ textarea.dsh-git-input{resize:vertical}
          visible row to a parent far below is still the same curve it was. */
       const first = typeof props.first === 'number' ? props.first : 0
       const last = typeof props.last === 'number' ? Math.min(props.last, rows.length) : rows.length
-      const rowOf = {}
-      for (let i = 0; i < commits.length; i += 1) rowOf[commits[i].hash] = i
+      /* Rebuilt only when the history itself changes. It used to be built on
+         every render, and the graph re-renders on every scroll tick (the window
+         edges are its props) — so scrolling a 400-commit history rebuilt a
+         400-entry map per frame for the two hashes the window's edges look up. */
+      const rowOf = useMemo(function () {
+        const map = {}
+        for (let i = 0; i < commits.length; i += 1) map[commits[i].hash] = i
+        return map
+      }, [commits])
       const cx = function (lane) { return lane * LANE_W + LANE_W / 2 + 3 }
       const cy = function (row) { return row * ROW_H + ROW_H / 2 }
       const shapes = []
@@ -1146,7 +1183,6 @@ textarea.dsh-git-input{resize:vertical}
       }
       return h('div', {
         className: 'dsh-git-crow' + (props.selected === true ? ' dsh-git-crow-sel' : ''),
-        key: commit.hash,
         title: commit.hash + '\n' + commit.subject,
         onClick: function () { props.onPick(commit.hash) },
       },
@@ -3372,7 +3408,10 @@ textarea.dsh-git-input{resize:vertical}
               graph: graph,
               selected: selected,
               onPick: openCommit,
-              onLoadMore: function () { setMaxCount(maxCount + PAGE_COMMITS) },
+              /* Functional, not `maxCount + PAGE_COMMITS`: two clicks before the
+                 next render would otherwise both read the same old value and lose
+                 a page. */
+              onLoadMore: function () { setMaxCount(function (n) { return n + PAGE_COMMITS }) },
             })),
           h(CommitDetail, {
             detail: detail, collapsed: collapsed, selectedKey: selectedKey,

@@ -257,7 +257,18 @@ const fakeSessions = { get(id) { return id === 's-known' ? { id: id, header: { c
 const handlers2 = new Map()
 const ctx2 = {
   get: (n) => {
-    if (n === 'shell') return { resolve: (r) => r, run: async (spec) => { specs.push(spec); return { exitCode: 0, stdout: { text: '' }, stderr: { text: '' } } } }
+    if (n === 'shell') {
+      return {
+        resolve: (r) => r,
+        run: async (spec) => {
+          specs.push(spec)
+          /* `git init` first asks whether the path is a directory, and a force
+             push with no branch asks which branch is checked out. */
+          const text = spec.command.indexOf('echo dir') >= 0 ? 'dir\n' : (spec.command.indexOf('symbolic-ref') >= 0 ? 'main\n' : '')
+          return { exitCode: 0, stdout: { text: text }, stderr: { text: '' } }
+        },
+      }
+    }
     if (n === 'sandboxPolicy') return fakePolicy
     if (n === 'sessions') return fakeSessions
     return undefined
@@ -286,6 +297,16 @@ specs.length = 0
 await H2('git/flush')({ repo: '/tmp/gp41-one-dir' })
 await H2('git/panel')({ repo: '/tmp/gp41-one-dir', quick: true })
 check('完全没有 sessionId 时也一样不编', specs[specs.length - 1].sandboxPolicy === undefined)
+
+/* `git init` 是这些 RPC 里唯一自己拼过入参的：它传了 {repo}，sessionId 就掉了，
+   于是真正要写 .git 的那条命令拿到的是部署默认策略 —— 一个读得到、却写不进去的
+   目录，报回来还是 git 的 "Permission denied"。 */
+specs.length = 0
+const initReply = await H2('git/init')({ sessionId: 's-known', repo: '/tmp/gp41-one-dir', branch: 'main' })
+const initSpec = specs[specs.length - 1]
+console.log('  git/init ->', JSON.stringify(specs.map((x) => x.command)), '策略:', JSON.stringify(initSpec.sandboxPolicy))
+check('git/init 的写入命令也带着那个会话的策略（它要建 .git）',
+  initReply.ok === true && initSpec.sandboxPolicy !== undefined && initSpec.sandboxPolicy.sessionId === 's-known')
 
 /* 被沙箱拒了要和「仓库有问题」分开说 */
 specs.length = 0
@@ -363,6 +384,104 @@ console.log('  源码里读状态的调用:', statusLines.length, '条，没带�
 for (const x of unguarded) console.log('    L' + x.n + ': ' + x.l.trim().slice(0, 80))
 check('每一条读状态的 git 调用都带 --no-optional-locks', statusLines.length >= 3 && unguarded.length === 0)
 
+
+/* ── 值是值，不是选项 ──
+
+   结构化工具把调用方给的字符串直接放进 git 的 argv：一个修订号、一个路径、一个
+   远端名、一个分支名。以 "-" 开头的字符串已经不是那个值了 —— git 会把它当选项
+   读。实测：`git_sync` 的 branch="--force" 跑出 `git push origin --force`（一次
+   没有确认的强推），`git_log` 的 ref="--output=/tmp/x" 把空日志写进那个文件并
+   返回空结果，`git_branch` 的 name="--force" 跑出 `git branch --force`。 */
+console.log('')
+console.log('=== 值是值，不是选项 ===')
+const cmds = []
+const tools5 = new Map()
+const ctx5 = {
+  get: (n) => (n === 'shell'
+    ? {
+      resolve: (r) => r,
+      run: async (spec) => {
+        cmds.push(spec.command)
+        const text = spec.command.indexOf('symbolic-ref') >= 0 ? 'main\n' : ''
+        return { exitCode: 0, stdout: { text: text }, stderr: { text: '' } }
+      },
+    }
+    : undefined),
+  effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
+}
+const harness5 = { defineTool: (d) => { tools5.set(d.name, d); return d }, registerTool: () => () => {}, handle: (n, f) => { tools5.set('rpc:' + n, f); return () => {} } }
+new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
+  ctx5, harness5, console, s => Buffer.from(s, 'binary').toString('base64'),
+  s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx5)
+const exec5 = { agent: { session: { header: { cwd: '/tmp' } } } }
+
+const refuses = async (label, name, args) => {
+  cmds.length = 0
+  const out = await tools5.get(name).execute(args, exec5)
+  console.log('  ' + label.padEnd(34) + ' -> error=' + String(out.error) + ' blocked=' + String(out.blocked) + ' 发出的命令=' + String(cmds.length))
+  return out
+}
+const logOpt = await refuses('git_log ref=--output=/tmp/gp41-zzz', 'git_log', { repo: '/tmp', ref: '--output=/tmp/gp41-zzz' })
+check('以 - 开头的 revision 被拒，且一个进程都没起', logOpt.ok !== true && logOpt.error === 'option-like-value' && cmds.length === 0)
+const syncOpt = await refuses('git_sync push branch=--force', 'git_sync', { action: 'push', remote: 'origin', branch: '--force' })
+check('以 - 开头的分支名被拒（否则就是一次没确认的强推）', syncOpt.ok !== true && syncOpt.error === 'option-like-value' && cmds.length === 0)
+const branchOpt = await refuses('git_branch create name=--force', 'git_branch', { action: 'create', name: '--force' })
+check('以 - 开头的分支名在 git_branch 里也被拒', branchOpt.ok !== true && branchOpt.error === 'option-like-value' && cmds.length === 0)
+/* `--` 之后是路径：一个叫 `-notes.txt` 的文件是正当名字，不能被顺手一起拒掉。 */
+cmds.length = 0
+const dottedPath = await tools5.get('git').execute({ args: ['log', '--', '-notes.txt'] }, exec5)
+check('`--` 后面的路径不受这条规矩影响', cmds.length === 1 && String(cmds[0]).indexOf("'--' '-notes.txt'") > 0)
+
+/* 保护分支的三种写法是同一个引用：只有最长的那一种被认出来时，规则看着还在，
+   而它点名的那个分支已经过去了。 */
+console.log('')
+const protectedRefs = [
+  ['git push -f origin refs/heads/main', ['push', '-f', 'origin', 'refs/heads/main'], 'forbidden'],
+  ['git push -f origin heads/main', ['push', '-f', 'origin', 'heads/main'], 'forbidden'],
+  ['git push -f origin main', ['push', '-f', 'origin', 'main'], 'forbidden'],
+  ['git push -f origin refs/heads/topic', ['push', '-f', 'origin', 'refs/heads/topic'], 'confirmation-required'],
+]
+for (const [label, argv, want] of protectedRefs) {
+  const out = await tools5.get('git').execute({ args: argv }, exec5)
+  console.log('  ' + label.padEnd(38) + ' -> blocked=' + String(out.blocked))
+  check(label + ' → ' + want, out.blocked === want)
+}
+/* 不带分支的强推推的是「当前分支」，而当前分支同样可能是 main。 */
+const forceNoBranch = await tools5.get('git_sync').execute({ action: 'push', force: 'force', confirm: true }, exec5)
+console.log('  git_sync force + confirm，不给分支（当前分支 main） -> blocked=' + String(forceNoBranch.blocked))
+check('不给分支的强推也要看当前分支是不是保护分支', forceNoBranch.blocked === 'forbidden')
+
+/* 空参数那条路是唯一没有 stdout 的答复，渲染器不能因此炸掉。 */
+console.log('')
+const emptyArgs = await tools5.get('git').execute({ args: [] }, exec5)
+let rendered = ''
+try { rendered = JSON.stringify(tools5.get('git').output.render({}, emptyArgs)) } catch (error) { rendered = 'threw: ' + String(error) }
+console.log('  空参数渲染 ->', JSON.stringify(rendered))
+check('空参数被拒之后，渲染器照常给出理由', rendered.indexOf('INVALID ARGUMENTS') >= 0 && rendered.indexOf('threw') < 0)
+
+/* 身份读（chip 用的那个廉价读）自己也要报数，而且未出生的分支也要认名字。 */
+console.log('')
+console.log('=== 身份读：报数、认未出生的分支 ===')
+await sh('git switch -q ahead-one', R)
+await H('git/flush')({ repo: R })
+const identAhead = await H('git/panel')({ repo: R, quick: true })
+console.log('  ahead-one:', JSON.stringify({ branch: identAhead.branch, upstream: identAhead.upstream, ahead: identAhead.ahead, behind: identAhead.behind }))
+check('身份读给出领先数（locale 固定，词是英文）',
+  identAhead.ok === true && identAhead.branch === 'ahead-one' && identAhead.upstream === 'origin/ahead-one' && identAhead.ahead === 1 && identAhead.behind === 0)
+await sh('git switch -q behind-one', R)
+await H('git/flush')({ repo: R })
+const identBehind = await H('git/panel')({ repo: R, quick: true })
+check('身份读给出落后数', identBehind.branch === 'behind-one' && identBehind.behind === 1 && identBehind.ahead === 0)
+await sh('git switch -q main', R)
+
+const UNBORN = '/tmp/gp41-unborn'
+await sh('rm -rf ' + UNBORN + ' && mkdir -p ' + UNBORN, '/tmp')
+await sh('git init -q -b trunk .', UNBORN)
+await H('git/flush')({ repo: UNBORN })
+const unborn = await H('git/panel')({ repo: UNBORN, quick: true })
+console.log('  未出生分支:', JSON.stringify({ branch: unborn.branch, detached: unborn.detached, ok: unborn.ok }))
+check('还没有提交的分支，身份读照样报名字（读的是 HEAD 文件本身）',
+  unborn.ok === true && unborn.branch === 'trunk' && unborn.detached === false)
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {

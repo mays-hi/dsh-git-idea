@@ -10,11 +10,26 @@
     const repoWatchers = {}
     let watchPageDoc = null
 
-    function watcherFor(repo) {
-      if (repoWatchers[repo] === undefined) {
-        repoWatchers[repo] = { listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false, sessionId: undefined }
+    /* One watcher per *workspace*, and an empty path means "this session's own
+       workspace" — the state every panel and chip starts in. Keyed by the path
+       alone, that state was a single shared entry: two sessions in one page both
+       wrote their id into it, the last one won, and the other session then polled
+       a stranger's workspace — never noticing its own changes and reloading on
+       someone else's. The key says which workspace an entry is, and the entry
+       carries what a tick has to ask about, so no tick needs to be told. */
+    function watcherKey(repo, sessionId) {
+      return repo.length > 0 ? repo : 'session:' + text(sessionId)
+    }
+
+    function watcherFor(repo, sessionId) {
+      const key = watcherKey(repo, sessionId)
+      if (repoWatchers[key] === undefined) {
+        repoWatchers[key] = {
+          key: key, repo: repo, sessionId: sessionId,
+          listeners: new Set(), fast: 0, deep: 0, stop: null, sig: null, busy: false,
+        }
       }
-      return repoWatchers[repo]
+      return repoWatchers[key]
     }
 
     function watcherInterval(entry) {
@@ -22,22 +37,20 @@
       return (sec > 0 ? sec : 3) * 1000
     }
 
-    function watcherSchedule(repo) {
-      const entry = repoWatchers[repo]
-      if (entry === undefined) return
+    function watcherSchedule(entry) {
       if (entry.stop != null) { entry.stop(); entry.stop = null }
       const timer = ctx.get('timer')
       if (timer === undefined) return
       if (gitSettings.watchEnabled !== true || entry.listeners.size === 0) return
-      entry.stop = timer.interval(function () { watcherTick(repo, entry) }, watcherInterval(entry))
+      entry.stop = timer.interval(function () { watcherTick(entry) }, watcherInterval(entry))
     }
 
-    function watcherTick(repo, entry) {
+    function watcherTick(entry) {
       if (entry.busy) return
       if (watchPageDoc != null && watchPageDoc.hidden === true) return
       entry.busy = true
-      const request = repo.length > 0 ? { repo: repo } : {}
-      if (request.repo === undefined) request.sessionId = entry.sessionId
+      const request = entry.repo.length > 0 ? { repo: entry.repo } : {}
+      if (request.repo === undefined && entry.sessionId !== undefined) request.sessionId = entry.sessionId
       /* Only while something is showing the working tree: the deep signature
          is the one that notices edits inside files, and it is the expensive
          one — seconds on a slow mount, every tick. */
@@ -61,21 +74,18 @@
        the signature first, so a page that was hidden over lunch reads nothing
        unless the repository actually moved. */
     function watcherTickAll() {
-      const keys = Object.keys(repoWatchers)
-      for (let i = 0; i < keys.length; i += 1) {
-        const entry = repoWatchers[keys[i]]
-        if (entry.listeners.size > 0) watcherTick(keys[i], entry)
-      }
+      Object.keys(repoWatchers).forEach(function (key) {
+        const entry = repoWatchers[key]
+        if (entry.listeners.size > 0) watcherTick(entry)
+      })
     }
 
     function rescheduleWatchers() {
-      const keys = Object.keys(repoWatchers)
-      for (let i = 0; i < keys.length; i += 1) watcherSchedule(keys[i])
+      Object.keys(repoWatchers).forEach(function (key) { watcherSchedule(repoWatchers[key]) })
     }
 
     function watchRepo(repo, sessionId, listener, fast, deep) {
-      const entry = watcherFor(repo)
-      entry.sessionId = sessionId
+      const entry = watcherFor(repo, sessionId)
       entry.listeners.add(listener)
       if (fast === true) entry.fast += 1
       if (deep === true) entry.deep += 1
@@ -95,12 +105,16 @@
           }
         }
       }
-      watcherSchedule(repo)
+      watcherSchedule(entry)
       return function () {
         entry.listeners.delete(listener)
         if (fast === true && entry.fast > 0) entry.fast -= 1
         if (deep === true && entry.deep > 0) entry.deep -= 1
-        watcherSchedule(repo)
+        /* Nobody watches this workspace any more: the entry goes with the last
+           listener, so a page that walks through many worktrees (the setup page
+           tries one path after another) does not keep every one of them. */
+        if (entry.listeners.size === 0 && entry.stop == null) delete repoWatchers[entry.key]
+        else watcherSchedule(entry)
       }
     }
 

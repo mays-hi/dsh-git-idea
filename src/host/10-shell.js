@@ -88,29 +88,29 @@ async function invoke(command, args, exec, options) {
   }
 }
 
-async function git(args, argv, exec, options) {
-  const result = await invoke('git ' + argv.map(shq).join(' '), args, exec, options)
+/* The three wrappers differ only in what they put in front of the command: the
+   package prefix is the whole of the difference, so it is the only argument. */
+async function shellGit(prefix, args, argv, exec, options) {
+  const result = await invoke(prefix + 'git ' + argv.map(shq).join(' '), args, exec, options)
   result.command = 'git ' + argv.join(' ')
   result.ok = result.exitCode === 0
   return result
 }
 
+async function git(args, argv, exec, options) {
+  return await shellGit('', args, argv, exec, options)
+}
+
 /* Network commands must never sit waiting for a credential prompt: the panel has
    no terminal to answer one, so the call would hang until its timeout fires. */
 async function gitNet(args, argv, exec, options) {
-  const result = await invoke('GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true git ' + argv.map(shq).join(' '), args, exec, options)
-  result.command = 'git ' + argv.join(' ')
-  result.ok = result.exitCode === 0
-  return result
+  return await shellGit('GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true ', args, argv, exec, options)
 }
 
 /* for-each-ref's %(upstream:track) is the one atom git translates. The switcher
    shows the numbers out of it, so the words around them have to be predictable
    rather than whatever locale the machine happens to use. */
 async function gitC(args, argv, exec, options) {
-  const result = await invoke('LC_ALL=C git ' + argv.map(shq).join(' '), args, exec, options)
-  result.command = 'git ' + argv.join(' ')
-  result.ok = result.exitCode === 0
-  return result
+  return await shellGit('LC_ALL=C ', args, argv, exec, options)
 }
 

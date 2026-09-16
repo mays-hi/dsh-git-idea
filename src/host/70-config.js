@@ -70,7 +70,12 @@ async function initSnapshot(input) {
     }
   }
   const branch = input != null && isStr(input.branch) ? input.branch.trim() : ''
-  if (branch.length > 0) return await panelMutate({ repo: target }, ['init', '-b', branch])
-  return await panelMutate({ repo: target }, ['init'])
+  /* Through `argsAt`, so the session id survives: `git init` is a write, and a
+     request that loses its session runs under the deployment's default sandbox
+     policy rather than this reader's — which is a "Permission denied" on a
+     directory the reader can write to perfectly well. */
+  const args = argsAt(input, target)
+  if (branch.length > 0) return await panelMutate(args, ['init', '-b', branch])
+  return await panelMutate(args, ['init'])
 }
 

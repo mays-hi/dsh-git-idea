@@ -1,33 +1,51 @@
 /* ─────────────── Client RPC ─────────────── */
 
-function repoFrom(input, exec) {
-  if (input != null && isStr(input.repo) && input.repo.trim().length > 0) return input.repo.trim()
-  const direct = sessionCwd(exec)
-  if (direct !== undefined) return direct
-  if (input != null && isStr(input.sessionId)) {
-    const sessions = ctx.get('sessions')
-    if (sessions !== undefined) {
-      try {
-        const session = sessions.get(input.sessionId)
-        const header = session != null ? session.header : undefined
-        const cwd = header != null ? header.cwd : undefined
-        if (isStr(cwd) && cwd.length > 0) return cwd
-      } catch (error) {
-        console.error('dsh-git-idea: could not resolve the session cwd', String(error))
-      }
-    }
+/* ── whose working directory this request means ──
+
+   A request that names no path of its own is about the session's own working
+   directory, which is exactly the directory the shell layer already treats as
+   home when no workdir is given. Both questions below are that one lookup: which
+   repository this request is about, and where a probe of some *other* path may be
+   spawned. A probe must never run with the inspected path as its workdir — when
+   that directory does not exist the spawn itself fails before git is ever reached
+   and the caller sees a rejected promise instead of the diagnosis it asked for. */
+function sessionWorkdir(input) {
+  if (input == null || !isStr(input.sessionId)) return undefined
+  const sessions = ctx.get('sessions')
+  if (sessions === undefined) return undefined
+  try {
+    const session = sessions.get(input.sessionId)
+    const header = session != null ? session.header : undefined
+    const cwd = header != null ? header.cwd : undefined
+    if (isStr(cwd) && cwd.length > 0) return cwd
+  } catch (error) {
+    console.error('dsh-git-idea: could not resolve the session working directory', String(error))
   }
   return undefined
 }
 
+function repoFrom(input) {
+  if (input != null && isStr(input.repo) && input.repo.trim().length > 0) return input.repo.trim()
+  return sessionWorkdir(input)
+}
+
 /* Which repository, and on whose behalf. The session id travels with the args so
    the shell layer can ask for that session's sandbox policy — it is the only
-   thing that says whether these commands may write at all (see `sandboxFor`). */
-function argsFor(input) {
-  const repo = repoFrom(input, null)
-  const out = repo === undefined ? {} : { repo: repo }
+   thing that says whether these commands may write at all (see `sandboxFor`).
+
+   Every path that builds these args goes through here, including the ones that
+   resolved a path of their own: a request that keeps the repo and drops the
+   session id runs under the *deployment* default policy instead of the reader's
+   own, which is how `git init` came to be denied on a directory nobody had a
+   problem writing to. */
+function argsAt(input, repo) {
+  const out = repo === undefined || repo === null ? {} : { repo: repo }
   if (input != null && isStr(input.sessionId) && input.sessionId.length > 0) out.sessionId = input.sessionId
   return out
+}
+
+function argsFor(input) {
+  return argsAt(input, repoFrom(input))
 }
 
 /* ─────────────── per-repository read cache ───────────────
@@ -36,30 +54,35 @@ function argsFor(input) {
    so every open re-read the whole repository. Reads are now memoised per
    repository and dropped on any mutation.
 
-   Reads no longer age out on a timer. Data may be as old as the last explicit
+   Reads do not age out on a timer. Data may be as old as the last explicit
    invalidation, which is what makes reopening the panel instant; freshness is
    the watcher's job (git/watch below) plus the mutation and refresh paths.
 
-   Time is feature-detected rather than assumed. If the restricted host realm
-   has no Date, caching turns itself off completely instead of never expiring. */
-
-const nowMs = (function () {
-  if (typeof Date === 'undefined' || typeof Date.now !== 'function') return null
-  return function () { return Date.now() }
-})()
+   A miss stores the *promise*, not the value: two surfaces asking for the same
+   read at the same moment — the composer chip's full read, and the panel opening
+   under it — are one child process instead of two, which on a slow mount is the
+   difference between one seven-second `git status` and two. A rejection is never
+   kept, so a read that failed can be attempted again, and the value is only
+   stored if the entry is still the promise that produced it: an invalidation
+   arriving mid-read must not be undone by that read landing afterwards. */
 
 const readCache = new Map()
+const READ_CACHE_MAX = 300
 
-async function cached(repo, tag, ttlMs, loader) {
-  if (nowMs === null) return await loader()
+async function cached(repo, tag, loader) {
   const key = repo + '\u0000' + tag
   const hit = readCache.get(key)
-  const at = nowMs()
-  if (hit !== undefined && (ttlMs <= 0 || at - hit.at < ttlMs)) return hit.value
-  const value = await loader()
-  if (readCache.size > 300) readCache.clear()
-  readCache.set(key, { at: at, value: value })
-  return value
+  if (hit !== undefined) return await hit
+  const pending = loader()
+  readCache.set(key, pending)
+  try {
+    const value = await pending
+    if (readCache.get(key) === pending) readCache.set(key, value)
+    return value
+  } catch (error) {
+    if (readCache.get(key) === pending) readCache.delete(key)
+    throw error
+  }
 }
 
 function invalidateRepo(repo) {
@@ -70,38 +93,16 @@ function invalidateRepo(repo) {
     if (key.indexOf(prefix) === 0) doomed.push(key)
   })
   for (let i = 0; i < doomed.length; i += 1) readCache.delete(doomed[i])
+  /* Oldest first, one key at a time. Clearing the whole map on overflow meant one
+     repository's paging dropped every other repository's reads with it. */
+  while (readCache.size > READ_CACHE_MAX) readCache.delete(readCache.keys().next().value)
 }
 
-const TTL_FOREVER = 0
-
-/* Diagnostics for the "this path is not a repository" setup page. A probe must
-   never run with the inspected path as its workdir: when that directory does
-   not exist the spawn itself fails before git is ever reached, and the caller
-   would see a rejected promise instead of a diagnosis. */
-function baseWorkdir(input) {
-  const direct = sessionCwd(null)
-  if (direct !== undefined) return direct
-  if (input != null && isStr(input.sessionId)) {
-    const sessions = ctx.get('sessions')
-    if (sessions !== undefined) {
-      try {
-        const session = sessions.get(input.sessionId)
-        const header = session != null ? session.header : undefined
-        const cwd = header != null ? header.cwd : undefined
-        if (isStr(cwd) && cwd.length > 0) return cwd
-      } catch (error) {
-        console.error('dsh-git-idea: could not resolve a safe workdir', String(error))
-      }
-    }
-  }
-  return undefined
-}
-
+/* Diagnostics for the "this path is not a repository" setup page. The workdir is
+   the session's own directory, never the path being inspected (see
+   `sessionWorkdir`). */
 async function probeShell(input, command) {
-  const workdir = baseWorkdir(input)
-  const args = workdir === undefined ? {} : { repo: workdir }
-  if (input != null && isStr(input.sessionId) && input.sessionId.length > 0) args.sessionId = input.sessionId
-  return await invoke(command, args, null, { timeoutMs: 20000 })
+  return await invoke(command, argsAt(input, sessionWorkdir(input)), null, { timeoutMs: 20000 })
 }
 
 async function pathKind(input, target) {
@@ -138,33 +139,71 @@ function repoHere(target) {
   return '[ -e ' + shq(target) + '/.git ]'
 }
 
-function panelIdentityCommand(target) {
-  const quoted = shq(target)
+/* The five states in which an operation is caught half-done. Both reads below ask
+   for all of them, and they have to stay in step: a state known to one and not
+   the other is a panel that offers "continue" on one screen and not the next. */
+function sequencerShell() {
   return [
-    'if [ -d ' + quoted + ' ]; then',
-    "  printf 'K:dir\\n'",
-    '  if ' + repoHere(target) + '; then',
-    '    gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
-    '  else',
-    "    gd=''",
-    '  fi',
-    '  if [ -z "$gd" ]; then',
-    "    printf 'RC:1\\n'",
-    "    printf 'fatal: not a git repository\\n'",
-    '  else',
-    "    b=$(git -C " + quoted + " symbolic-ref --quiet --short HEAD 2>/dev/null)",
-    '    if [ -n "$b" ]; then',
-    "      printf 'B:%s\\n' \"$b\"",
-    "      printf 'U:%s\\n' \"$(git -C " + quoted + " for-each-ref --format='%(upstream:short)' \"refs/heads/$b\" 2>/dev/null)\"",
-    "      printf 'T:%s\\n' \"$(git -C " + quoted + " for-each-ref --format='%(upstream:track)' \"refs/heads/$b\" 2>/dev/null)\"",
-    '    fi',
     "    [ -e \"$gd/CHERRY_PICK_HEAD\" ] && printf 'S:cherry-pick\\n'",
     "    [ -e \"$gd/REVERT_HEAD\" ] && printf 'S:revert\\n'",
     "    [ -e \"$gd/MERGE_HEAD\" ] && printf 'S:merge\\n'",
     "    [ -d \"$gd/rebase-merge\" ] && printf 'S:rebase\\n'",
     "    [ -d \"$gd/rebase-apply\" ] && printf 'S:rebase\\n'",
-    "    printf 'RC:0\\n'",
+  ].join('\n')
+}
+
+/* The branch half of the identity read, in one git process instead of three.
+
+   The branch name comes out of `$gd/HEAD` itself rather than out of
+   `symbolic-ref`: the gitdir is already in hand, the answer is the one line in
+   that file, and the spawn cost a quarter of this read. Reading it also answers
+   the case for-each-ref cannot — a repository whose branch has no commit yet
+   names that branch, while `refs/heads` is still empty.
+
+   Then one for-each-ref, restricted to that branch, carries the upstream and the
+   ahead/behind numbers together. Asking for them separately re-walked the same
+   ref table for nothing, and asking for *all* branches instead is far worse than
+   it looks: `%(upstream:track)` costs a rev-list pair per branch, 109ms against
+   31ms for the single branch on screen on the repository this was measured
+   against.
+
+   LC_ALL=C is not decoration either: the words around those numbers are
+   translated, and this is the read the composer chip shows. */
+function branchIdentityShell(target) {
+  return [
+    "    b=''",
+    '    if [ -f "$gd/HEAD" ]; then',
+    '      read -r headline < "$gd/HEAD"',
+    '      case "$headline" in',
+    "        'ref: refs/heads/'*) b=${headline#'ref: refs/heads/'} ;;",
+    '      esac',
+    '    fi',
+    '    if [ -n "$b" ]; then',
+    "      printf 'B:%s\\n' \"$b\"",
+    "      printf 'U:%s\\n' \"$(LC_ALL=C git -C " + shq(target) + " for-each-ref --format='%(upstream:short)%1f%(upstream:track)' \"refs/heads/$b\" 2>/dev/null)\"",
+    '    fi',
+  ].join('\n')
+}
+
+/* The shape both reads share: the three answers about the path itself, the one
+   gitdir both of them need, and the half-done-operation markers — with everything
+   that is actually asked of the repository in the middle. Written once because
+   the two commands have to keep answering the same way about the same path, and
+   only their middles should ever differ. */
+function pathShell(target, middle) {
+  const quoted = shq(target)
+  return [
+    'if [ -d ' + quoted + ' ]; then',
+    "  printf 'K:dir\\n'",
+    /* Guarded by `repoHere` and not left to git: without the guard,
+       `git rev-parse` in a directory that is not a repository walks up and
+       answers for a parent one. */
+    '  if ' + repoHere(target) + '; then',
+    '    gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
+    '  else',
+    "    gd=''",
     '  fi',
+    middle,
     'elif [ -f ' + quoted + ' ]; then',
     "  printf 'K:file\\n'",
     'else',
@@ -173,36 +212,33 @@ function panelIdentityCommand(target) {
   ].join('\n')
 }
 
+function panelIdentityCommand(target) {
+  return pathShell(target, [
+    '  if [ -z "$gd" ]; then',
+    "    printf 'RC:1\\n'",
+    "    printf 'fatal: not a git repository\\n'",
+    '  else',
+    branchIdentityShell(target),
+    sequencerShell(),
+    "    printf 'RC:0\\n'",
+    '  fi',
+  ].join('\n'))
+}
+
 function panelCommand(target) {
   const quoted = shq(target)
-  return [
-    'if [ -d ' + quoted + ' ]; then',
-    "  printf 'K:dir\\n'",
+  return pathShell(target, [
     '  if ' + repoHere(target) + '; then',
     "    out=$(git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal 2>&1); rc=$?",
     '  else',
     "    out='fatal: not a git repository'; rc=1",
     '  fi',
-    "  printf '%s\\n' \"$out\"",
-    "  printf 'RC:%s\\n' \"$rc\"",
-    '  if [ $rc -eq 0 ]; then',
-    '    gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
-    '  else',
-    "    gd=''",
-    '  fi',
+    "  printf '%s\n' \"$out\"",
+    "  printf 'RC:%s\n' \"$rc\"",
     '  if [ -n "$gd" ]; then',
-    "    [ -e \"$gd/CHERRY_PICK_HEAD\" ] && printf 'S:cherry-pick\\n'",
-    "    [ -e \"$gd/REVERT_HEAD\" ] && printf 'S:revert\\n'",
-    "    [ -e \"$gd/MERGE_HEAD\" ] && printf 'S:merge\\n'",
-    "    [ -d \"$gd/rebase-merge\" ] && printf 'S:rebase\\n'",
-    "    [ -d \"$gd/rebase-apply\" ] && printf 'S:rebase\\n'",
+    sequencerShell(),
     '  fi',
-    'elif [ -f ' + quoted + ' ]; then',
-    "  printf 'K:file\\n'",
-    'else',
-    "  printf 'K:none\\n'",
-    'fi',
-  ].join('\n')
+  ].join('\n'))
 }
 
 /* One lightweight spawn answers "did anything change?" for the client watcher.
@@ -284,15 +320,18 @@ async function readPanelIdentity(input, target) {
   let branch = null
   let upstream = null
   let track = ''
-  const body = []
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i]
     if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
     if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
     if (line.indexOf('B:') === 0) { branch = line.slice(2); continue }
-    if (line.indexOf('U:') === 0) { upstream = line.slice(2); continue }
-    if (line.indexOf('T:') === 0) { track = line.slice(2); continue }
-    body.push(line)
+    /* The upstream and its standing arrive in one line, separated by the same
+       \u001f the rest of the Host uses: one for-each-ref answers both. */
+    if (line.indexOf('U:') === 0) {
+      const fields = line.slice(2).split('\u001f')
+      upstream = fields[0] === undefined ? '' : fields[0]
+      track = fields[1] === undefined ? '' : fields[1]
+    }
   }
   if (exitCode !== 0) {
     const failed = missingPanel(target, 'not-a-repo')
@@ -356,9 +395,9 @@ async function panelSnapshot(input) {
   /* Two tags, never one: a cheap answer cached under the full read's name would
      hand an empty working tree to the changes tab. */
   if (input != null && input.quick === true) {
-    return await cached(target, 'panel-ident', TTL_FOREVER, function () { return readPanelIdentity(input, target) })
+    return await cached(target, 'panel-ident', function () { return readPanelIdentity(input, target) })
   }
-  return await cached(target, 'panel', TTL_FOREVER, function () { return readPanel(input, target) })
+  return await cached(target, 'panel', function () { return readPanel(input, target) })
 }
 
 async function readGraph(input, repo) {
@@ -434,7 +473,7 @@ function graphTag(input) {
 async function graphSnapshot(input) {
   const repo = repoFrom(input, null)
   if (repo === undefined) return await readGraph(input, undefined)
-  return await cached(repo, graphTag(input), TTL_FOREVER, function () { return readGraph(input, repo) })
+  return await cached(repo, graphTag(input), function () { return readGraph(input, repo) })
 }
 
 async function readAuthors(input, repo) {
@@ -468,7 +507,7 @@ async function readAuthors(input, repo) {
 async function authorsSnapshot(input) {
   const repo = repoFrom(input, null)
   if (repo === undefined) return await readAuthors(input, undefined)
-  return await cached(repo, 'authors', TTL_FOREVER, function () { return readAuthors(input, repo) })
+  return await cached(repo, 'authors', function () { return readAuthors(input, repo) })
 }
 
 async function readRefs(input, repo) {
@@ -520,7 +559,7 @@ async function readRefs(input, repo) {
 async function refsSnapshot(input) {
   const repo = repoFrom(input, null)
   if (repo === undefined) return await readRefs(input, undefined)
-  return await cached(repo, 'refs', TTL_FOREVER, function () { return readRefs(input, repo) })
+  return await cached(repo, 'refs', function () { return readRefs(input, repo) })
 }
 
 /* "[ahead 2, behind 3]", "[behind 3]", "[gone]" — the words are English because
@@ -619,7 +658,7 @@ async function readBranches(input, repo) {
 async function branchesSnapshot(input) {
   const repo = repoFrom(input, null)
   if (repo === undefined) return await readBranches(input, undefined)
-  return await cached(repo, 'branches', TTL_FOREVER, function () { return readBranches(input, repo) })
+  return await cached(repo, 'branches', function () { return readBranches(input, repo) })
 }
 
 async function previousBranch(input) {
@@ -770,7 +809,7 @@ async function commitDetailSnapshot(input) {
   if (hash.length === 0) return { ok: false, error: 'hash is required' }
   const repo = repoFrom(input, null)
   if (repo === undefined) return await readCommitDetail(input)
-  return await cached(repo, 'detail|' + hash, TTL_FOREVER, function () { return readCommitDetail(input) })
+  return await cached(repo, 'detail|' + hash, function () { return readCommitDetail(input) })
 }
 
 async function panelMutate(input, argv, options) {

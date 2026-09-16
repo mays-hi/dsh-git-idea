@@ -1,8 +1,20 @@
 /* ─────────────── renderers ─────────────── */
 
+/* The header every renderer prints when a git command came back non-zero. Three
+   of them wrote it out by hand. */
+function renderCommandFailure(title, value) {
+  const stderr = isStr(value.stderr) ? value.stderr.replace(/\n+$/, '') : ''
+  return title + ' failed in ' + String(value.cwd) + '\n' + stderr + '\n[exit code: ' + String(value.exitCode) + ']'
+}
+
 function renderPassthrough(value) {
   const lines = ['$ ' + value.command]
   if (value.cwd !== null) lines.push('cwd: ' + value.cwd)
+  if (value.blocked === 'invalid-args') {
+    lines.push('INVALID ARGUMENTS: ' + value.reason)
+    lines.push('Nothing was executed.')
+    return lines.join('\n')
+  }
   if (value.blocked === 'forbidden') {
     lines.push('BLOCKED by git plugin policy: ' + value.reason)
     return lines.join('\n')
@@ -12,8 +24,10 @@ function renderPassthrough(value) {
     lines.push('Nothing was executed. Re-call with confirm: true only if this destructive operation is really intended.')
     return lines.join('\n')
   }
-  const out = value.stdout.replace(/\n+$/, '')
-  const err = value.stderr.replace(/\n+$/, '')
+  /* Guarded rather than assumed: three of the refusal paths above return no
+     stdout at all, and a renderer that throws takes the answer with it. */
+  const out = isStr(value.stdout) ? value.stdout.replace(/\n+$/, '') : ''
+  const err = isStr(value.stderr) ? value.stderr.replace(/\n+$/, '') : ''
   if (out.length > 0) lines.push(out)
   if (err.length > 0) lines.push('[stderr]\n' + err)
   if (out.length === 0 && err.length === 0) lines.push('(no output)')
@@ -104,9 +118,7 @@ function parseStatusV2(stdout) {
 }
 
 function renderStatus(value) {
-  if (value.ok !== true) {
-    return 'git status failed in ' + String(value.cwd) + '\n' + value.stderr.replace(/\n+$/, '') + '\n[exit code: ' + String(value.exitCode) + ']'
-  }
+  if (value.ok !== true) return renderCommandFailure('git status', value)
   const lines = []
   lines.push('repo:      ' + String(value.cwd))
   const head = value.detached === true ? '(detached HEAD)' : String(value.branch)
@@ -127,9 +139,7 @@ function renderStatus(value) {
 }
 
 function renderLog(value) {
-  if (value.ok !== true) {
-    return 'git log failed in ' + String(value.cwd) + '\n' + value.stderr.replace(/\n+$/, '') + '\n[exit code: ' + String(value.exitCode) + ']'
-  }
+  if (value.ok !== true) return renderCommandFailure('git log', value)
   if (value.commits.length === 0) return 'no commits matched in ' + String(value.cwd)
   const lines = []
   for (let i = 0; i < value.commits.length; i += 1) {
@@ -141,9 +151,7 @@ function renderLog(value) {
 }
 
 function renderDiff(value) {
-  if (value.ok !== true) {
-    return 'git diff failed in ' + String(value.cwd) + '\n' + value.stderr.replace(/\n+$/, '') + '\n[exit code: ' + String(value.exitCode) + ']'
-  }
+  if (value.ok !== true) return renderCommandFailure('git diff', value)
   const lines = ['diff mode: ' + value.mode, 'cwd: ' + String(value.cwd), 'changed files: ' + String(value.paths.length)]
   for (let i = 0; i < value.paths.length; i += 1) lines.push('  ' + value.paths[i])
   if (value.note !== null) lines.push('note: ' + value.note)
@@ -191,6 +199,12 @@ function capText(text) {
   return { text: text, cut: false }
 }
 
+/* A path is data, and `cat <path>` did not treat it as data: a file called `-n`
+   is an option to cat, so the card showed it as empty rather than as itself.
+   (`:./path` would be the other half of this — except that git already resolves
+   `:<path>` correctly even when the path contains a colon, and `./` would break
+   the case where the repository path is a subdirectory, so the spec is left as
+   git's plain `:<path>` form.) */
 async function readBlob(args, spec, exec) {
   const result = await git(args, ['show', spec], exec, { maxBytes: 400000 })
   if (result.exitCode !== 0) return null
@@ -198,7 +212,7 @@ async function readBlob(args, spec, exec) {
 }
 
 async function readWorktreeFile(args, path, exec) {
-  const result = await invoke('cat ' + shq(path), args, exec, { maxBytes: 400000 })
+  const result = await invoke('cat -- ' + shq(path), args, exec, { maxBytes: 400000 })
   if (result.exitCode !== 0) return null
   return result.stdout
 }

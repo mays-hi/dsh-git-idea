@@ -47,8 +47,48 @@ function refspecTargetsProtected(refspec) {
   let spec = refspec.charAt(0) === '+' ? refspec.slice(1) : refspec
   const colon = spec.lastIndexOf(':')
   if (colon >= 0) spec = spec.slice(colon + 1)
-  if (spec.indexOf('refs/heads/') === 0) spec = spec.slice('refs/heads/'.length)
-  return PROTECTED_BRANCHES.indexOf(spec) >= 0
+  return isProtectedBranch(spec)
+}
+
+/* "main", "heads/main" and "refs/heads/main" are one ref written three ways, and
+   git accepts all three. Only the longest spelling was recognised here, so a
+   force push written `-f origin heads/main` classified as merely destructive
+   instead of forbidden — the rule read as if it held while the ref it names went
+   through. */
+function bareBranchName(name) {
+  let spec = name
+  if (spec.indexOf('refs/') === 0) spec = spec.slice('refs/'.length)
+  if (spec.indexOf('heads/') === 0) spec = spec.slice('heads/'.length)
+  return spec
+}
+
+function isProtectedBranch(name) {
+  return PROTECTED_BRANCHES.indexOf(bareBranchName(name)) >= 0
+}
+
+/* ── a value is not an option ──
+
+   The structured tools hand caller strings straight into git's argv: a revision,
+   a path, a remote, a branch name. A string that starts with "-" is not that
+   value any more — git reads it as an option and the tool does something else
+   entirely. Measured on this deployment: `git_sync` with branch "--force" ran
+   `git push origin --force` (a force push with no confirmation), `git_log` with
+   ref "--output=/tmp/x" wrote an empty log to that path and returned nothing, and
+   `git_branch` with name "--force" ran `git branch --force`. The escape hatch
+   has a classifier for this because its argv is open-ended; the named arguments
+   here only need the one rule. */
+function optionLike(fields) {
+  for (let i = 0; i < fields.length; i += 1) {
+    const value = fields[i][1]
+    if (isStr(value) && value.length > 0 && value.charAt(0) === '-') {
+      return {
+        field: fields[i][0],
+        value: value,
+        reason: fields[i][0] + ' may not start with "-" (' + value + ' would be read by git as an option, not as a value)',
+      }
+    }
+  }
+  return null
 }
 
 function classify(argv) {

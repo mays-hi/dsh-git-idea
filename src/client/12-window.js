@@ -57,7 +57,6 @@
       return {
         first: first,
         last: last,
-        windowed: win !== null,
         measure: measure,
         attach: attach,
       }

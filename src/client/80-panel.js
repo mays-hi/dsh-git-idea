@@ -806,7 +806,10 @@
               graph: graph,
               selected: selected,
               onPick: openCommit,
-              onLoadMore: function () { setMaxCount(maxCount + PAGE_COMMITS) },
+              /* Functional, not `maxCount + PAGE_COMMITS`: two clicks before the
+                 next render would otherwise both read the same old value and lose
+                 a page. */
+              onLoadMore: function () { setMaxCount(function (n) { return n + PAGE_COMMITS }) },
             })),
           h(CommitDetail, {
             detail: detail, collapsed: collapsed, selectedKey: selectedKey,

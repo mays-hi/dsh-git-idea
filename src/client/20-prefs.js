@@ -100,10 +100,14 @@
       })
     }
 
-    function savePluginConfig(next) {
-      pluginConfig = normalizePluginConfig(next)
-      pluginConfigError = ''
-      pluginConfigSignal.notify()
+    /* What is on screen is the draft and updates at once; the file follows when
+       the typing stops. Every keystroke of a branch name used to be its own RPC
+       and its own write of the config file, and the settings page asks for one on
+       each `onChange`. */
+    const CONFIG_SAVE_MS = 400
+    let configSaveTimer = null
+
+    function writePluginConfig() {
       callHost('git/config-save', { config: pluginConfig }).then(function (result) {
         if (result == null || result.ok !== true) {
           pluginConfigError = text(result != null ? result.error : '') || '保存失败'
@@ -115,4 +119,17 @@
         pluginConfigError = failureText(failure)
         pluginConfigSignal.notify()
       })
+    }
+
+    function savePluginConfig(next) {
+      pluginConfig = normalizePluginConfig(next)
+      pluginConfigError = ''
+      pluginConfigSignal.notify()
+      if (configSaveTimer != null) { configSaveTimer(); configSaveTimer = null }
+      const timer = ctx.get('timer')
+      if (timer === undefined) { writePluginConfig(); return }
+      configSaveTimer = timer.timeout(function () {
+        configSaveTimer = null
+        writePluginConfig()
+      }, CONFIG_SAVE_MS)
     }

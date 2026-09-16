@@ -448,3 +448,20 @@ await wait(60)
 const clean = await renderUntilStable(makeElement(chip, { sessionId: 's-3' }), 'chip-s3')
 ok('改动清零后徽标消失', badgeOf(clean).length === 0)
 ok('tooltip 这时才说工作区干净', String(clean.props.title).indexOf('工作区干净') >= 0)
+
+console.log('')
+console.log('=== 一个页面里的两个会话：各自轮询自己的工作区 ===')
+/* 没有应用过仓库时，轮询问的是「这个会话自己的工作区」，而每个面板和 chip 都是
+   从这个状态开始的。按仓库路径当键的时候，这个状态只有一个条目：两个会话先后
+   把自己的 id 写进去，最后一个赢 —— 另一个会话于是去轮询别人的工作区，自己改
+   了看不见，别人改了自己重读。键里带上会话，一个 tick 就该问出两个 id。 */
+const beforeTwo = calls.length
+await renderUntilStable(makeElement('div', null,
+  makeElement(chip, { sessionId: 's-A', key: 'a' }),
+  makeElement(chip, { sessionId: 's-B', key: 'b' })), 'two-chips')
+tick()
+await wait(40)
+const askedSessions = since(beforeTwo).filter((c) => c.method === 'git/watch').map((c) => c.args.sessionId)
+console.log('  这一轮问过的会话:', JSON.stringify(askedSessions))
+ok('两个会话各问各的（不是同一个 id 问两遍）',
+  askedSessions.indexOf('s-A') >= 0 && askedSessions.indexOf('s-B') >= 0)

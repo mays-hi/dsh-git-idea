@@ -92,9 +92,18 @@ define('git_log', {
   execute: async function (args, exec) {
     const requested = typeof args.maxCount === 'number' && args.maxCount > 0 ? Math.floor(args.maxCount) : 20
     const maxCount = requested > 200 ? 200 : requested
+    const ref = isStr(args.ref) ? args.ref.trim() : ''
+    const path = isStr(args.path) ? args.path.trim() : ''
+    /* A revision is positional, so a "-"-leading one is an option to git. A path
+       is not guarded here: it travels after `--`, where git already reads it as a
+       path, and a file called `-notes.txt` is a legitimate name. */
+    const bad = optionLike([['ref', ref]])
+    if (bad !== null) {
+      return { ok: false, cwd: here(args, exec), exitCode: null, stderr: bad.reason, error: 'option-like-value' }
+    }
     const argv = ['-c', 'core.quotePath=false', 'log', '--max-count=' + String(maxCount), '--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1f%D%x1e']
-    if (isStr(args.ref) && args.ref.trim().length > 0) argv.push(args.ref.trim())
-    if (isStr(args.path) && args.path.trim().length > 0) { argv.push('--'); argv.push(args.path.trim()) }
+    if (ref.length > 0) argv.push(ref)
+    if (path.length > 0) { argv.push('--'); argv.push(path) }
     const result = await git(args, argv, exec, {})
     if (result.exitCode !== 0) {
       return { ok: false, cwd: result.cwd, exitCode: result.exitCode, stderr: result.stderr, error: 'log-failed' }
@@ -147,6 +156,10 @@ define('git_diff', {
   },
   execute: async function (args, exec) {
     const mode = isStr(args.mode) ? args.mode : 'worktree'
+    const bad = optionLike([['ref', isStr(args.ref) ? args.ref.trim() : ''], ['to', isStr(args.to) ? args.to.trim() : '']])
+    if (bad !== null) {
+      return { ok: false, cwd: here(args, exec), exitCode: null, stderr: bad.reason, error: 'option-like-value' }
+    }
     const requested = typeof args.maxFiles === 'number' && args.maxFiles > 0 ? Math.floor(args.maxFiles) : 12
     const maxFiles = requested > 50 ? 50 : requested
     const paths = Array.isArray(args.paths) ? args.paths.filter(isStr) : []
@@ -301,6 +314,11 @@ define('git_branch', {
     if (action !== 'list' && name === null) {
       return { ok: false, action: action, cwd: here(args, exec), error: 'name is required for action ' + action }
     }
+    const startPoint = isStr(args.startPoint) ? args.startPoint.trim() : ''
+    const bad = optionLike([['name', name === null ? '' : name], ['startPoint', startPoint]])
+    if (bad !== null) {
+      return { ok: false, action: action, cwd: here(args, exec), exitCode: null, stderr: bad.reason, error: 'option-like-value' }
+    }
     if (action === 'delete' && args.force === true && args.confirm !== true) {
       return { ok: false, action: action, cwd: here(args, exec), blocked: 'confirmation-required', reason: 'force-deleting a branch discards commits that are not merged anywhere else' }
     }
@@ -335,9 +353,9 @@ define('git_branch', {
     let argv
     if (action === 'create') {
       argv = ['branch', name]
-      if (isStr(args.startPoint) && args.startPoint.trim().length > 0) argv.push(args.startPoint.trim())
+      if (startPoint.length > 0) argv.push(startPoint)
     } else if (action === 'switch') {
-      if (isStr(args.startPoint) && args.startPoint.trim().length > 0) argv = ['switch', '-c', name, args.startPoint.trim()]
+      if (startPoint.length > 0) argv = ['switch', '-c', name, startPoint]
       else argv = ['switch', name]
     } else if (action === 'delete') {
       argv = ['branch', args.force === true ? '-D' : '-d', name]
@@ -444,9 +462,25 @@ define('git_sync', {
     const branch = isStr(args.branch) && args.branch.trim().length > 0 ? args.branch.trim() : null
     const url = isStr(args.url) && args.url.trim().length > 0 ? args.url.trim() : null
     const cwd = here(args, exec)
+    const bad = optionLike([['remote', remote], ['branch', branch], ['url', url]])
+    if (bad !== null) {
+      return { ok: false, action: action, cwd: cwd, exitCode: null, stderr: bad.reason, error: 'option-like-value' }
+    }
 
-    if (action === 'push' && args.force === 'force' && branch !== null && PROTECTED_BRANCHES.indexOf(branch) >= 0) {
-      return { ok: false, action: action, cwd: cwd, blocked: 'forbidden', reason: 'force-pushing to a protected branch (main/master) is never allowed' }
+    if (action === 'push' && args.force === 'force') {
+      /* The branch that is not named is the branch you are on, and "a protected
+         branch can never be force-pushed" has to mean that branch too: without
+         this, `force: 'force'` with no branch force-pushed whatever was checked
+         out after a bare `confirm`. Resolved here, once, on the one path that
+         needs it. */
+      let target = branch
+      if (target === null) {
+        const head = await git(args, ['symbolic-ref', '--quiet', '--short', 'HEAD'], exec, {})
+        target = head.exitCode === 0 ? head.stdout.trim() : null
+      }
+      if (target !== null && isProtectedBranch(target)) {
+        return { ok: false, action: action, cwd: cwd, blocked: 'forbidden', reason: 'force-pushing to a protected branch (main/master) is never allowed' }
+      }
     }
     if (action === 'push' && (args.force === 'force' || args.force === 'lease') && args.confirm !== true) {
       return { ok: false, action: action, cwd: cwd, blocked: 'confirmation-required', reason: 'a force push overwrites remote history' }

@@ -9,8 +9,15 @@
          visible row to a parent far below is still the same curve it was. */
       const first = typeof props.first === 'number' ? props.first : 0
       const last = typeof props.last === 'number' ? Math.min(props.last, rows.length) : rows.length
-      const rowOf = {}
-      for (let i = 0; i < commits.length; i += 1) rowOf[commits[i].hash] = i
+      /* Rebuilt only when the history itself changes. It used to be built on
+         every render, and the graph re-renders on every scroll tick (the window
+         edges are its props) — so scrolling a 400-commit history rebuilt a
+         400-entry map per frame for the two hashes the window's edges look up. */
+      const rowOf = useMemo(function () {
+        const map = {}
+        for (let i = 0; i < commits.length; i += 1) map[commits[i].hash] = i
+        return map
+      }, [commits])
       const cx = function (lane) { return lane * LANE_W + LANE_W / 2 + 3 }
       const cy = function (row) { return row * ROW_H + ROW_H / 2 }
       const shapes = []
@@ -64,7 +71,6 @@
       }
       return h('div', {
         className: 'dsh-git-crow' + (props.selected === true ? ' dsh-git-crow-sel' : ''),
-        key: commit.hash,
         title: commit.hash + '\n' + commit.subject,
         onClick: function () { props.onPick(commit.hash) },
       },
