@@ -125,14 +125,23 @@
         const workCode = text(file.workCode)
         if (staged === true) {
           /* A path the index has never seen is an addition, whatever it looked
-             like before; anything else keeps the index code it had. */
-          next.staged.push({ path: path, code: indexCode.length > 0 ? indexCode : (file.untracked === true ? 'A' : 'M') })
-        } else if (indexCode === 'A' || file.untracked === true) {
+             like before; anything else keeps the index code it had. The addition
+             is spelled the way the read behind this prediction will spell it —
+             the porcelain pair `A.` — because the prediction and its confirmation
+             disagreeing is itself a visible thing: `diffSig` moves on the index
+             code, so a patch on screen is re-read for a difference that is not a
+             difference. */
+          const added = file.untracked === true || addedInIndex(indexCode)
+          next.staged.push({ path: path, code: added ? 'A.' : (indexCode.length > 0 ? indexCode : 'M.') })
+        } else if (addedInIndex(indexCode) || file.untracked === true) {
           /* Unstaging an addition does not make it modified: HEAD has no such
-             path, so it goes back to being untracked. */
+             path, so it goes back to being untracked. This branch takes the first
+             letter of the index code — see addedInIndex: a bare `A` is not one of
+             the shapes git prints, and the whole-string test that was here sent
+             every untick of a new file into the changelist for a frame. */
           next.untracked.push({ path: path, code: '??' })
         } else {
-          next.unstaged.push({ path: path, code: workCode.length > 0 ? workCode : (indexCode.length > 0 ? indexCode : 'M') })
+          next.unstaged.push({ path: path, code: workCode.length > 0 ? workCode : (indexCode.length > 0 ? indexCode : 'M.') })
         }
       }
       return next

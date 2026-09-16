@@ -51,6 +51,23 @@
       return 'M'
     }
 
+    /* ── "this path is an addition" is one question, asked in one place ──
+
+       `git status --porcelain=v2` prints the index letter and the worktree letter
+       together, so a path the index has added reads `A.` (added, unchanged since)
+       or `AM` (added, then edited) — a bare `A` is a shape this code base only
+       ever made up itself. Two places ask the question: which changelist a row
+       belongs to, and what an untick is about to turn this path back into. They
+       answered it differently — one took the first letter, the other compared the
+       whole string to `A` — and the second one was wrong, so unticking a new file
+       (already confirmed by a read, and therefore carrying `A.`) was predicted as
+       "modified in the worktree": the row jumped into 默认变更列表 for as long as
+       `git restore --staged` and the read behind it took, then jumped back. Asked
+       once, the two cannot drift apart again. */
+    function addedInIndex(code) {
+      return text(code).slice(0, 1) === 'A'
+    }
+
     function splitRefs(value) {
       const raw = text(value)
       if (raw.length === 0) return []

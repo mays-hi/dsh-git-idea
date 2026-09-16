@@ -1125,16 +1125,95 @@ ok('右边那句数的是框（项），不再是「个文件」',
   stageLineOf(tree).indexOf('已暂存 1 / 共 4 项') >= 0)
 
 /* 点一组的框：整组的路径都发给 git，本地这一帧就全勾上（不等 git 回话）。
-   把 git/stage 扣住不回答，就是为了看这一帧 —— 一帧一帧地看，先把变更列表那一组
-   点完（它此刻正好 1 个已暂存 + 1 个没暂存），再点未跟踪那一组。 */
+
+   mock 照着 Host 的样子回答：按路径的问法只回答被问到的那几条，而且**记住**刚被暂存的
+   东西。这是必须的 —— 面板现在把改动按点击顺序排队（80-panel.js 的 queueMutation：
+   并发的 `git add` 会互相抢 .git/index.lock，在 /tmp 里量过一次，39 个并发 add 有 **29
+   个**直接死在 `Unable to create .git/index.lock: File exists`），所以第二次点击要等
+   第一次被回答才会发出去。mock 要还是扣着不回答，第二次点击就只会排在队里。 */
+const groupIdentity = {
+  ok: true, repo: '/tmp/ws', branch: 'main', detached: false,
+  upstream: 'origin/main', ahead: 0, behind: 0, sequencer: null,
+}
+const groupState = {
+  staged: [{ path: 'src/app.js', code: 'M.' }],
+  unstaged: [{ path: 'src/app.js', code: 'M.' }, { path: 'notes.md', code: 'M.' }],
+  untracked: [{ path: 'tmp.bin', code: '??' }, { path: 'newdir/', code: '??' }],
+}
+const GROUP_TRACKED = { 'src/app.js': true, 'notes.md': true }
 const groupSaved = host.call
-const heldStages = []
 let groupAsk = null
+const groupDrop = function (list, path) {
+  for (let i = list.length - 1; i >= 0; i -= 1) if (list[i].path === path) list.splice(i, 1)
+}
+const groupApply = function (method, paths) {
+  for (let i = 0; i < paths.length; i += 1) {
+    const p = paths[i]
+    groupDrop(groupState.staged, p); groupDrop(groupState.unstaged, p); groupDrop(groupState.untracked, p)
+    if (method === 'git/stage') {
+      /* git 折叠未跟踪目录：暂存 `newdir/` 之后索引里是它里面的文件。已经跟踪过的
+         文件暂存起来是 `M.`（改动的那个字母），只有 HEAD 没有过的路径才是 `A.` ——
+         这个字母就是分组判据本身，mock 写错了整组都会换地方。 */
+      if (p.slice(-1) === '/') groupState.staged.push({ path: p + 'a.txt', code: 'A.' }, { path: p + 'deep/b.txt', code: 'A.' })
+      else groupState.staged.push({ path: p, code: GROUP_TRACKED[p] === true ? 'M.' : 'A.' })
+    } else if (GROUP_TRACKED[p] === true) {
+      groupState.unstaged.push({ path: p, code: '.M' })
+    } else {
+      groupState.untracked.push({ path: p, code: '??' })
+    }
+  }
+  /* 撤出索引之后那个目录又整个是未跟踪的；整树读会把它重新折叠成一条（量过真 git：
+     `git restore --staged -- newdir/a.txt newdir/deep/b.txt` 之后整树读是 `? newdir/`，
+     而按这两个文件的路径去问，回答的是 `? newdir/a.txt` / `? newdir/deep/b.txt`，
+     不折叠）。所以折叠只发生在整树读那次回答里。 */
+}
+const groupCollapsed = function (entries) {
+  const out = []
+  const seen = {}
+  for (let i = 0; i < entries.length; i += 1) {
+    const p = entries[i].path
+    const cut = p.lastIndexOf('/')
+    if (cut < 0) { out.push(entries[i]); continue }
+    const top = p.slice(0, cut + 1)
+    if (seen[top] === true) continue
+    seen[top] = true
+    out.push({ path: top, code: '??' })
+  }
+  return out
+}
+const groupReplyFor = function (paths) {
+  const wanted = function (p) {
+    for (let i = 0; i < paths.length; i += 1) {
+      const one = paths[i]
+      if (p === one) return true
+      if (one.slice(-1) === '/' && p.indexOf(one) === 0) return true
+    }
+    return false
+  }
+  const pick = function (entries) {
+    return entries.filter(function (e) { return wanted(e.path) }).map(function (e) { return { path: e.path, code: e.code } })
+  }
+  return Object.assign({}, groupIdentity, {
+    partial: true, paths: paths,
+    staged: pick(groupState.staged), unstaged: pick(groupState.unstaged),
+    untracked: pick(groupState.untracked), unmerged: [],
+  })
+}
 host.call = function (method, args) {
+  if (method === 'git/panel') {
+    calls.push({ method: method, args: args })
+    if (args != null && args.quick === true) return Promise.resolve(groupIdentity)
+    if (args != null && Array.isArray(args.paths)) return Promise.resolve(groupReplyFor(args.paths))
+    return Promise.resolve(Object.assign({}, groupIdentity, {
+      staged: groupState.staged.slice(), unstaged: groupState.unstaged.slice(),
+      untracked: groupCollapsed(groupState.untracked), unmerged: [],
+    }))
+  }
   if (method === 'git/stage' || method === 'git/unstage') {
     calls.push({ method: method, args: args })
     groupAsk = { method: method, args: args }
-    return new Promise(function (resolve) { heldStages.push(resolve) })
+    groupApply(method, args.paths)
+    return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
   }
   return groupSaved(method, args)
 }
@@ -1178,32 +1257,35 @@ ok('本地这一帧就勾上了（tmp.bin 的框已是 ☑）',
     const row = changeRow(tree, 'tmp.bin')
     return row !== undefined && textOf(byClass(row, 'dsh-git-cbox')[0]) === '☑'
   })())
-ok('这一组还在（没有跳进变更列表），两行都留在这里',
+ok('这一组还在（没有跳进变更列表）：tmp.bin 留在这一组，那个目录展开成它里面的文件也在',
   groupRow(tree, '新增的文件') !== undefined
-  && changeRow(tree, 'tmp.bin') !== undefined && changeRow(tree, 'newdir/') !== undefined)
+  && membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('tmp.bin') >= 0 })
+  && membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('a.txt') >= 0 }))
 ok('这一组的框变成全选 ☑（组里的行都进索引了）',
   groupBox(tree, '新增的文件') !== undefined && textOf(groupBox(tree, '新增的文件')) === '☑')
 ok('变更列表里没有混进新文件（新文件还在自己那一组里）',
   membersOf(tree, '默认变更列表').every(function (x) {
-    return x.indexOf('tmp.bin') < 0 && x.indexOf('newdir/') < 0
+    return x.indexOf('tmp.bin') < 0 && x.indexOf('newdir') < 0 && x.indexOf('a.txt') < 0
   }))
 
-/* 再点一次：整组撤出索引，行还是留在这一组里，只是框回到空的（可以来回切） */
+/* 再点一次：整组撤出索引，行还是留在这一组里，只是框回到空的（可以来回切）。
+   组里的条目这时是索引里的三个文件 —— `newdir/` 一旦进了索引就展开成了它里面的文件，
+   所以这次发出去的是那三个路径，不是折叠的那一条。撤出之后 git 又把那个目录折叠回一条。 */
 groupAsk = null
 press(groupBox(tree, '新增的文件'), 'onClick', { stopPropagation: function () {} })
 await wait(10)
 tree = await settle()
-ok('再点一次是整组撤出索引（unstage，路径还是整组）',
+ok('再点一次是整组撤出索引（unstage，路径是组里此刻的三条）',
   groupAsk != null && groupAsk.method === 'git/unstage'
-  && groupAsk.args.paths.slice().sort().join(',') === 'newdir/,tmp.bin')
+  && groupAsk.args.paths.slice().sort().join(',') === 'newdir/a.txt,newdir/deep/b.txt,tmp.bin')
 ok('撤出之后这一组照样在，框回到空的',
   groupRow(tree, '新增的文件') !== undefined
   && textOf(groupBox(tree, '新增的文件')) === '☐'
   && changeRow(tree, 'tmp.bin') !== undefined)
+ok('撤出之后组里的条目回到未跟踪（同一组，框都是空的）',
+  membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('a.txt') >= 0 })
+  && membersOf(tree, '新增的文件').some(function (x) { return x.indexOf('tmp.bin') >= 0 }))
 
-for (let i = 0; i < heldStages.length; i += 1) {
-  heldStages[i]({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
-}
 host.call = groupSaved
 await wait(10)
 tree = await settle()
@@ -1276,3 +1358,244 @@ ok('按路径的读和「问哪些路径」都走 entryPath（一个读法，两
   /function mergePanelStatus[\s\S]{0,1600}entryPath\(/.test(panelCss)
   && /function pathsOfInterest[\s\S]{0,1600}entryPath\(/.test(panelCss)
   && /function stageLocally[\s\S]{0,1600}entryPath\(/.test(panelCss))
+
+/* ── 13. 勾一下只动那一行 ──
+
+   读者看着运行中的面板说「还是有点闪动」。一帧一帧量过之后，闪的是三处，都不是点击
+   本身：
+
+   1. 整个面板变暗。勾一下会抬起面板级的 `busy`，而 `busy` 是全局的：头部四个工具和
+      提交按钮在它挂着的时候按 40–45% 不透明度渲染，提交按钮的文字还换成「处理中…」
+      （宽度一变，右边整块跟着动）。`git add` 在这台机器上是 98–236ms，所以每勾一下，
+      工具条和提交那一栏都闪一次。
+   2. 那一行自己会跳。`mergeChanges` 的次序来自 git 回答的列表（索引在前、工作区次之、
+      未跟踪最后），于是条目在列表里的位置说明了它来自哪个列表；勾上 = 进索引 = 挪到本组
+      最前面。量到：三个新文件里勾第二个，这一组从 `[tmp.bin, zztail.bin, newdir/]`
+      重画成 `[zztail.bin, tmp.bin, newdir/]`，取消勾选再挪一次。
+   3. 取消勾选时那一行会**跳到另一组再跳回来**。`stageLocally` 的「回到未跟踪」分支比的
+      是整串 `indexCode === 'A'`，而 Host 报的是 porcelain 的两个字母 `A.` / `AM`（同一
+      份代码里 `isNewFile` 走的是首字母）。于是取消勾选被预测成「工作区改了」，行落进
+      默认变更列表，等 `git restore --staged` 和它后面那次读回来才跳回新增的文件。
+
+   这一节把三件事都钉住：行的次序只由路径决定，勾一下不碰面板级的任何东西，取消勾选
+   预测的是「回到未跟踪」。用的 mock 和 Host 一样回答 `partial`（按路径的问法），并且
+   按帧渲染 —— 变暗和跳组都只发生在中途那一两帧里，settle 之后是看不见的。 */
+console.log('')
+console.log('== 勾一下只动那一行 ==')
+
+const rowsInGroup = function (t, label) {
+  const rws = byClass(t, 'dsh-git-trow')
+  const out = []
+  let cur = ''
+  for (let i = 0; i < rws.length; i += 1) {
+    if (String(rws[i].props.className).indexOf('dsh-git-cgroup') >= 0) { cur = textOf(rws[i]); continue }
+    if (cur.indexOf(label) >= 0) {
+      /* 名字那一格，不是整行的文字：行里还有框、状态字母（? → A 正是勾选该做的事），
+         次序要比的是「哪个文件在第几个」，那些都不是位置。 */
+      const cell = byClass(rws[i], 'dsh-git-tname')[0]
+      out.push(cell === undefined ? textOf(rws[i]) : textOf(cell))
+    }
+  }
+  return out
+}
+const dimmedTools = function (t) {
+  return byClass(t, 'dsh-git-tool').filter(function (b) { return b.props.disabled === true }).length
+}
+const primaryText = function (t) {
+  const b = byClass(t, 'dsh-git-primary')[0]
+  return b === undefined ? '' : textOf(b)
+}
+const sameOrder = function (a, b) {
+  return a.length === b.length && a.every(function (x, i) { return x === b[i] })
+}
+
+/* 一个有状态的 mock 仓库：勾了会记得，按路径读只回答被问到的路径。 */
+const tickState = {
+  staged: [{ path: 'src/app.js', code: 'M.' }],
+  unstaged: [{ path: 'src/app.js', code: 'M.' }, { path: 'notes.md', code: 'M.' }],
+  untracked: [{ path: 'tmp.bin', code: '??' }, { path: 'zztail.bin', code: '??' }, { path: 'newdir/', code: '??' }],
+}
+const tickIdentity = {
+  ok: true, repo: '/tmp/ws', branch: 'main', detached: false,
+  upstream: 'origin/main', ahead: 0, behind: 0, sequencer: null,
+}
+const tickReply = function (paths) {
+  const wanted = function (p) {
+    for (let i = 0; i < paths.length; i += 1) {
+      const one = paths[i]
+      if (p === one) return true
+      if (one.slice(-1) === '/' && p.indexOf(one) === 0) return true
+    }
+    return false
+  }
+  const pick = function (entries) {
+    return entries.filter(function (e) { return wanted(e.path) }).map(function (e) { return { path: e.path, code: e.code } })
+  }
+  return Object.assign({}, tickIdentity, {
+    partial: true, paths: paths,
+    staged: pick(tickState.staged), unstaged: pick(tickState.unstaged),
+    untracked: pick(tickState.untracked), unmerged: [],
+  })
+}
+const tickWhole = function () {
+  return Object.assign({}, tickIdentity, {
+    staged: tickState.staged.slice(), unstaged: tickState.unstaged.slice(),
+    untracked: tickState.untracked.slice(), unmerged: [],
+  })
+}
+const heldStage = []
+const heldTickRead = []
+const tickSaved = host.call
+host.call = function (method, args) {
+  if (method === 'git/panel') {
+    calls.push({ method: method, args: args })
+    if (args != null && args.quick === true) return Promise.resolve(tickIdentity)
+    if (args != null && Array.isArray(args.paths)) {
+      return new Promise(function (resolve) { heldTickRead.push({ paths: args.paths, resolve: resolve }) })
+    }
+    return Promise.resolve(tickWhole())
+  }
+  if (method === 'git/stage' || method === 'git/unstage') {
+    calls.push({ method: method, args: args })
+    return new Promise(function (resolve) { heldStage.push({ method: method, args: args, resolve: resolve }) })
+  }
+  return tickSaved(method, args)
+}
+const applyHeldStage = function (entry) {
+  const paths = entry.args.paths
+  for (let i = 0; i < paths.length; i += 1) {
+    const p = paths[i]
+    const drop = function (list) { for (let k = list.length - 1; k >= 0; k -= 1) if (list[k].path === p) list.splice(k, 1) }
+    drop(tickState.staged); drop(tickState.unstaged); drop(tickState.untracked)
+    if (entry.method === 'git/stage') {
+      if (p.slice(-1) === '/') tickState.staged.push({ path: p + 'a.txt', code: 'A.' }, { path: p + 'deep/b.txt', code: 'A.' })
+      else tickState.staged.push({ path: p, code: 'A.' })
+    } else {
+      tickState.untracked.push({ path: p, code: '??' })
+    }
+  }
+}
+const answerStage = function () {
+  const done = heldStage.splice(0)
+  for (let i = 0; i < done.length; i += 1) {
+    applyHeldStage(done[i])
+    done[i].resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
+  }
+  return done.length
+}
+const answerTickReads = function () {
+  const pending = heldTickRead.splice(0)
+  for (let i = 0; i < pending.length; i += 1) pending[i].resolve(tickReply(pending[i].paths))
+  return pending.length
+}
+const tickElement = function () { return makeElement(popover, { sessionId: 's-1' }) }
+const targetTickReads = function () {
+  return calls.filter(function (c) {
+    return c.method === 'git/panel' && c.args.quick !== true && Array.isArray(c.args.paths)
+  })
+}
+
+fibers.clear()
+tree = await openPanel()
+press(tabBtn(tree, '变更'), 'onClick')
+await wait(10)
+tree = await settle()
+
+ok('前提：两组都按路径排，和索引状态无关（新增那一组是 newdir/ · tmp.bin · zztail.bin）',
+  sameOrder(rowsInGroup(tree, '新增的文件'), ['newdir/', 'tmp.bin', 'zztail.bin'])
+  && sameOrder(rowsInGroup(tree, '默认变更列表'), ['src', 'app.js', 'notes.md']))
+
+const tickOn = async function (label) {
+  const row = changeRow(tree, label)
+  const box = row === undefined ? undefined : byClass(row, 'dsh-git-cbox')[0]
+  if (box === undefined) return null
+  calls.length = 0
+  box.props.onClick({ stopPropagation: function () {} })
+  const frame1 = renderRoot(tickElement(), 'pop')
+  await wait(1)
+  const sent = answerStage()
+  await wait(1)
+  const frame2 = renderRoot(tickElement(), 'pop')
+  const reads = answerTickReads()
+  await wait(20)
+  tree = await settle()
+  return { sent: sent, reads: reads, frame1: frame1, frame2: frame2, frame3: tree, calls: calls.slice() }
+}
+
+/* ── 勾上 ── */
+const orderBefore = rowsInGroup(tree, '新增的文件')
+const on = await tickOn('zztail.bin')
+ok('勾上：一次 git/stage，路径正好是那一条',
+  on !== null && on.sent === 1
+  && on.calls.filter(function (c) { return c.method === 'git/stage' })[0].args.paths.join(',') === 'zztail.bin')
+ok('勾上：随后照旧有一次按路径的确认读（问的就是这一条）',
+  on !== null && on.reads >= 1
+  && on.calls.filter(function (c) { return c.method === 'git/panel' && Array.isArray(c.args.paths) })[0].args.paths.join(',') === 'zztail.bin')
+ok('勾上：三帧里那一行的位置一模一样（行序只由路径决定）',
+  on !== null && sameOrder(rowsInGroup(on.frame1, '新增的文件'), orderBefore)
+  && sameOrder(rowsInGroup(on.frame2, '新增的文件'), orderBefore)
+  && sameOrder(rowsInGroup(on.frame3, '新增的文件'), orderBefore))
+ok('勾上：它还在新增的文件里，只是框变成 ☑',
+  on !== null && glyphOf(changeRow(on.frame1, 'zztail.bin')) === '☑'
+  && rowsInGroup(on.frame3, '新增的文件').indexOf('zztail.bin') >= 0
+  && membersOf(on.frame3, '默认变更列表').every(function (x) { return x.indexOf('zztail.bin') < 0 }))
+ok('勾上：这一刻面板没有变暗 —— 头部没有工具被禁用',
+  on !== null && dimmedTools(on.frame1) === 0)
+ok('勾上：提交按钮还是那句话，没有变成「处理中…」',
+  on !== null && primaryText(on.frame1).indexOf('提交') === 0
+  && primaryText(on.frame1).indexOf('处理中') < 0)
+
+/* ── 取消勾选：这一行不许跳进另一组再跳回来 ── */
+const off = await tickOn('zztail.bin')
+ok('取消勾选：一次 git/unstage',
+  off !== null && off.sent === 1
+  && off.calls.filter(function (c) { return c.method === 'git/unstage' })[0].args.paths.join(',') === 'zztail.bin')
+ok('取消勾选：预测的是「回到未跟踪」（A. 也要认，以前只认裸 A）',
+  off !== null && glyphOf(changeRow(off.frame1, 'zztail.bin')) === '☐'
+  && textOf(byClass(changeRow(off.frame1, 'zztail.bin'), 'dsh-git-st')[0]) === '?'
+  && membersOf(off.frame1, '默认变更列表').every(function (x) { return x.indexOf('zztail.bin') < 0 }))
+ok('取消勾选：三帧都不动，它留在原处',
+  off !== null && sameOrder(rowsInGroup(off.frame1, '新增的文件'), orderBefore)
+  && sameOrder(rowsInGroup(off.frame2, '新增的文件'), orderBefore)
+  && sameOrder(rowsInGroup(off.frame3, '新增的文件'), orderBefore))
+ok('取消勾选：面板同样没有变暗，按钮也没换字',
+  off !== null && dimmedTools(off.frame1) === 0 && primaryText(off.frame1).indexOf('处理中') < 0)
+
+/* ── 提交排在勾选后面 ──
+   `busy` 以前是提交按钮的锁（勾选在飞的时候它按不动），撤掉它就得把这把锁换个地方：
+   命令按点击顺序排队，提交排在前面那次勾选后面。 */
+const commitOrder = await (async function () {
+  const box = byClass(changeRow(tree, 'tmp.bin'), 'dsh-git-cbox')[0]
+  calls.length = 0
+  box.props.onClick({ stopPropagation: function () {} })
+  await wait(1)
+  const textarea = collect(tree).filter(function (n) { return n.type === 'textarea' })[0]
+  if (textarea !== undefined) textarea.props.onChange({ target: { value: '把这次勾上提交掉' } })
+  await wait(5)
+  tree = await settle()
+  const button = byClass(tree, 'dsh-git-primary')[0]
+  const enabled = button !== undefined && button.props.disabled !== true
+  if (enabled) button.props.onClick()
+  await wait(5)
+  const beforeAnswer = calls.map(function (c) { return c.method })
+  const sent = answerStage()
+  await wait(10)
+  answerTickReads()
+  await wait(20)
+  tree = await settle()
+  return { enabled: enabled, beforeAnswer: beforeAnswer, sent: sent, after: calls.map(function (c) { return c.method }) }
+})()
+ok('勾选在飞的时候提交按钮是可按的（不再靠禁用闪一下来挡）', commitOrder.enabled)
+ok('但那一次提交还没发出去（排队等前面那次勾选）',
+  commitOrder.beforeAnswer.indexOf('git/commit') < 0)
+ok('勾选一被回答，提交才跟着发出去（顺序不会反）',
+  commitOrder.sent === 1 && commitOrder.after.indexOf('git/commit') > commitOrder.after.indexOf('git/unstage'))
+
+/* 同一个判据只能有一处：「这个路径是新增吗」。分组规则（isNewFile）和取消勾选的预测
+   （stageLocally）必须问同一个问题，不然两种字母形状又会各认各的。 */
+ok('「是不是新增」只有一个读法（isNewFile 和 stageLocally 都走 addedInIndex）',
+  /function addedInIndex[\s\S]{0,200}slice\(0, 1\) === 'A'/.test(panelCss)
+  && /function isNewFile[\s\S]{0,400}addedInIndex\(/.test(panelCss)
+  && /function stageLocally[\s\S]{0,2000}addedInIndex\(/.test(panelCss))
+
+host.call = tickSaved

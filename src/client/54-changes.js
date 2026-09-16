@@ -43,7 +43,9 @@
 
     function isNewFile(entry) {
       if (entry.untracked === true) return true
-      return entry.staged === true && text(entry.indexCode).slice(0, 1) === 'A'
+      /* The addition test lives in one place (40-format.js): the untick
+         prediction asks the same question about the same letters. */
+      return entry.staged === true && addedInIndex(entry.indexCode)
     }
 
     function ChangesPane(props) {
@@ -68,6 +70,22 @@
         if (isNewFile(entry)) fresh.push(entry)
         else tracked.push(entry)
       }
+
+      /* ── the order is a property of the paths, not of the index ──
+
+         `mergeChanges` orders entries by the list git answered in — the index
+         entries first, then the worktree, then the untracked ones — so an entry's
+         place in the list said which list it came from, and ticking its box moved
+         it to the front of its own group: measured on a probe of the running
+         panel, ticking the second of three new files repainted the group as
+         `[zztail.bin, tmp.bin, newdir/]` where it had been
+         `[tmp.bin, zztail.bin, newdir/]`, and every untick moved it again. A tick
+         must move the box and nothing else, so both groups are sorted by path
+         first: two readers looking at the same paths see the same rows in the
+         same places, whatever the index happens to say about them. */
+      const byPath = function (a, b) { return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0) }
+      tracked.sort(byPath)
+      fresh.sort(byPath)
 
       /* ── the indent is not the row's padding ──
          A row's own padding-left moved the checkbox along with the tree, so the

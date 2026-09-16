@@ -80,7 +80,7 @@
          rather than in the state alone: an effect keeps the render it was created
          in, so a callback registered once would otherwise read a stale
          `status` for as long as its dependencies do not move. */
-      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '' } })
+      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '', mutations: Promise.resolve() } })
       panelBox.status = status
 
       /* work is the only truth about whether this path is a usable repository.
@@ -515,6 +515,28 @@
         }).catch(function () {})
       }
 
+      /* ── one mutation after another, and none of them dims the panel ──
+
+         A tick used to raise the panel's `busy` flag for as long as `git add`
+         took (98–236ms measured, plus the read behind it), and `busy` is a
+         panel-wide thing: the four header tools and the commit button render at
+         40–45% opacity while it is up, and the commit button's own label swaps to
+         `处理中…`, so the row's box moving was accompanied by the toolbar and the
+         commit pane blinking on every single tick. What the flag was also buying
+         is bought here instead: the two things a burst of clicks needs are order
+         (the reader's calls reach git in the order they made them, so a tick and
+         the untick after it cannot land reversed) and a commit that sees the
+         index the reader sees (`git add` and `git commit` are separate processes,
+         and a commit that starts before the add has finished commits the index
+         from before the tick). */
+      const queueMutation = function (run) {
+        const next = panelBox.mutations.then(run, run)
+        /* The chain itself must not carry a rejection forward: a failed `git add`
+           is reported on screen, not by poisoning every mutation after it. */
+        panelBox.mutations = next.then(function () {}, function () {})
+        return next
+      }
+
       const setStaged = function (files, staged) {
         if (files.length === 0) return
         const paths = []
@@ -526,27 +548,29 @@
         /* Everything already in flight describes the index before this call; one
            of those replies landing after it would paint the tick back to empty. */
         bumpRepoEpoch(appliedRepo, sessionId)
+        const epoch = repoEpoch(appliedRepo, sessionId)
         const before = panelBox.status
         const patched = stageLocally(before, files, staged)
         if (patched !== null) {
           panelBox.status = patched
           setStatus(patched)
         }
-        setBusy(true)
         const request = base(appliedRepo)
         request.paths = paths
-        rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
-          setBusy(false)
-          setError(null)
-          confirmStaged(paths)
-        }, function (failure) {
-          setBusy(false)
-          setError(failureText(failure))
-          /* git did not do it, so the tree goes back to what git last said. */
-          if (before !== undefined) {
-            panelBox.status = before
-            setStatus(before)
-          }
+        queueMutation(function () {
+          return rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
+            setError(null)
+            /* Only the newest click may paint from a read. A reply about a state
+               the reader has already moved past — the tick this one replaced —
+               would put that box back where it was for a frame. */
+            if (epoch === repoEpoch(appliedRepo, sessionId)) confirmStaged(paths)
+          }, function (failure) {
+            setError(failureText(failure))
+            /* git did not do it, so those paths go back to what git last said —
+               read, not from a snapshot that a later click has already moved on
+               from. The newest click's own read is the one that answers. */
+            if (epoch === repoEpoch(appliedRepo, sessionId)) confirmStaged(paths)
+          })
         })
       }
 
@@ -563,16 +587,22 @@
         const request = base(appliedRepo)
         request.message = message.trim()
         if (stagedCount === 0) request.stageAll = true
-        rpc('git/commit', request, '提交失败').then(function () {
-          setBusy(false)
-          setError(null)
-          setMessage('')
-          /* A commit empties the index and the list it was showing: the answer is
-             a read of the whole tree, not of the paths that were on it. */
-          reloadChanges()
-        }, function (failure) {
-          setBusy(false)
-          setError(failureText(failure))
+        /* Behind the ticks rather than racing them: this button is no longer
+           disabled while an `git add` is in flight (that disabled state was half
+           the blink), so the queue is what keeps the commit from describing an
+           index the reader has already moved past. */
+        queueMutation(function () {
+          return rpc('git/commit', request, '提交失败').then(function () {
+            setBusy(false)
+            setError(null)
+            setMessage('')
+            /* A commit empties the index and the list it was showing: the answer is
+               a read of the whole tree, not of the paths that were on it. */
+            reloadChanges()
+          }, function (failure) {
+            setBusy(false)
+            setError(failureText(failure))
+          })
         })
       }
 

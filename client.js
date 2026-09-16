@@ -768,6 +768,23 @@ return {
       return 'M'
     }
 
+    /* ── "this path is an addition" is one question, asked in one place ──
+
+       `git status --porcelain=v2` prints the index letter and the worktree letter
+       together, so a path the index has added reads `A.` (added, unchanged since)
+       or `AM` (added, then edited) — a bare `A` is a shape this code base only
+       ever made up itself. Two places ask the question: which changelist a row
+       belongs to, and what an untick is about to turn this path back into. They
+       answered it differently — one took the first letter, the other compared the
+       whole string to `A` — and the second one was wrong, so unticking a new file
+       (already confirmed by a read, and therefore carrying `A.`) was predicted as
+       "modified in the worktree": the row jumped into 默认变更列表 for as long as
+       `git restore --staged` and the read behind it took, then jumped back. Asked
+       once, the two cannot drift apart again. */
+    function addedInIndex(code) {
+      return text(code).slice(0, 1) === 'A'
+    }
+
     function splitRefs(value) {
       const raw = text(value)
       if (raw.length === 0) return []
@@ -1704,14 +1721,23 @@ textarea.dsh-git-input{resize:vertical}
         const workCode = text(file.workCode)
         if (staged === true) {
           /* A path the index has never seen is an addition, whatever it looked
-             like before; anything else keeps the index code it had. */
-          next.staged.push({ path: path, code: indexCode.length > 0 ? indexCode : (file.untracked === true ? 'A' : 'M') })
-        } else if (indexCode === 'A' || file.untracked === true) {
+             like before; anything else keeps the index code it had. The addition
+             is spelled the way the read behind this prediction will spell it —
+             the porcelain pair `A.` — because the prediction and its confirmation
+             disagreeing is itself a visible thing: `diffSig` moves on the index
+             code, so a patch on screen is re-read for a difference that is not a
+             difference. */
+          const added = file.untracked === true || addedInIndex(indexCode)
+          next.staged.push({ path: path, code: added ? 'A.' : (indexCode.length > 0 ? indexCode : 'M.') })
+        } else if (addedInIndex(indexCode) || file.untracked === true) {
           /* Unstaging an addition does not make it modified: HEAD has no such
-             path, so it goes back to being untracked. */
+             path, so it goes back to being untracked. This branch takes the first
+             letter of the index code — see addedInIndex: a bare `A` is not one of
+             the shapes git prints, and the whole-string test that was here sent
+             every untick of a new file into the changelist for a frame. */
           next.untracked.push({ path: path, code: '??' })
         } else {
-          next.unstaged.push({ path: path, code: workCode.length > 0 ? workCode : (indexCode.length > 0 ? indexCode : 'M') })
+          next.unstaged.push({ path: path, code: workCode.length > 0 ? workCode : (indexCode.length > 0 ? indexCode : 'M.') })
         }
       }
       return next
@@ -1867,7 +1893,9 @@ textarea.dsh-git-input{resize:vertical}
 
     function isNewFile(entry) {
       if (entry.untracked === true) return true
-      return entry.staged === true && text(entry.indexCode).slice(0, 1) === 'A'
+      /* The addition test lives in one place (40-format.js): the untick
+         prediction asks the same question about the same letters. */
+      return entry.staged === true && addedInIndex(entry.indexCode)
     }
 
     function ChangesPane(props) {
@@ -1892,6 +1920,22 @@ textarea.dsh-git-input{resize:vertical}
         if (isNewFile(entry)) fresh.push(entry)
         else tracked.push(entry)
       }
+
+      /* ── the order is a property of the paths, not of the index ──
+
+         `mergeChanges` orders entries by the list git answered in — the index
+         entries first, then the worktree, then the untracked ones — so an entry's
+         place in the list said which list it came from, and ticking its box moved
+         it to the front of its own group: measured on a probe of the running
+         panel, ticking the second of three new files repainted the group as
+         `[zztail.bin, tmp.bin, newdir/]` where it had been
+         `[tmp.bin, zztail.bin, newdir/]`, and every untick moved it again. A tick
+         must move the box and nothing else, so both groups are sorted by path
+         first: two readers looking at the same paths see the same rows in the
+         same places, whatever the index happens to say about them. */
+      const byPath = function (a, b) { return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0) }
+      tracked.sort(byPath)
+      fresh.sort(byPath)
 
       /* ── the indent is not the row's padding ──
          A row's own padding-left moved the checkbox along with the tree, so the
@@ -3549,7 +3593,7 @@ textarea.dsh-git-input{resize:vertical}
          rather than in the state alone: an effect keeps the render it was created
          in, so a callback registered once would otherwise read a stale
          `status` for as long as its dependencies do not move. */
-      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '' } })
+      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '', mutations: Promise.resolve() } })
       panelBox.status = status
 
       /* work is the only truth about whether this path is a usable repository.
@@ -3984,6 +4028,28 @@ textarea.dsh-git-input{resize:vertical}
         }).catch(function () {})
       }
 
+      /* ── one mutation after another, and none of them dims the panel ──
+
+         A tick used to raise the panel's `busy` flag for as long as `git add`
+         took (98–236ms measured, plus the read behind it), and `busy` is a
+         panel-wide thing: the four header tools and the commit button render at
+         40–45% opacity while it is up, and the commit button's own label swaps to
+         `处理中…`, so the row's box moving was accompanied by the toolbar and the
+         commit pane blinking on every single tick. What the flag was also buying
+         is bought here instead: the two things a burst of clicks needs are order
+         (the reader's calls reach git in the order they made them, so a tick and
+         the untick after it cannot land reversed) and a commit that sees the
+         index the reader sees (`git add` and `git commit` are separate processes,
+         and a commit that starts before the add has finished commits the index
+         from before the tick). */
+      const queueMutation = function (run) {
+        const next = panelBox.mutations.then(run, run)
+        /* The chain itself must not carry a rejection forward: a failed `git add`
+           is reported on screen, not by poisoning every mutation after it. */
+        panelBox.mutations = next.then(function () {}, function () {})
+        return next
+      }
+
       const setStaged = function (files, staged) {
         if (files.length === 0) return
         const paths = []
@@ -3995,27 +4061,29 @@ textarea.dsh-git-input{resize:vertical}
         /* Everything already in flight describes the index before this call; one
            of those replies landing after it would paint the tick back to empty. */
         bumpRepoEpoch(appliedRepo, sessionId)
+        const epoch = repoEpoch(appliedRepo, sessionId)
         const before = panelBox.status
         const patched = stageLocally(before, files, staged)
         if (patched !== null) {
           panelBox.status = patched
           setStatus(patched)
         }
-        setBusy(true)
         const request = base(appliedRepo)
         request.paths = paths
-        rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
-          setBusy(false)
-          setError(null)
-          confirmStaged(paths)
-        }, function (failure) {
-          setBusy(false)
-          setError(failureText(failure))
-          /* git did not do it, so the tree goes back to what git last said. */
-          if (before !== undefined) {
-            panelBox.status = before
-            setStatus(before)
-          }
+        queueMutation(function () {
+          return rpc(staged ? 'git/stage' : 'git/unstage', request).then(function () {
+            setError(null)
+            /* Only the newest click may paint from a read. A reply about a state
+               the reader has already moved past — the tick this one replaced —
+               would put that box back where it was for a frame. */
+            if (epoch === repoEpoch(appliedRepo, sessionId)) confirmStaged(paths)
+          }, function (failure) {
+            setError(failureText(failure))
+            /* git did not do it, so those paths go back to what git last said —
+               read, not from a snapshot that a later click has already moved on
+               from. The newest click's own read is the one that answers. */
+            if (epoch === repoEpoch(appliedRepo, sessionId)) confirmStaged(paths)
+          })
         })
       }
 
@@ -4032,16 +4100,22 @@ textarea.dsh-git-input{resize:vertical}
         const request = base(appliedRepo)
         request.message = message.trim()
         if (stagedCount === 0) request.stageAll = true
-        rpc('git/commit', request, '提交失败').then(function () {
-          setBusy(false)
-          setError(null)
-          setMessage('')
-          /* A commit empties the index and the list it was showing: the answer is
-             a read of the whole tree, not of the paths that were on it. */
-          reloadChanges()
-        }, function (failure) {
-          setBusy(false)
-          setError(failureText(failure))
+        /* Behind the ticks rather than racing them: this button is no longer
+           disabled while an `git add` is in flight (that disabled state was half
+           the blink), so the queue is what keeps the commit from describing an
+           index the reader has already moved past. */
+        queueMutation(function () {
+          return rpc('git/commit', request, '提交失败').then(function () {
+            setBusy(false)
+            setError(null)
+            setMessage('')
+            /* A commit empties the index and the list it was showing: the answer is
+               a read of the whole tree, not of the paths that were on it. */
+            reloadChanges()
+          }, function (failure) {
+            setBusy(false)
+            setError(failureText(failure))
+          })
         })
       }
 
