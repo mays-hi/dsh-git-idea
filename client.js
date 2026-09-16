@@ -920,7 +920,6 @@ return {
 .dsh-git-primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
 .dsh-git-clearable{position:relative;display:inline-flex;align-items:center;min-width:0;flex:1 1 auto}
 .dsh-git-clearable-set{flex:1 1 160px;max-width:260px}
-.dsh-git-clearable-path{flex:1 1 140px;min-width:110px}
 .dsh-git-clearable-area{flex:0 0 auto;align-items:flex-start}
 .dsh-git-clearable > input,.dsh-git-clearable > textarea{padding-right:22px}
 .dsh-git-clear-x{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:1;cursor:pointer}
@@ -984,7 +983,6 @@ textarea.dsh-git-input{resize:vertical}
    green up arrow. */
 .dsh-git-ab-in{color:var(--dsw-alias-brand-primary)}
 .dsh-git-ab-out{color:var(--dsw-alias-state-success)}
-.dsh-git-repo-path{flex:1 1 140px;min-width:110px;width:auto}
 .dsh-git-set{display:flex;flex-direction:column;gap:14px;padding:4px 2px;max-width:660px}
 .dsh-git-set-h{font-size:14px;font-weight:600}
 .dsh-git-set-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -2572,7 +2570,10 @@ textarea.dsh-git-input{resize:vertical}
       const switcher = useSwitchMode()
       const switching = useSwitchingTo()
       const [tab, setTab] = React.useState('log')
-      const [repoPath, setRepoPath] = React.useState(sessionRepo(sessionId))
+      /* Which repository this panel shows is not a panel setting: it is the
+         session's workspace, and the Host resolves it from the session. The one
+         exception is a path the reader picked on the setup page after the
+         workspace turned out not to be a repository yet. */
       const [appliedRepo, setAppliedRepo] = React.useState(sessionRepo(sessionId))
       const [refs, setRefs] = React.useState(null)
       const [authors, setAuthors] = React.useState(null)
@@ -3313,15 +3314,6 @@ textarea.dsh-git-input{resize:vertical}
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
-        needsSetup ? null : clearable('repo', h('input', {
-          className: 'dsh-git-input dsh-git-repo-path',
-          placeholder: '仓库路径（留空用会话工作区）',
-          value: repoPath,
-          onChange: function (event) { setRepoPath(event.target.value) },
-          onKeyDown: function (event) { if (event.key === 'Enter') applyRepo(repoPath.trim()) },
-        }), repoPath.length > 0, function () { setRepoPath(''); applyRepo('') }, 'dsh-git-clearable-path'),
-        needsSetup ? null : h('button', { type: 'button', className: 'dsh-git-btn',
-          onClick: function () { applyRepo(repoPath.trim()) } }, '应用'),
         switchCard)
 
       let body

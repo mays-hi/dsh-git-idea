@@ -198,18 +198,15 @@ ok('× 之后 history 不再带 search', lastGraph().args.search === undefined)
 ok('× 之后搜索框空了', byClass(t, 'dsh-git-logsearch-input')[0].props.value === '')
 
 console.log('')
-console.log('== 面板头部：仓库路径也能一键清空 ==')
-ok('路径框是可清除的框', byClass(t, 'dsh-git-clearable-path').length === 1)
-ok('空的时候不显示 ×', byClass(byClass(t, 'dsh-git-clearable-path')[0], 'dsh-git-clear-x').length === 0)
-byClass(t, 'dsh-git-repo-path')[0].props.onChange({ target: { value: '/tmp/other' } })
-await wait(5)
-t = await settle('pop')
-const repoX = byClass(byClass(t, 'dsh-git-clearable-path')[0], 'dsh-git-clear-x')[0]
-ok('填了内容就出现 ×', repoX !== undefined)
-repoX.props.onClick({ stopPropagation() {} })
-await wait(10)
-t = await settle('pop')
-ok('点 × 清空了仓库路径', byClass(t, 'dsh-git-repo-path')[0].props.value === '')
+console.log('== 面板头部：不再有第二个「仓库路径」输入框 ==')
+/* 看哪个仓库不是面板的偏好设置，而是会话工作区本身，Host 从会话里取。
+   头部再放一个预填着同一个路径的框 + 「应用」，就是把同一件事问两遍。 */
+const panelTop = byClass(t, 'dsh-git-top')[0]
+console.log('  头部文本:', JSON.stringify(textOf(panelTop)))
+ok('头部没有仓库路径框了', byClass(t, 'dsh-git-repo-path').length === 0)
+ok('可清除框的那个变体类也一起没了', byClass(t, 'dsh-git-clearable-path').length === 0)
+ok('头部一个输入框都不剩', inputs(panelTop).length === 0)
+ok('也没有那个「应用」按钮', buttons(panelTop).every((b) => textOf(b) !== '应用'))
 
 console.log('')
 console.log('== 标签 / 分支 的内联输入：也能一键清空 ==')
@@ -357,3 +354,44 @@ ok('左侧分支树的行一直是这个规矩（对照）',
 console.log('  转圈的规则:', (cssText.match(/@keyframes dsh-git-spin\{[^}]*\}/) || [''])[0])
 ok('转圈是一条 @keyframes 动画，不是靠改尺寸或位置',
   /@keyframes dsh-git-spin\{/.test(cssText) && /\.dsh-git-spin\{[^}]*animation:dsh-git-spin/.test(cssText))
+
+/* ── 清空按钮还活着，只是搬到了唯一还需要它的地方 ──
+
+   头部那个路径框删掉之后，「一个框 + 里面的 ×」只剩说明页在用：路径没能确定
+   的时候才需要人填，填错了要能一键清掉。这一段单独放在最后，因为它会把面板
+   换成「路径没定」的说明页，后面的段落不能再借用这棵树。 */
+console.log('')
+console.log('== 说明页上的框仍然一键清空 ==')
+const beforeSetupRead = host.call
+host.call = function (method, args) {
+  if (method === 'git/panel') {
+    calls.push({ method: method, args: args })
+    return Promise.resolve({
+      ok: false, repo: '', error: 'no-session-repo', reason: 'no-path',
+      stderr: '', exitCode: 1, staged: [], unstaged: [], untracked: [], unmerged: [],
+    })
+  }
+  return beforeSetupRead(method, args)
+}
+/* 标签必须和别的段落一样是 'pop'：harness 把根路径也算进 fiber 的键，
+   换个标签等于整棵树重新挂载，框里的草稿就没了。面板已经在读一个正常仓库，
+   所以先按一下「重新读取」（它会忽略缓存重读，于是读到下面这个 stub）。 */
+const refreshBtn = byClass(t, 'dsh-git-tool').filter((b) => String(b.props.title).indexOf('重新读取仓库') === 0)[0]
+refreshBtn.props.onClick()
+await wait(15)
+const setupTree = await settle('pop')
+const setupBox = byClass(setupTree, 'dsh-git-clearable')[0]
+console.log('  说明页标题:', textOf(byClass(setupTree, 'dsh-git-setup-h')[0]))
+ok('路径没定时用的是可清除的框', setupBox !== undefined && inputs(setupBox).length === 1)
+ok('空的时候不显示 ×', byClass(setupBox, 'dsh-git-clear-x').length === 0)
+inputs(setupBox)[0].props.onChange({ target: { value: '/tmp/other' } })
+await wait(5)
+const filledTree = await settle('pop')
+const filledX = byClass(byClass(filledTree, 'dsh-git-clearable')[0], 'dsh-git-clear-x')[0]
+ok('填了内容就出现 ×', filledX !== undefined)
+filledX.props.onClick({ stopPropagation() {} })
+await wait(5)
+const clearedTree = await settle('pop')
+ok('点 × 清空了框', inputs(byClass(clearedTree, 'dsh-git-clearable')[0])[0].props.value === '')
+host.call = beforeSetupRead
+

@@ -4,7 +4,10 @@
       const switcher = useSwitchMode()
       const switching = useSwitchingTo()
       const [tab, setTab] = React.useState('log')
-      const [repoPath, setRepoPath] = React.useState(sessionRepo(sessionId))
+      /* Which repository this panel shows is not a panel setting: it is the
+         session's workspace, and the Host resolves it from the session. The one
+         exception is a path the reader picked on the setup page after the
+         workspace turned out not to be a repository yet. */
       const [appliedRepo, setAppliedRepo] = React.useState(sessionRepo(sessionId))
       const [refs, setRefs] = React.useState(null)
       const [authors, setAuthors] = React.useState(null)
@@ -745,15 +748,6 @@
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
-        needsSetup ? null : clearable('repo', h('input', {
-          className: 'dsh-git-input dsh-git-repo-path',
-          placeholder: '仓库路径（留空用会话工作区）',
-          value: repoPath,
-          onChange: function (event) { setRepoPath(event.target.value) },
-          onKeyDown: function (event) { if (event.key === 'Enter') applyRepo(repoPath.trim()) },
-        }), repoPath.length > 0, function () { setRepoPath(''); applyRepo('') }, 'dsh-git-clearable-path'),
-        needsSetup ? null : h('button', { type: 'button', className: 'dsh-git-btn',
-          onClick: function () { applyRepo(repoPath.trim()) } }, '应用'),
         switchCard)
 
       let body
