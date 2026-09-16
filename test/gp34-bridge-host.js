@@ -44,10 +44,6 @@ return {
       const home = (await probeText('printf %s "${DSH_HOME:-$HOME/.dsh}"')).trim()
       if (home.length > 0) {
         dirsCache.push(home + '/dsh-git-idea')
-        /* The plugin was called gitops until it was renamed; the old directory
-           is still tried so the rename can never leave a half-moved
-           installation that refuses to load. */
-        dirsCache.push(home + '/gitops')
       }
       return dirsCache
     }
@@ -82,7 +78,7 @@ return {
         const source = await readSource(name)
         return { ok: true, half: name, source: source }
       })
-    }, 'gitops bridge source rpc')
+    }, 'dsh-git-idea bridge source rpc')
 
     ctx.effect(function () {
       const loading = (async function () {

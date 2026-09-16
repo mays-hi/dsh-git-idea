@@ -79,14 +79,14 @@
       else title = where + ' 不在任何 Git 仓库中 —— 点击选择路径或在这里初始化'
 
       const children = [h(BranchIcon, { key: 'icon', size: 14, plus: !isRepo && info.phase === 'none' })]
-      if (isRepo) children.push(h('span', { className: 'gitops-chip-label', key: 'label' }, info.label))
-      if (isRepo && info.pending > 0) children.push(h('span', { className: 'gitops-badge', key: 'badge' }, String(info.pending)))
+      if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
+      if (isRepo && info.pending > 0) children.push(h('span', { className: 'dsh-git-badge', key: 'badge' }, String(info.pending)))
 
       return h('button', {
         type: 'button',
-        className: 'gitops-chip'
-          + (isRepo ? ' gitops-chip-repo' : ' gitops-chip-idle')
-          + (isOpen ? ' gitops-chip-open' : ''),
+        className: 'dsh-git-chip'
+          + (isRepo ? ' dsh-git-chip-repo' : ' dsh-git-chip-idle')
+          + (isOpen ? ' dsh-git-chip-open' : ''),
         title: isRepo ? title + ' · 悬停可直接切换分支' : title,
         ref: function (node) { chipNode = node },
         onClick: function () { clearHoverTimer(); setSwitchMode(null); setOpen(!isOpen) },

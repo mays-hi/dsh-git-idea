@@ -13,7 +13,7 @@ function repoFrom(input, exec) {
         const cwd = header != null ? header.cwd : undefined
         if (isStr(cwd) && cwd.length > 0) return cwd
       } catch (error) {
-        console.error('gitops: could not resolve the session cwd', String(error))
+        console.error('dsh-git-idea: could not resolve the session cwd', String(error))
       }
     }
   }
@@ -85,7 +85,7 @@ function baseWorkdir(input) {
         const cwd = header != null ? header.cwd : undefined
         if (isStr(cwd) && cwd.length > 0) return cwd
       } catch (error) {
-        console.error('gitops: could not resolve a safe workdir', String(error))
+        console.error('dsh-git-idea: could not resolve a safe workdir', String(error))
       }
     }
   }
@@ -497,7 +497,7 @@ async function switchBranch(input, name) {
 
   let stashed = false
   if (dirty > 0 && before.exitCode === 0) {
-    const saved = await git(args, ['stash', 'push', '-u', '-m', 'gitops: switch to ' + name], null, {})
+    const saved = await git(args, ['stash', 'push', '-u', '-m', 'dsh-git-idea: switch to ' + name], null, {})
     if (saved.exitCode !== 0) {
       return finish(saved, { stashed: false, dirty: dirty, popConflict: false, error: 'stash-failed' })
     }

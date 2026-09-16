@@ -30,12 +30,12 @@
     /* One field, one clear button: the × sits inside the box, where the eye
        already is, so no row of buttons has to exist for it. */
     function clearable(key, input, hasValue, onClear, variant) {
-      const classes = ['gitops-clearable']
+      const classes = ['dsh-git-clearable']
       if (variant != null && variant.length > 0) classes.push(variant)
       return h('div', { key: key, className: classes.join(' ') },
         input,
         hasValue === true ? h('button', {
-          key: 'x', type: 'button', className: 'gitops-clear-x', title: '清空',
+          key: 'x', type: 'button', className: 'dsh-git-clear-x', title: '清空',
           onClick: function (event) {
             stopEvent(event)
             if (event != null && typeof event.preventDefault === 'function') event.preventDefault()

@@ -59,7 +59,7 @@ async function measureRun(viewport) {
     open: openMs,
     pass: pass / 20,
     nodes: collect(tree).length,
-    rows: byClass(tree, 'gitops-crow').length,
+    rows: byClass(tree, 'dsh-git-crow').length,
     paths: collect(tree).filter((n) => n.type === 'path').length,
   }
 }
@@ -73,7 +73,7 @@ const selectElement = makeElement(popover, { sessionId: 's-1' })
 let selectTree = await renderUntilStable(selectElement, 'bench-select')
 await wait(20)
 selectTree = await renderUntilStable(selectElement, 'bench-select')
-const clickable = byClass(selectTree, 'gitops-crow')
+const clickable = byClass(selectTree, 'dsh-git-crow')
 const beforeSkips = memoSkips
 clickable[2].props.onClick()
 await wait(5)
@@ -87,7 +87,7 @@ for (let i = 0; i < 10; i += 1) {
 /* 滚到深处：仍然只画视口里的行，而且首行要对得上 */
 fakeNode.scrollTop = 2600
 const scrolled = await renderUntilStable(makeElement(popover, { sessionId: 's-1' }), 'bench-2600')
-const scrolledRows = byClass(scrolled, 'gitops-crow')
+const scrolledRows = byClass(scrolled, 'dsh-git-crow')
 const pads = collect(scrolled).filter((n) => n.props && n.props.style && typeof n.props.style.height === 'string' && n.type === 'div' && n.props.style.height !== '26px')
 
 const row = (label, m) => console.log('  ' + label.padEnd(14) + String(m.open.toFixed(1)).padStart(7) + 'ms' + String(m.nodes).padStart(7) + String(m.rows).padStart(7) + String(m.paths).padStart(7) + String(m.pass.toFixed(3)).padStart(9) + 'ms')

@@ -45,43 +45,43 @@
         })
       }
 
-      return h('div', { className: 'gitops-setup' },
-        h('div', { className: 'gitops-setup-h' }, info.title),
-        h('div', { className: 'gitops-setup-path' }, props.initial.length > 0 ? props.initial : '（没能确定路径）'),
-        info.hint.length > 0 ? h('div', { className: 'gitops-hint' }, info.hint) : null,
-        props.stderr.length > 0 ? h('div', { className: 'gitops-hint gitops-error gitops-mono' }, props.stderr) : null,
+      return h('div', { className: 'dsh-git-setup' },
+        h('div', { className: 'dsh-git-setup-h' }, info.title),
+        h('div', { className: 'dsh-git-setup-path' }, props.initial.length > 0 ? props.initial : '（没能确定路径）'),
+        info.hint.length > 0 ? h('div', { className: 'dsh-git-hint' }, info.hint) : null,
+        props.stderr.length > 0 ? h('div', { className: 'dsh-git-hint dsh-git-error dsh-git-mono' }, props.stderr) : null,
         clearable('path', h('input', {
-          className: 'gitops-input',
+          className: 'dsh-git-input',
           placeholder: '仓库目录的绝对路径',
           autoFocus: true,
           value: draft,
           onChange: function (event) { setDraft(event.target.value); setArmed(false) },
           onKeyDown: function (event) { if (event.key === 'Enter') open() },
         }), draft.length > 0, function () { setDraft(''); setArmed(false) }),
-        h('div', { className: 'gitops-setup-actions' },
+        h('div', { className: 'dsh-git-setup-actions' },
           h('button', {
-            type: 'button', className: 'gitops-btn gitops-primary',
+            type: 'button', className: 'dsh-git-btn dsh-git-primary',
             disabled: target.length === 0,
             onClick: open,
           }, '打开这个目录'),
           armed
             ? h('button', {
-                type: 'button', className: 'gitops-btn gitops-danger',
+                type: 'button', className: 'dsh-git-btn dsh-git-danger',
                 disabled: busy || target.length === 0,
                 onClick: doInit,
               }, busy ? '正在初始化…' : '确认初始化（会写入 .git）')
             : h('button', {
-                type: 'button', className: 'gitops-btn',
+                type: 'button', className: 'dsh-git-btn',
                 disabled: busy || target.length === 0,
                 onClick: function () { setArmed(true); setProblem(null) },
               }, '在此初始化仓库'),
           armed ? h('button', {
-            type: 'button', className: 'gitops-btn',
+            type: 'button', className: 'dsh-git-btn',
             disabled: busy,
             onClick: function () { setArmed(false) },
           }, '取消') : null),
-        armed ? h('div', { className: 'gitops-hint gitops-danger' },
+        armed ? h('div', { className: 'dsh-git-hint dsh-git-danger' },
           '将在 ' + target + ' 下执行 git init' + (plugin.initBranch.length > 0 ? ' -b ' + plugin.initBranch : '') + ' —— 这会创建一个 .git 目录并写入文件，无法通过界面撤销。') : null,
-        problem !== null ? h('div', { className: 'gitops-hint gitops-error' }, problem) : null)
+        problem !== null ? h('div', { className: 'dsh-git-hint dsh-git-error' }, problem) : null)
     }
 

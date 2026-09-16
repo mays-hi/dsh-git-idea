@@ -82,9 +82,9 @@ await wait(15)
 /* renderRoot 只渲染一遍、不等待 promise，所以「第一帧」是可观察的：
    预热过的仓库这一帧就有分支行，没预热就只有「正在读取分支…」。 */
 const firstFrame = renderRoot(makeElement(popover, { sessionId: 's-2' }), 'pop')
-const firstCard = byClass(firstFrame, 'gitops-switch-hover')[0]
+const firstCard = byClass(firstFrame, 'dsh-git-switch-hover')[0]
 ok('s-2 的 hover 卡片已经在了', firstCard !== undefined)
-const firstRows = firstCard === undefined ? [] : byClass(firstCard, 'gitops-bs-row')
+const firstRows = firstCard === undefined ? [] : byClass(firstCard, 'dsh-git-bs-row')
 console.log('  第一帧里的行:', JSON.stringify(firstRows.map(textOf).slice(0, 5)))
 ok('预热过：第一帧就列出了分支（不是「正在读取分支…」）', firstRows.length > 0)
 ok('读的是 s-2 自己的仓库 /tmp/ws2', calls.filter((c) => c.method === 'git/branches').every((c) => c.args.repo === '/tmp/ws2'))

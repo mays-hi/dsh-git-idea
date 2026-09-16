@@ -1,7 +1,7 @@
     function CommitDetail(props) {
       const detail = props.detail
-      if (detail == null) return h('div', { className: 'gitops-detail gitops-dim' }, '选择一个提交')
-      if (detail.ok !== true) return h('div', { className: 'gitops-detail gitops-error' }, '无法读取提交详情')
+      if (detail == null) return h('div', { className: 'dsh-git-detail dsh-git-dim' }, '选择一个提交')
+      if (detail.ok !== true) return h('div', { className: 'dsh-git-detail dsh-git-error' }, '无法读取提交详情')
 
       const entries = []
       for (let i = 0; i < detail.files.length; i += 1) {
@@ -16,7 +16,7 @@
         const node = flat[i]
         if (node.kind === 'dir') {
           fileRows.push(h('div', {
-            className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: (node.depth * 12) + 'px' },
             title: node.name + '（双击展开/折叠）',
@@ -24,35 +24,35 @@
             onDoubleClick: function () { props.onToggle(node.path) },
           },
             twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-            h('span', { className: 'gitops-tname' }, node.name),
-            h('span', { className: 'gitops-tdim' }, String(node.count) + ' 个文件')))
+            h('span', { className: 'dsh-git-tname' }, node.name),
+            h('span', { className: 'dsh-git-tdim' }, String(node.count) + ' 个文件')))
         } else {
           const file = node.data || {}
           fileRows.push(h('div', {
-            className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: (node.depth * 12) + 'px' },
             title: text(file.path),
             onClick: function () { props.onSelect(node.id) },
           },
-            h('span', { className: 'gitops-tw' }),
-            h('span', { className: 'gitops-st' + statusClass(file.status) }, statusLabel(file.status)),
-            h('span', { className: 'gitops-tname' }, node.name)))
+            h('span', { className: 'dsh-git-tw' }),
+            h('span', { className: 'dsh-git-st' + statusClass(file.status) }, statusLabel(file.status)),
+            h('span', { className: 'dsh-git-tname' }, node.name)))
         }
       }
 
       const inBranches = detail.branches.length > 0 ? detail.branches.join('、') : '（没有分支引用此提交）'
       const fullMessage = (detail.subject + (detail.body.length > 0 ? '\n\n' + detail.body : '')).replace(/\n+$/, '')
 
-      return h('div', { className: 'gitops-detail' },
-        h('div', { className: 'gitops-group-title' }, String(detail.files.length) + ' 个文件'),
+      return h('div', { className: 'dsh-git-detail' },
+        h('div', { className: 'dsh-git-group-title' }, String(detail.files.length) + ' 个文件'),
         fileRows,
-        h('div', { className: 'gitops-info' },
-          h('div', { className: 'gitops-hash' }, detail.hash),
-          h('div', { className: 'gitops-dim' }, detail.author + ' <' + detail.email + '>'),
-          h('div', { className: 'gitops-dim' }, detail.date.replace('T', ' ').slice(0, 16)),
-          h('div', { className: 'gitops-dim' }, '所在分支：' + inBranches),
-          h('div', { className: 'gitops-msg' }, fullMessage)))
+        h('div', { className: 'dsh-git-info' },
+          h('div', { className: 'dsh-git-hash' }, detail.hash),
+          h('div', { className: 'dsh-git-dim' }, detail.author + ' <' + detail.email + '>'),
+          h('div', { className: 'dsh-git-dim' }, detail.date.replace('T', ' ').slice(0, 16)),
+          h('div', { className: 'dsh-git-dim' }, '所在分支：' + inBranches),
+          h('div', { className: 'dsh-git-msg' }, fullMessage)))
     }
 
     function mergeChanges(work) {

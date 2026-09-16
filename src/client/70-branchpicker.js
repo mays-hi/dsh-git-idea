@@ -16,8 +16,8 @@
       if (when.length > 0) tip.push(when)
       tip.push(trackTitle(ahead, behind))
       return h('div', {
-        className: 'gitops-bs-row' + (props.active === true ? ' gitops-bs-row-on' : '') + (isCurrent ? ' gitops-bs-row-cur' : '')
-          + (props.busy === true ? ' gitops-bs-busy' : '') + (props.flying === true ? ' gitops-bs-row-fly' : ''),
+        className: 'dsh-git-bs-row' + (props.active === true ? ' dsh-git-bs-row-on' : '') + (isCurrent ? ' dsh-git-bs-row-cur' : '')
+          + (props.busy === true ? ' dsh-git-bs-busy' : '') + (props.flying === true ? ' dsh-git-bs-row-fly' : ''),
         title: tip.join('\n'),
         onMouseEnter: function (event) { props.onEnter(props.rowKey, props.at, event) },
         onMouseLeave: function () { props.onLeave() },
@@ -25,19 +25,19 @@
       },
         h('button', {
           key: 's', type: 'button',
-          className: 'gitops-bs-star' + (starred ? ' gitops-bs-star-on' : ''),
+          className: 'dsh-git-bs-star' + (starred ? ' dsh-git-bs-star-on' : ''),
           title: starred ? '取消收藏' : '收藏这个分支',
           onClick: function (event) { props.onStar(name, event) },
         }, h(Icon, { name: 'star', size: 12, filled: starred })),
-        h('span', { key: 'i', className: 'gitops-bs-ico' },
+        h('span', { key: 'i', className: 'dsh-git-bs-ico' },
           isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
-        h('span', { key: 'n', className: 'gitops-bs-name' }, name),
-        ahead > 0 ? h('span', { key: 'a', className: 'gitops-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
-        behind > 0 ? h('span', { key: 'b', className: 'gitops-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
-        upstream.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, upstream)
-          : (where.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, where) : null),
+        h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
+        upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
+          : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         h('button', {
-          key: 'm', type: 'button', className: 'gitops-bs-more',
+          key: 'm', type: 'button', className: 'dsh-git-bs-more',
           title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
           onClick: function (event) { props.onMenu(props.rowKey, event) },
         }, h(Icon, { name: 'right', size: 12 })))
@@ -374,43 +374,43 @@
         const items = []
         if (remote === true) {
           items.push(h('button', {
-            key: 'sw', type: 'button', className: 'gitops-bs-fly-item',
+            key: 'sw', type: 'button', className: 'dsh-git-bs-fly-item',
             title: 'git switch ' + name + ' —— 会在本地建一个跟踪分支',
             onClick: function (event) { stopEvent(event); choose(name, stash) },
-          }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })), '检出为本地分支'))
+          }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })), '检出为本地分支'))
         } else if (isCurrent !== true) {
           items.push(h('button', {
-            key: 'sw', type: 'button', className: 'gitops-bs-fly-item',
+            key: 'sw', type: 'button', className: 'dsh-git-bs-fly-item',
             title: 'git switch ' + name,
             onClick: function (event) { stopEvent(event); choose(name, stash) },
-          }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })),
+          }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })),
             stash === true ? '暂存并切换' : '检出'))
         }
         items.push(h('button', {
-          key: 'nb', type: 'button', className: 'gitops-bs-fly-item',
+          key: 'nb', type: 'button', className: 'dsh-git-bs-fly-item',
           title: '以 ' + name + ' 为起点新建分支并切过去',
           onClick: function (event) { stopEvent(event); setFly(null); setCreating({ at: name, value: '' }) },
-        }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'plus', size: 12 })),
+        }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'plus', size: 12 })),
           '从此分支新建分支…'))
         if (remote !== true && isCurrent !== true) {
-          items.push(h('div', { key: 's1', className: 'gitops-bs-fly-sep' }))
+          items.push(h('div', { key: 's1', className: 'dsh-git-bs-fly-sep' }))
           items.push(h('button', {
-            key: 'mg', type: 'button', className: 'gitops-bs-fly-item',
+            key: 'mg', type: 'button', className: 'dsh-git-bs-fly-item',
             title: 'git merge ' + name + ' —— 合入当前分支',
             onClick: function (event) { stopEvent(event); setFly(null); act('git/sequence', { op: 'merge', action: 'start', target: name }, '合并 ' + name) },
-          }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'pull', size: 12 })), '合并到当前分支'))
-          items.push(h('div', { key: 's2', className: 'gitops-bs-fly-sep' }))
+          }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'pull', size: 12 })), '合并到当前分支'))
+          items.push(h('div', { key: 's2', className: 'dsh-git-bs-fly-sep' }))
           if (armedDelete === name) {
             items.push(h('button', {
-              key: 'dx', type: 'button', className: 'gitops-bs-fly-item gitops-bs-fly-danger',
+              key: 'dx', type: 'button', className: 'dsh-git-bs-fly-item dsh-git-bs-fly-danger',
               title: 'git branch -D ' + name + ' —— 丢弃没合并的提交',
               onClick: function (event) { stopEvent(event); remove(name, true) },
-            }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '强制删除'))
+            }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '强制删除'))
           } else {
             items.push(h('button', {
-              key: 'dl', type: 'button', className: 'gitops-bs-fly-item gitops-bs-fly-danger',
+              key: 'dl', type: 'button', className: 'dsh-git-bs-fly-item dsh-git-bs-fly-danger',
               onClick: function (event) { stopEvent(event); remove(name, false) },
-            }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '删除'))
+            }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '删除'))
           }
         }
         return items
@@ -423,15 +423,15 @@
         const def = actions[i]
         const on = nav[index] !== undefined && nav[index].kind === 'action' && nav[index].def === def
         const parts = [
-          h('span', { key: 'i', className: 'gitops-bs-ico' }, h(Icon, { name: def.icon, size: 12 })),
-          h('span', { key: 'n', className: 'gitops-bs-name' }, def.short),
+          h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(Icon, { name: def.icon, size: 12 })),
+          h('span', { key: 'n', className: 'dsh-git-bs-name' }, def.short),
         ]
-        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'gitops-bs-ab' }, def.badge))
+        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'dsh-git-bs-ab' }, def.badge))
         chips.push(h('button', {
           key: 'a:' + def.id, type: 'button',
-          className: 'gitops-bs-chip'
-            + (on ? ' gitops-bs-chip-on' : '')
-            + (def.id === 'new' ? ' gitops-bs-chip-new' : ''),
+          className: 'dsh-git-bs-chip'
+            + (on ? ' dsh-git-bs-chip-on' : '')
+            + (def.id === 'new' ? ' dsh-git-bs-chip-new' : ''),
           title: def.label,
           disabled: busy === true,
           onMouseEnter: function () { setIndex(i) },
@@ -444,15 +444,15 @@
         const group = groups[g]
         const shut = collapsed[group.id] === true
         items.push(h('div', {
-          key: 'g:' + group.id, className: 'gitops-bs-group',
+          key: 'g:' + group.id, className: 'dsh-git-bs-group',
           onClick: function () { setCollapsed(function (prev) { const next = Object.assign({}, prev); next[group.id] = prev[group.id] !== true; return next }) },
         },
-          h('span', { key: 'c', className: 'gitops-bs-caret' }, h(Icon, { name: shut ? 'right' : 'down', size: 12 })),
+          h('span', { key: 'c', className: 'dsh-git-bs-caret' }, h(Icon, { name: shut ? 'right' : 'down', size: 12 })),
           h('span', { key: 'l' }, group.label),
-          h('span', { key: 'n', className: 'gitops-bs-count' }, String(group.rows.length))))
+          h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(group.rows.length))))
         if (shut) continue
         if (group.rows.length === 0) {
-          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'gitops-bs-empty' },
+          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' },
             needle.length > 0 ? '没有匹配的分支' : '这个仓库还没有本地分支'))
           continue
         }
@@ -481,27 +481,27 @@
         }
       }
 
-      if (data == null) items.push(h('div', { key: 'wait', className: 'gitops-bs-empty' }, '正在读取分支…'))
+      if (data == null) items.push(h('div', { key: 'wait', className: 'dsh-git-bs-empty' }, '正在读取分支…'))
 
       const foot = []
       if (pending.length > 0) {
         foot.push(h('button', {
-          key: 'rescue', type: 'button', className: 'gitops-bs-rescue',
+          key: 'rescue', type: 'button', className: 'dsh-git-bs-rescue',
           onClick: function () { setStash(true); choose(pending, true) },
         }, '先暂存本地改动，再切到 ' + pending))
       }
       if (props.dirty > 0) {
         foot.push(h('label', {
-          key: 'stash', className: 'gitops-bs-check',
+          key: 'stash', className: 'dsh-git-bs-check',
           title: '把本地改动 stash 起来，切过去之后再自动 pop 回来',
         },
           h('input', { key: 'c', type: 'checkbox', checked: stash === true, onChange: function (event) { setStash(event.target.checked) } }),
           h('span', { key: 't' }, '有 ' + String(props.dirty) + ' 个未提交改动 —— 先暂存再切（切完自动恢复）')))
       }
 
-      const createRow = creating === null ? null : h('div', { key: 'create', className: 'gitops-bs-create' },
+      const createRow = creating === null ? null : h('div', { key: 'create', className: 'dsh-git-bs-create' },
         clearable('i', h('input', {
-          key: 'i', className: 'gitops-input gitops-bs-new',
+          key: 'i', className: 'dsh-git-input dsh-git-bs-new',
           placeholder: creating.at.length > 0 ? '以 ' + creating.at + ' 为起点的新分支名' : '新分支名，回车创建',
           value: creating.value,
           autoFocus: true,
@@ -511,8 +511,8 @@
             else if (event.key === 'Escape') { event.preventDefault(); setCreating(null) }
           },
         }), creating.value.length > 0, function () { setCreating({ at: creating.at, value: '' }) }),
-        h('button', { key: 'ok', type: 'button', className: 'gitops-btn', onClick: function () { submitNew(creating) } }, '创建并切换'),
-        h('button', { key: 'no', type: 'button', className: 'gitops-btn', onClick: function () { setCreating(null) } }, '取消'))
+        h('button', { key: 'ok', type: 'button', className: 'dsh-git-btn', onClick: function () { submitNew(creating) } }, '创建并切换'),
+        h('button', { key: 'no', type: 'button', className: 'dsh-git-btn', onClick: function () { setCreating(null) } }, '取消'))
 
       /* The submenu element: which branch it belongs to is read back from the
          key the row handed us, so nothing has to be kept in sync by hand. */
@@ -530,7 +530,7 @@
           const flyName = text(foundRow.name)
           const flyCurrent = foundRow.current === true
           flyNode = h('div', {
-            key: 'fly', className: 'gitops-bs-fly',
+            key: 'fly', className: 'dsh-git-bs-fly',
             style: { top: String(Math.max(0, fly.top)) + 'px' },
             /* Crossing from the row into the panel must not count as leaving —
                in hover mode the card closes itself on pointerleave, so both
@@ -538,8 +538,8 @@
             onPointerEnter: function () { clearFlyTimer(); clearHoverTimer() },
             onPointerLeave: function () { flyCloseSoon() },
           },
-            h('div', { key: 'h', className: 'gitops-bs-fly-head' },
-              h('span', { key: 'n', className: 'gitops-bs-name' }, flyName),
+            h('div', { key: 'h', className: 'dsh-git-bs-fly-head' },
+              h('span', { key: 'n', className: 'dsh-git-bs-name' }, flyName),
               flyCurrent === true ? h('span', { key: 'c' }, '（当前）') : null),
             rowActions(flyName, foundRemote, flyCurrent))
         }
@@ -568,11 +568,11 @@
         }
       }
 
-      return h('div', { className: 'gitops-bs' },
-        h('div', { key: 'h', className: 'gitops-bs-head' },
-          h('span', { key: 'i', className: 'gitops-bs-mag' }, h(Icon, { name: 'search', size: 14 })),
+      return h('div', { className: 'dsh-git-bs' },
+        h('div', { key: 'h', className: 'dsh-git-bs-head' },
+          h('span', { key: 'i', className: 'dsh-git-bs-mag' }, h(Icon, { name: 'search', size: 14 })),
           h('input', {
-            key: 'q', className: 'gitops-bs-search',
+            key: 'q', className: 'dsh-git-bs-search',
             placeholder: '搜索分支',
             value: query,
             ref: function (node) { pickerInputNode = node },
@@ -581,25 +581,25 @@
           }),
           /* The repository-wide actions share the header line with the search
              box instead of owning a row of their own below it. */
-          chips.length > 0 ? h('div', { key: 'acts', className: 'gitops-bs-head-acts' }, chips) : null,
+          chips.length > 0 ? h('div', { key: 'acts', className: 'dsh-git-bs-head-acts' }, chips) : null,
           h('button', {
-            key: 'sort', type: 'button', className: 'gitops-bs-icon gitops-bs-sort',
+            key: 'sort', type: 'button', className: 'dsh-git-bs-icon dsh-git-bs-sort',
             title: branchSort === 'name'
               ? '当前按名称排序（A→Z），点击改为按最近提交'
               : '当前按最近提交排序，点击改为按名称（A→Z）',
             onClick: function () { setBranchSort(branchSort === 'name' ? 'recent' : 'name') },
           }, h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 14 }))),
         h('div', {
-          key: 'l', className: 'gitops-bs-list',
+          key: 'l', className: 'dsh-git-bs-list',
           ref: function (node) { pickerList = node },
           /* A flyout is anchored to a row's screen position, so a scroll would
              leave it pointing at the wrong one. */
           onScroll: function () { clearFlyTimer(); setFly(null) },
         }, items),
         flyNode,
-        note !== null ? h('div', { key: 'n', className: 'gitops-hint gitops-warn' }, note) : null,
-        error !== null ? h('div', { key: 'e', className: 'gitops-hint gitops-error' }, error) : null,
+        note !== null ? h('div', { key: 'n', className: 'dsh-git-hint dsh-git-warn' }, note) : null,
+        error !== null ? h('div', { key: 'e', className: 'dsh-git-hint dsh-git-error' }, error) : null,
         createRow,
-        foot.length > 0 ? h('div', { key: 'f', className: 'gitops-bs-foot' }, foot) : null)
+        foot.length > 0 ? h('div', { key: 'f', className: 'dsh-git-bs-foot' }, foot) : null)
     }
 

@@ -122,11 +122,11 @@ function collect(node, out = []) {
 const buttons = (t) => collect(t).filter((n) => n.type === 'button')
 const inputs = (t) => collect(t).filter((n) => n.type === 'input')
 const byClass = (t, s) => collect(t).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(s) >= 0)
-const rows = (t) => byClass(t, 'gitops-bs-row')
-/* 操作行与分支行共用 .gitops-bs-row，取分支行时要排掉操作行 */
-const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexOf('gitops-bs-action') < 0)
+const rows = (t) => byClass(t, 'dsh-git-bs-row')
+/* 操作行与分支行共用 .dsh-git-bs-row，取分支行时要排掉操作行 */
+const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
-const groups = (t) => byClass(t, 'gitops-bs-group')
+const groups = (t) => byClass(t, 'dsh-git-bs-group')
 
 function renderRoot(element, label) {
   const pending = []
@@ -152,9 +152,9 @@ function renderRoot(element, label) {
       if (typeof node.props.ref === 'function') {
         const cls = String(node.props.className || '')
         let target = fakeNode
-        if (cls.indexOf('gitops-switch') >= 0) target = cardNodeObj
-        else if (cls.indexOf('gitops-pop') >= 0) target = panelNodeObj
-        else if (cls.indexOf('gitops-chip') >= 0) target = chipNodeObj
+        if (cls.indexOf('dsh-git-switch') >= 0) target = cardNodeObj
+        else if (cls.indexOf('dsh-git-pop') >= 0) target = panelNodeObj
+        else if (cls.indexOf('dsh-git-chip') >= 0) target = chipNodeObj
         if (target !== fakeNode && !globalThis.__seen) globalThis.__seen = new Set()
         if (target !== fakeNode && !globalThis.__seen.has(cls)) { globalThis.__seen.add(cls); console.log('  [ref→' + (target === panelNodeObj ? 'panel' : target === cardNodeObj ? 'card' : 'chip') + '] className=' + JSON.stringify(cls)) }
         node.props.ref(target)
@@ -223,7 +223,7 @@ const host = {
     if (method === 'git/watch') return Promise.resolve({ ok: true, repo: '/tmp/ws', sig: 'SIG' })
     if (method === 'git/commit-detail') return Promise.resolve({ ok: true, repo: '/tmp/ws', hash: (args && args.hash) || 'a', subject: 'detail subject', body: '', author: 'mays', date: '2026-09-16', files: [], branches: [] })
     if (method === 'git/flush') return Promise.resolve({ ok: true })
-    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/gitops.json', config: { initBranch: 'main', cherryPickRecord: false } })
+    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/dsh-git-idea.json', config: { initBranch: 'main', cherryPickRecord: false } })
     if (method === 'git/checkout') return Promise.resolve(checkoutReply)
     return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
   },
@@ -251,9 +251,9 @@ const styles = { insert: () => () => {} }
 new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
-const chip = registered.find((r) => r.options.id === 'gitops-git-chip').component
-const popover = registered.find((r) => r.options.id === 'gitops-git-panel').component
-const section = registered.find((r) => r.options.id === 'gitops').component
+const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
+const popover = registered.find((r) => r.options.id === 'dsh-git-idea-panel').component
+const section = registered.find((r) => r.options.id === 'dsh-git-idea').component
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms || 10))
 const popTree = (l) => renderUntilStable(makeElement(popover, { sessionId: 's-1' }), l || 'pop')
@@ -261,12 +261,12 @@ const chipTree = (l) => renderUntilStable(makeElement(chip, { sessionId: 's-1' }
 async function settle(l) { let t = null; for (let i = 0; i < 4; i += 1) { t = await popTree(l); await wait(10) } return t }
 async function openPanel() {
   let t = await chipTree()
-  if (t.props.className.indexOf('gitops-chip-open') < 0) { t.props.onClick(); await wait(10) }
+  if (t.props.className.indexOf('dsh-git-chip-open') < 0) { t.props.onClick(); await wait(10) }
   return await settle()
 }
 async function openSwitcher() {
   const t = await openPanel()
-  const chipBtn = byClass(t, 'gitops-branch-chip')[0]
+  const chipBtn = byClass(t, 'dsh-git-branch-chip')[0]
   chipBtn.props.onClick()
   await wait(10)
   return await settle()
@@ -334,7 +334,7 @@ async function measureRun(viewport) {
     open: openMs,
     pass: pass / 20,
     nodes: collect(tree).length,
-    rows: byClass(tree, 'gitops-crow').length,
+    rows: byClass(tree, 'dsh-git-crow').length,
     paths: collect(tree).filter((n) => n.type === 'path').length,
   }
 }
@@ -348,7 +348,7 @@ const selectElement = makeElement(popover, { sessionId: 's-1' })
 let selectTree = await renderUntilStable(selectElement, 'bench-select')
 await wait(20)
 selectTree = await renderUntilStable(selectElement, 'bench-select')
-const clickable = byClass(selectTree, 'gitops-crow')
+const clickable = byClass(selectTree, 'dsh-git-crow')
 const beforeSkips = memoSkips
 clickable[2].props.onClick()
 await wait(5)
@@ -362,7 +362,7 @@ for (let i = 0; i < 10; i += 1) {
 /* 滚到深处：仍然只画视口里的行，而且首行要对得上 */
 fakeNode.scrollTop = 2600
 const scrolled = await renderUntilStable(makeElement(popover, { sessionId: 's-1' }), 'bench-2600')
-const scrolledRows = byClass(scrolled, 'gitops-crow')
+const scrolledRows = byClass(scrolled, 'dsh-git-crow')
 const pads = collect(scrolled).filter((n) => n.props && n.props.style && typeof n.props.style.height === 'string' && n.type === 'div' && n.props.style.height !== '26px')
 
 const row = (label, m) => console.log('  ' + label.padEnd(14) + String(m.open.toFixed(1)).padStart(7) + 'ms' + String(m.nodes).padStart(7) + String(m.rows).padStart(7) + String(m.paths).padStart(7) + String(m.pass.toFixed(3)).padStart(9) + 'ms')

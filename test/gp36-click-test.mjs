@@ -97,11 +97,11 @@ function collect(node, out = []) {
 const buttons = (t) => collect(t).filter((n) => n.type === 'button')
 const inputs = (t) => collect(t).filter((n) => n.type === 'input')
 const byClass = (t, s) => collect(t).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(s) >= 0)
-const rows = (t) => byClass(t, 'gitops-bs-row')
-/* 操作行与分支行共用 .gitops-bs-row，取分支行时要排掉操作行 */
-const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexOf('gitops-bs-action') < 0)
+const rows = (t) => byClass(t, 'dsh-git-bs-row')
+/* 操作行与分支行共用 .dsh-git-bs-row，取分支行时要排掉操作行 */
+const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
-const groups = (t) => byClass(t, 'gitops-bs-group')
+const groups = (t) => byClass(t, 'dsh-git-bs-group')
 
 function renderRoot(element, label) {
   const pending = []
@@ -116,9 +116,9 @@ function renderRoot(element, label) {
       if (typeof node.props.ref === 'function') {
         const cls = String(node.props.className || '')
         let target = fakeNode
-        if (cls.indexOf('gitops-switch') >= 0) target = cardNodeObj
-        else if (cls.indexOf('gitops-pop') >= 0) target = panelNodeObj
-        else if (cls.indexOf('gitops-chip') >= 0) target = chipNodeObj
+        if (cls.indexOf('dsh-git-switch') >= 0) target = cardNodeObj
+        else if (cls.indexOf('dsh-git-pop') >= 0) target = panelNodeObj
+        else if (cls.indexOf('dsh-git-chip') >= 0) target = chipNodeObj
         if (target !== fakeNode && !globalThis.__seen) globalThis.__seen = new Set()
         if (target !== fakeNode && !globalThis.__seen.has(cls)) { globalThis.__seen.add(cls); console.log('  [ref→' + (target === panelNodeObj ? 'panel' : target === cardNodeObj ? 'card' : 'chip') + '] className=' + JSON.stringify(cls)) }
         node.props.ref(target)
@@ -179,7 +179,7 @@ const host = {
     if (method === 'git/watch') return Promise.resolve({ ok: true, repo: '/tmp/ws', sig: 'SIG' })
     if (method === 'git/commit-detail') return Promise.resolve({ ok: true, hash: 'a', files: [], branches: [] })
     if (method === 'git/flush') return Promise.resolve({ ok: true })
-    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/gitops.json', config: { initBranch: 'main', cherryPickRecord: false } })
+    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/dsh-git-idea.json', config: { initBranch: 'main', cherryPickRecord: false } })
     if (method === 'git/checkout') return Promise.resolve(checkoutReply)
     return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
   },
@@ -201,9 +201,9 @@ const styles = { insert: () => () => {} }
 new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
-const chip = registered.find((r) => r.options.id === 'gitops-git-chip').component
-const popover = registered.find((r) => r.options.id === 'gitops-git-panel').component
-const section = registered.find((r) => r.options.id === 'gitops').component
+const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
+const popover = registered.find((r) => r.options.id === 'dsh-git-idea-panel').component
+const section = registered.find((r) => r.options.id === 'dsh-git-idea').component
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms || 10))
 const popTree = (l) => renderUntilStable(makeElement(popover, { sessionId: 's-1' }), l || 'pop')
@@ -211,12 +211,12 @@ const chipTree = (l) => renderUntilStable(makeElement(chip, { sessionId: 's-1' }
 async function settle(l) { let t = null; for (let i = 0; i < 4; i += 1) { t = await popTree(l); await wait(10) } return t }
 async function openPanel() {
   let t = await chipTree()
-  if (t.props.className.indexOf('gitops-chip-open') < 0) { t.props.onClick(); await wait(10) }
+  if (t.props.className.indexOf('dsh-git-chip-open') < 0) { t.props.onClick(); await wait(10) }
   return await settle()
 }
 async function openSwitcher() {
   const t = await openPanel()
-  const chipBtn = byClass(t, 'gitops-branch-chip')[0]
+  const chipBtn = byClass(t, 'dsh-git-branch-chip')[0]
   chipBtn.props.onClick()
   await wait(10)
   return await settle()
@@ -229,13 +229,13 @@ const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + 
 console.log('== 点面板内部：必须留下 ==')
 let tree = await openPanel()
 console.log('  开面板后:', (await chipTree()).props.className, ' 监听器:', (fakeDoc._listeners['pointerdown'] || []).length)
-ok('面板已打开', (await chipTree()).props.className.indexOf('gitops-chip-open') >= 0)
+ok('面板已打开', (await chipTree()).props.className.indexOf('dsh-git-chip-open') >= 0)
 fakeDoc.fire('pointerdown', { target: INSIDE })
 await wait(15)
 console.log('  点内部后:', (await chipTree()).props.className, ' 监听器:', (fakeDoc._listeners['pointerdown'] || []).length)
 tree = await settle('pop')
 console.log('  settle 之后:', (await chipTree()).props.className, ' 监听器:', (fakeDoc._listeners['pointerdown'] || []).length)
-ok('点内部后仍然打开', (await chipTree()).props.className.indexOf('gitops-chip-open') >= 0)
+ok('点内部后仍然打开', (await chipTree()).props.className.indexOf('dsh-git-chip-open') >= 0)
 ok('面板内容还在（标签页在）', textOf(tree).indexOf('历史') >= 0)
 
 console.log('')
@@ -248,62 +248,62 @@ for (let i = 0; i < 3; i += 1) {
   console.log('  第 ' + (i + 1) + ' 次点击后 chip class:', (await chipTree()).props.className)
 }
 await settle('pop')
-ok('点三次内部还是开着', (await chipTree()).props.className.indexOf('gitops-chip-open') >= 0)
+ok('点三次内部还是开着', (await chipTree()).props.className.indexOf('dsh-git-chip-open') >= 0)
 
 console.log('')
 console.log('== 点外面：应该关掉 ==')
 fakeDoc.fire('pointerdown', { target: OUTSIDE })
 await wait(15)
 await settle('pop')
-ok('点外面关掉了', (await chipTree()).props.className.indexOf('gitops-chip-open') < 0)
+ok('点外面关掉了', (await chipTree()).props.className.indexOf('dsh-git-chip-open') < 0)
 
 console.log('')
 console.log('== Esc 也能关 ==')
 await openPanel()
-ok('重新打开', (await chipTree()).props.className.indexOf('gitops-chip-open') >= 0)
+ok('重新打开', (await chipTree()).props.className.indexOf('dsh-git-chip-open') >= 0)
 fakeDoc.fire('keydown', { key: 'Escape' })
 await wait(15)
 await settle('pop')
-ok('Esc 关掉了', (await chipTree()).props.className.indexOf('gitops-chip-open') < 0)
+ok('Esc 关掉了', (await chipTree()).props.className.indexOf('dsh-git-chip-open') < 0)
 
 console.log('')
 console.log('== 切换器开着时，点面板内部也不该关面板 ==')
 await openPanel()
 tree = await settle('pop')
-byClass(tree, 'gitops-branch-chip')[0].props.onClick()
+byClass(tree, 'dsh-git-branch-chip')[0].props.onClick()
 await wait(10)
 tree = await settle('pop')
-ok('切换器开着', byClass(tree, 'gitops-switch').length === 1)
+ok('切换器开着', byClass(tree, 'dsh-git-switch').length === 1)
 fakeDoc.fire('pointerdown', { target: INSIDE })
 await wait(15)
 tree = await settle('pop')
-ok('面板还开着', (await chipTree()).props.className.indexOf('gitops-chip-open') >= 0)
-ok('切换器收起了', byClass(tree, 'gitops-switch').length === 0)
+ok('面板还开着', (await chipTree()).props.className.indexOf('dsh-git-chip-open') >= 0)
+ok('切换器收起了', byClass(tree, 'dsh-git-switch').length === 0)
 
 console.log('')
 console.log('== 点浮层卡片内部：谁都不该关 ==')
-byClass(tree, 'gitops-branch-chip')[0].props.onClick()
+byClass(tree, 'dsh-git-branch-chip')[0].props.onClick()
 await wait(10)
 tree = await settle('pop')
-ok('切换器又开了', byClass(tree, 'gitops-switch').length === 1)
+ok('切换器又开了', byClass(tree, 'dsh-git-switch').length === 1)
 fakeDoc.fire('pointerdown', { target: IN_CARD })
 await wait(15)
 tree = await settle('pop')
-ok('卡片还在', byClass(tree, 'gitops-switch').length === 1)
-ok('面板还在', (await chipTree()).props.className.indexOf('gitops-chip-open') >= 0)
+ok('卡片还在', byClass(tree, 'dsh-git-switch').length === 1)
+ok('面板还在', (await chipTree()).props.className.indexOf('dsh-git-chip-open') >= 0)
 
 console.log('')
 console.log('== 点输入框旁边的按钮：不该关面板 ==')
 fakeDoc.fire('pointerdown', { target: IN_CHIP })
 await wait(15)
 await settle('pop')
-ok('面板还在（按钮自己决定开合）', (await chipTree()).props.className.indexOf('gitops-chip-open') >= 0)
+ok('面板还在（按钮自己决定开合）', (await chipTree()).props.className.indexOf('dsh-git-chip-open') >= 0)
 
 console.log('')
 console.log('== 选中分支不再冒出操作条 ==')
 let t8 = await openPanel()
 t8 = await settle('pop')
-const localRow = collect(t8).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('gitops-trow') >= 0 && textOf(n) === 'feature')
+const localRow = collect(t8).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('dsh-git-trow') >= 0 && textOf(n) === 'feature')
 if (localRow === undefined) {
   console.log('  分支树里没有名为 feature 的行，改用第一行分支行')
 } else {
@@ -311,8 +311,8 @@ if (localRow === undefined) {
   await wait(15)
   t8 = await settle('pop')
 }
-ok('没有 side-actions 条了', byClass(t8, 'gitops-side-actions').length === 0)
-ok('工具栏本身还在', byClass(t8, 'gitops-tools').length === 1)
-console.log('  工具栏按钮:', JSON.stringify(buttons(byClass(t8, 'gitops-tools')[0]).map(textOf)))
-ok('工具栏里不再混入分支名', buttons(byClass(t8, 'gitops-tools')[0]).every((b) => textOf(b) !== '切换' && textOf(b) !== '合并' && textOf(b) !== '删除'))
-ok('左栏仍只有分支树', byClass(t8, 'gitops-left').length === 1 && byClass(t8, 'gitops-side').length >= 1)
+ok('没有 side-actions 条了', byClass(t8, 'dsh-git-side-actions').length === 0)
+ok('工具栏本身还在', byClass(t8, 'dsh-git-tools').length === 1)
+console.log('  工具栏按钮:', JSON.stringify(buttons(byClass(t8, 'dsh-git-tools')[0]).map(textOf)))
+ok('工具栏里不再混入分支名', buttons(byClass(t8, 'dsh-git-tools')[0]).every((b) => textOf(b) !== '切换' && textOf(b) !== '合并' && textOf(b) !== '删除'))
+ok('左栏仍只有分支树', byClass(t8, 'dsh-git-left').length === 1 && byClass(t8, 'dsh-git-side').length >= 1)

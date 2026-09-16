@@ -45,7 +45,7 @@
           strokeWidth: 1.5,
         }))
       }
-      return h('svg', { className: 'gitops-graph', width: width, height: height }, shapes)
+      return h('svg', { className: 'dsh-git-graph', width: width, height: height }, shapes)
     }
     /* Redrawn only when the history itself changes: picking a commit, hovering a
        row or typing in the filter box does not move a single one of these lines. */
@@ -60,18 +60,18 @@
       const refs = splitRefs(commit.refs)
       const chips = []
       for (let k = 0; k < refs.length; k += 1) {
-        chips.push(h('span', { className: 'gitops-ref gitops-ref-' + refKind(refs[k]), key: 'r' + k }, refs[k]))
+        chips.push(h('span', { className: 'dsh-git-ref dsh-git-ref-' + refKind(refs[k]), key: 'r' + k }, refs[k]))
       }
       return h('div', {
-        className: 'gitops-crow' + (props.selected === true ? ' gitops-crow-sel' : ''),
+        className: 'dsh-git-crow' + (props.selected === true ? ' dsh-git-crow-sel' : ''),
         key: commit.hash,
         title: commit.hash + '\n' + commit.subject,
         onClick: function () { props.onPick(commit.hash) },
       },
-        h('span', { className: 'gitops-subject' }, commit.subject),
-        chips.length > 0 ? h('span', { className: 'gitops-refs' }, chips) : null,
-        h('span', { className: 'gitops-author' }, commit.author),
-        h('span', { className: 'gitops-date' }, relativeDate(commit.date)))
+        h('span', { className: 'dsh-git-subject' }, commit.subject),
+        chips.length > 0 ? h('span', { className: 'dsh-git-refs' }, chips) : null,
+        h('span', { className: 'dsh-git-author' }, commit.author),
+        h('span', { className: 'dsh-git-date' }, relativeDate(commit.date)))
     }
     const CommitRowMemo = memo(CommitRow)
 
@@ -88,9 +88,9 @@
         const reason = graph != null && graph.error === 'not-a-repository'
           ? ('不是 git 仓库：' + text(graph.repo))
           : '无法读取提交历史'
-        return h('div', { className: 'gitops-pane gitops-error' }, reason)
+        return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
-      if (count === 0) return h('div', { className: 'gitops-pane gitops-dim' }, '没有匹配的提交')
+      if (count === 0) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '没有匹配的提交')
 
       const laneNum = Math.max(1, graph.lanes)
       const graphWidth = laneNum * LANE_W + 6
@@ -110,11 +110,11 @@
       const padTop = win.first * ROW_H
       const padBottom = (count - win.last) * ROW_H
       return h('div', {
-        className: 'gitops-log',
+        className: 'dsh-git-log',
         ref: win.attach,
         onScroll: win.measure,
       },
-        h('div', { className: 'gitops-logwrap', style: { minHeight: (count * ROW_H) + 'px' } },
+        h('div', { className: 'dsh-git-logwrap', style: { minHeight: (count * ROW_H) + 'px' } },
           h(GraphCanvasMemo, { rows: graph.rows, commits: commits, lanes: graph.lanes, first: win.first, last: win.last }),
           h('div', { style: { marginLeft: graphWidth + 'px' } },
             padTop > 0 ? h('div', { key: 'pad-top', style: { height: padTop + 'px' } }) : null,
@@ -124,23 +124,23 @@
 
     function RefTree(props) {
       const refs = props.refs
-      if (refs == null || refs.ok !== true) return h('div', { className: 'gitops-side gitops-dim' }, '无法读取分支')
+      if (refs == null || refs.ok !== true) return h('div', { className: 'dsh-git-side dsh-git-dim' }, '无法读取分支')
       const rows = []
 
-      rows.push(h('div', { className: 'gitops-trow', key: 'head-title', style: { paddingLeft: '6px' },
+      rows.push(h('div', { className: 'dsh-git-trow', key: 'head-title', style: { paddingLeft: '6px' },
         onClick: function () { props.onToggle('@head') } },
-        h('span', { className: 'gitops-tw' }, props.collapsed['@head'] === true ? '▶' : '▼'),
-        h('span', { className: 'gitops-tname gitops-dim' }, 'HEAD（当前分支）')))
+        h('span', { className: 'dsh-git-tw' }, props.collapsed['@head'] === true ? '▶' : '▼'),
+        h('span', { className: 'dsh-git-tname dsh-git-dim' }, 'HEAD（当前分支）')))
       if (props.collapsed['@head'] !== true) {
         if (refs.current.length === 0) {
-          rows.push(h('div', { className: 'gitops-trow gitops-dim', key: 'head-none', style: { paddingLeft: '18px' } }, '(游离 HEAD)'))
+          rows.push(h('div', { className: 'dsh-git-trow dsh-git-dim', key: 'head-none', style: { paddingLeft: '18px' } }, '(游离 HEAD)'))
         } else {
           for (let i = 0; i < refs.current.length; i += 1) {
             const name = refs.current[i]
             rows.push(h('div', {
-              className: 'gitops-trow'
-                + (props.selectedKey === name ? ' gitops-trow-sel' : '')
-                + (props.activeRef === name ? ' gitops-trow-scope' : ''),
+              className: 'dsh-git-trow'
+                + (props.selectedKey === name ? ' dsh-git-trow-sel' : '')
+                + (props.activeRef === name ? ' dsh-git-trow-scope' : ''),
               key: 'cur:' + name,
               style: { paddingLeft: '18px' },
               /* Single click only moves the selection: the graph follows on a
@@ -150,18 +150,18 @@
               onClick: function () { props.onSelect(name) },
               onDoubleClick: function () { props.onSelect(name); props.onPick(name) },
             },
-              h('span', { className: 'gitops-tw' }, '★'),
-              h('span', { className: 'gitops-tname' }, name)))
+              h('span', { className: 'dsh-git-tw' }, '★'),
+              h('span', { className: 'dsh-git-tname' }, name)))
           }
         }
       }
 
       const section = function (title, key, entries) {
-        rows.push(h('div', { className: 'gitops-trow', key: key + ':title', style: { paddingLeft: '6px' },
+        rows.push(h('div', { className: 'dsh-git-trow', key: key + ':title', style: { paddingLeft: '6px' },
           onClick: function () { props.onToggle(key) } },
-          h('span', { className: 'gitops-tw' }, props.collapsed[key] === true ? '▶' : '▼'),
-          h('span', { className: 'gitops-tname gitops-dim' }, title),
-          h('span', { className: 'gitops-tdim' }, String(entries.length))))
+          h('span', { className: 'dsh-git-tw' }, props.collapsed[key] === true ? '▶' : '▼'),
+          h('span', { className: 'dsh-git-tname dsh-git-dim' }, title),
+          h('span', { className: 'dsh-git-tdim' }, String(entries.length))))
         if (props.collapsed[key] === true) return
         const tree = buildTree(entries)
         const flat = flattenTree(tree, 2, key, props.collapsed, [], key)
@@ -169,7 +169,7 @@
           const node = flat[i]
           if (node.kind === 'dir') {
             rows.push(h('div', {
-              className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+              className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
               key: node.id,
               style: { paddingLeft: (6 + node.depth * 12) + 'px' },
               title: node.name + '（双击展开/折叠）',
@@ -177,22 +177,22 @@
               onDoubleClick: function () { props.onToggle(node.path) },
             },
               twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-              h('span', { className: 'gitops-tname' }, node.name),
-              h('span', { className: 'gitops-tdim' }, String(node.count))))
+              h('span', { className: 'dsh-git-tname' }, node.name),
+              h('span', { className: 'dsh-git-tdim' }, String(node.count))))
           } else {
             const branchName = text(node.data)
             rows.push(h('div', {
-              className: 'gitops-trow'
-                + (props.selectedKey === branchName ? ' gitops-trow-sel' : '')
-                + (props.activeRef === branchName ? ' gitops-trow-scope' : ''),
+              className: 'dsh-git-trow'
+                + (props.selectedKey === branchName ? ' dsh-git-trow-sel' : '')
+                + (props.activeRef === branchName ? ' dsh-git-trow-scope' : ''),
               key: node.id,
               style: { paddingLeft: (6 + node.depth * 12) + 'px' },
               title: branchName + '（双击只看这个分支的历史）',
               onClick: function () { props.onSelect(branchName) },
               onDoubleClick: function () { props.onSelect(branchName); props.onPick(branchName) },
             },
-              h('span', { className: 'gitops-tw' }),
-              h('span', { className: 'gitops-tname' }, node.name)))
+              h('span', { className: 'dsh-git-tw' }),
+              h('span', { className: 'dsh-git-tname' }, node.name)))
           }
         }
       }
@@ -201,6 +201,6 @@
       for (let i = 0; i < refs.remote.length; i += 1) {
         section('远程 · ' + refs.remote[i].name, '@remote:' + refs.remote[i].name, refs.remote[i].refs)
       }
-      return h('div', { className: 'gitops-side' }, rows)
+      return h('div', { className: 'dsh-git-side' }, rows)
     }
 

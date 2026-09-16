@@ -36,7 +36,7 @@ await renderUntilStable(element, label)
 await wait(20)
 const tree = await renderUntilStable(element, label)
 
-const branchRowEls = rows(tree).filter((r) => String(r.props.className).indexOf('gitops-bs-row') >= 0)
+const branchRowEls = rows(tree).filter((r) => String(r.props.className).indexOf('dsh-git-bs-row') >= 0)
 const timePasses = function (rounds) {
   let total = 0
   for (let i = 0; i < rounds; i += 1) {

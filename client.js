@@ -125,39 +125,14 @@ return {
       }
     }
 
-    /* The plugin answered to "gitops" before it was named dsh-git-idea, and the
-       keys it wrote then are the same preferences this version reads now. A
-       rename must not silently reset someone's panel size, cadence or
-       favourites, so the old key is copied across once, on the first store the
-       page hands over, and only when the new one is still absent. */
-    const STORE_RENAMES = [
-      ['dsh.gitops.settings', 'dsh.git-idea.settings'],
-      ['dsh.gitops.panel', 'dsh.git-idea.panel'],
-      ['dsh.gitops.mru', 'dsh.git-idea.mru'],
-      ['dsh.gitops.stars', 'dsh.git-idea.stars'],
-      ['dsh.gitops.sort', 'dsh.git-idea.sort'],
-    ]
-    let storeMigrated = false
-
     function readStored(key) {
       const store = localStore(null)
       if (store == null) return null
-      let value = null
       try {
-        if (storeMigrated !== true) {
-          storeMigrated = true
-          for (let i = 0; i < STORE_RENAMES.length; i += 1) {
-            const from = STORE_RENAMES[i][0]
-            const to = STORE_RENAMES[i][1]
-            const previous = store.getItem(from)
-            if (previous != null && store.getItem(to) == null) store.setItem(to, previous)
-          }
-        }
-        value = store.getItem(key)
+        return store.getItem(key)
       } catch (error) {
         return null
       }
-      return value
     }
 
     function writeStored(key, value) {
@@ -330,11 +305,14 @@ return {
           return
         }
         const top = node != null && typeof node.scrollTop === 'number' && node.scrollTop > 0 ? node.scrollTop : 0
-        const first = Math.max(0, Math.floor(top / rowHeight) - VIRTUAL_OVERSCAN)
-        const last = Math.min(count, Math.ceil((top + viewport) / rowHeight) + VIRTUAL_OVERSCAN)
+        /* Both ends are clamped to the list: a filter can leave the scroller
+           further down than the list is long, and a window that starts past the
+           end would paint a spacer taller than the list and nothing else. */
+        const first = Math.max(0, Math.min(count, Math.floor(top / rowHeight) - VIRTUAL_OVERSCAN))
+        const last = Math.max(first, Math.min(count, Math.ceil((top + viewport) / rowHeight) + VIRTUAL_OVERSCAN))
         setWin(function (previous) {
           if (previous !== null && previous.first === first && previous.last === last) return previous
-          return { first: first, last: Math.max(first, last) }
+          return { first: first, last: last }
         })
       }
       /* Deliberately no dependency list: measuring is idempotent and costs two
@@ -578,12 +556,12 @@ return {
 
     function statusClass(status) {
       const head = text(status).charAt(0)
-      if (head === 'A') return ' gitops-st-A'
-      if (head === 'D') return ' gitops-st-D'
-      if (head === 'R') return ' gitops-st-R'
-      if (head === 'C') return ' gitops-st-C'
-      if (head === '?') return ' gitops-st-U'
-      return ' gitops-st-M'
+      if (head === 'A') return ' dsh-git-st-A'
+      if (head === 'D') return ' dsh-git-st-D'
+      if (head === 'R') return ' dsh-git-st-R'
+      if (head === 'C') return ' dsh-git-st-C'
+      if (head === '?') return ' dsh-git-st-U'
+      return ' dsh-git-st-M'
     }
 
     function statusLabel(status) {
@@ -722,7 +700,7 @@ return {
 
     function twisty(props) {
       return h('span', {
-        className: 'gitops-tw',
+        className: 'dsh-git-tw',
         title: props.collapsed === true ? '展开' : '折叠',
         onClick: function (event) {
           event.stopPropagation()
@@ -733,233 +711,233 @@ return {
 
     ctx.effect(function () {
       return styles.insert(`
-.gitops-chip{display:inline-flex;align-items:center;gap:6px;height:28px;max-width:200px;padding:0 10px;border:none;border-radius:8px;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:13px;font-weight:500;line-height:20px;cursor:pointer;flex:none}
-.gitops-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-chip-open{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.gitops-chip-repo{color:var(--dsw-alias-label-primary)}
-.gitops-chip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.gitops-chip-idle{opacity:.72}
-.gitops-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:10px;line-height:1;flex:none}
-.gitops-pop{position:absolute;left:8px;right:8px;bottom:100%;margin-bottom:8px;z-index:30;pointer-events:auto;box-sizing:border-box;height:74vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
-.gitops-top{display:flex;align-items:center;gap:8px;row-gap:6px;flex-wrap:wrap;flex:none;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);position:relative}
-.gitops-tabs{display:flex;gap:2px;flex:none}
-.gitops-tab{border:none;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;padding:3px 10px;border-radius:6px;cursor:pointer}
-.gitops-tab:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-tab-on{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-weight:600}
-.gitops-title{font-weight:600;flex:none}
-.gitops-dim{color:var(--dsw-alias-label-secondary)}
-.gitops-body{flex:1;display:flex;min-height:0}
-.gitops-side{width:200px;flex:none;overflow:auto;padding:4px 0;border-right:1px solid var(--dsw-alias-border-l1)}
-.gitops-main{flex:1;min-width:0;display:flex;flex-direction:column}
-.gitops-detail{width:280px;flex:none;overflow:auto;padding:6px 8px;border-left:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-chip{display:inline-flex;align-items:center;gap:6px;height:28px;max-width:200px;padding:0 10px;border:none;border-radius:8px;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:13px;font-weight:500;line-height:20px;cursor:pointer;flex:none}
+.dsh-git-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-chip-open{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-git-chip-repo{color:var(--dsw-alias-label-primary)}
+.dsh-git-chip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.dsh-git-chip-idle{opacity:.72}
+.dsh-git-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:10px;line-height:1;flex:none}
+.dsh-git-pop{position:absolute;left:8px;right:8px;bottom:100%;margin-bottom:8px;z-index:30;pointer-events:auto;box-sizing:border-box;height:74vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
+.dsh-git-top{display:flex;align-items:center;gap:8px;row-gap:6px;flex-wrap:wrap;flex:none;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);position:relative}
+.dsh-git-tabs{display:flex;gap:2px;flex:none}
+.dsh-git-tab{border:none;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;padding:3px 10px;border-radius:6px;cursor:pointer}
+.dsh-git-tab:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-tab-on{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-weight:600}
+.dsh-git-title{font-weight:600;flex:none}
+.dsh-git-dim{color:var(--dsw-alias-label-secondary)}
+.dsh-git-body{flex:1;display:flex;min-height:0}
+.dsh-git-side{width:200px;flex:none;overflow:auto;padding:4px 0;border-right:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.dsh-git-detail{width:280px;flex:none;overflow:auto;padding:6px 8px;border-left:1px solid var(--dsw-alias-border-l1)}
 /* IDEA's log toolbar: a bordered search box, then the filters as inline
    "name: value" triggers that each clear themselves. Nothing else is a box, and
    there is no second filter row, so the graph keeps that height. */
-.gitops-logsearch{display:inline-flex;align-items:center;gap:4px;flex:1 1 120px;min-width:80px;max-width:240px;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base)}
-.gitops-logsearch:focus-within{border-color:var(--dsw-alias-brand-primary)}
-.gitops-logsearch-ico{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
-.gitops-logsearch-input{flex:1 1 auto;width:auto;min-width:0;border:0;background:transparent;outline:none;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);padding:2px 0}
-.gitops-logsearch-input::placeholder{color:var(--dsw-alias-label-secondary)}
-.gitops-logsearch-x{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:13px;line-height:1}
-.gitops-logsearch-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.gitops-tsep{flex:none;width:1px;height:14px;margin:0 3px;background:var(--dsw-alias-border-l1)}
-.gitops-lf{display:inline-flex;align-items:center;gap:2px;flex:none;height:22px;padding:0 4px;border-radius:5px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer}
-.gitops-lf:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-lf-on{color:var(--dsw-alias-brand-primary)}
-.gitops-lf-k{flex:none;color:inherit;opacity:.85}
-.gitops-lf-select{appearance:none;-webkit-appearance:none;-moz-appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;font-family:inherit;padding:0;flex:none;cursor:pointer;outline:none}
-.gitops-lf-select option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
-.gitops-lf-caret{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary);pointer-events:none}
-.gitops-lf-input{flex:0 0 auto;border:0;background:transparent;outline:none;font:inherit;font-size:11px;font-family:inherit;color:var(--dsw-alias-label-primary);padding:0}
-.gitops-lf-input::placeholder{color:var(--dsw-alias-label-secondary)}
-.gitops-lf-x{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px;height:14px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:12px;line-height:1}
-.gitops-lf-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.gitops-lclear{flex:none;padding:1px 6px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer}
-.gitops-lclear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.gitops-count{position:absolute;right:8px;top:5px;flex:none;font-size:11px;line-height:26px}
-.gitops-log{flex:1;overflow:auto}
-.gitops-trow{display:flex;align-items:center;gap:6px;padding:2px 6px 2px 0;cursor:pointer;white-space:nowrap;border-radius:4px;-webkit-user-select:none;user-select:none}
-.gitops-trow:hover{background:var(--dsw-alias-bg-layer-2)}
-.gitops-trow-sel{background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-trow-sel:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-logsearch{display:inline-flex;align-items:center;gap:4px;flex:1 1 120px;min-width:80px;max-width:240px;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base)}
+.dsh-git-logsearch:focus-within{border-color:var(--dsw-alias-brand-primary)}
+.dsh-git-logsearch-ico{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
+.dsh-git-logsearch-input{flex:1 1 auto;width:auto;min-width:0;border:0;background:transparent;outline:none;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);padding:2px 0}
+.dsh-git-logsearch-input::placeholder{color:var(--dsw-alias-label-secondary)}
+.dsh-git-logsearch-x{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:13px;line-height:1}
+.dsh-git-logsearch-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-git-tsep{flex:none;width:1px;height:14px;margin:0 3px;background:var(--dsw-alias-border-l1)}
+.dsh-git-lf{display:inline-flex;align-items:center;gap:2px;flex:none;height:22px;padding:0 4px;border-radius:5px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dsh-git-lf:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-lf-on{color:var(--dsw-alias-brand-primary)}
+.dsh-git-lf-k{flex:none;color:inherit;opacity:.85}
+.dsh-git-lf-select{appearance:none;-webkit-appearance:none;-moz-appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;font-family:inherit;padding:0;flex:none;cursor:pointer;outline:none}
+.dsh-git-lf-select option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
+.dsh-git-lf-caret{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary);pointer-events:none}
+.dsh-git-lf-input{flex:0 0 auto;border:0;background:transparent;outline:none;font:inherit;font-size:11px;font-family:inherit;color:var(--dsw-alias-label-primary);padding:0}
+.dsh-git-lf-input::placeholder{color:var(--dsw-alias-label-secondary)}
+.dsh-git-lf-x{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px;height:14px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:12px;line-height:1}
+.dsh-git-lf-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-git-lclear{flex:none;padding:1px 6px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer}
+.dsh-git-lclear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-git-count{position:absolute;right:8px;top:5px;flex:none;font-size:11px;line-height:26px}
+.dsh-git-log{flex:1;overflow:auto}
+.dsh-git-trow{display:flex;align-items:center;gap:6px;padding:2px 6px 2px 0;cursor:pointer;white-space:nowrap;border-radius:4px;-webkit-user-select:none;user-select:none}
+.dsh-git-trow:hover{background:var(--dsw-alias-bg-layer-2)}
+.dsh-git-trow-sel{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-trow-sel:hover{background:var(--dsw-alias-interactive-bg-hover)}
 /* The branch the graph is currently scoped to. Distinct from the selection: the
    selection moves on a single click, this only moves on a double click. */
-.gitops-trow-scope{box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
-.gitops-trow-scope .gitops-tname{color:var(--dsw-alias-brand-primary)}
-.gitops-tw{flex:none;width:10px;color:var(--dsw-alias-label-secondary);font-size:9px;cursor:pointer}
-.gitops-tname{overflow:hidden;text-overflow:ellipsis}
-.gitops-tdim{margin-left:auto;padding-right:6px;color:var(--dsw-alias-label-secondary);font-size:11px}
-.gitops-st{flex:none;width:12px;font-family:ui-monospace,monospace;font-weight:700}
-.gitops-st-M{color:var(--dsw-alias-state-warn-primary)}
-.gitops-st-A{color:var(--dsw-alias-state-success-primary)}
-.gitops-st-D{color:var(--dsw-alias-state-error-primary)}
-.gitops-st-R{color:var(--dsw-alias-brand-primary)}
-.gitops-st-C{color:var(--dsw-alias-brand-primary)}
-.gitops-st-U{color:var(--dsw-alias-state-error-primary)}
-.gitops-cbox{flex:none;width:14px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer}
-.gitops-cbox-on{color:var(--dsw-alias-brand-primary)}
-.gitops-cbox-part{color:var(--dsw-alias-state-warn-primary)}
-.gitops-changes{flex:1;display:flex;min-height:0}
-.gitops-changes-tree{flex:1;min-width:0;overflow:auto;padding:4px 0}
-.gitops-commitpane{width:304px;flex:none;border-left:1px solid var(--dsw-alias-border-l1);padding:8px;display:flex;flex-direction:column;gap:8px}
-.gitops-crow{display:flex;align-items:center;gap:8px;height:26px;box-sizing:border-box;padding:0 8px;cursor:pointer;white-space:nowrap;-webkit-user-select:none;user-select:none}
-.gitops-crow:hover{background:var(--dsw-alias-bg-layer-2)}
-.gitops-crow-sel{background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-subject{flex:1;overflow:hidden;text-overflow:ellipsis}
-.gitops-author{flex:none;width:84px;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary);font-size:11px}
-.gitops-date{flex:none;width:82px;text-align:right;color:var(--dsw-alias-label-secondary);font-size:11px}
-.gitops-refs{display:flex;gap:4px;flex:none;max-width:240px;overflow:hidden}
-.gitops-ref{border-radius:999px;padding:0 6px;font-size:10px;line-height:16px;font-weight:600;white-space:nowrap}
-.gitops-ref-head{background:var(--dsw-alias-brand-primary);color:#fff}
-.gitops-ref-remote{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1)}
-.gitops-ref-tag{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary);border:1px solid var(--dsw-alias-border-l1)}
-.gitops-logwrap{position:relative}
-.gitops-graph{position:absolute;left:0;top:0;pointer-events:none}
-.gitops-btn{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-family:inherit;flex:none}
-.gitops-btn:disabled{opacity:.45;cursor:default}
-.gitops-primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
-.gitops-clearable{position:relative;display:inline-flex;align-items:center;min-width:0;flex:1 1 auto}
-.gitops-clearable-set{flex:1 1 160px;max-width:260px}
-.gitops-clearable-path{flex:1 1 140px;min-width:110px}
-.gitops-clearable-area{flex:0 0 auto;align-items:flex-start}
-.gitops-clearable > input,.gitops-clearable > textarea{padding-right:22px}
-.gitops-clear-x{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:1;cursor:pointer}
-.gitops-clear-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.gitops-clearable-area .gitops-clear-x{top:5px;transform:none}
-.gitops-input{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border-radius:4px;padding:4px 6px;font-size:12px;font-family:inherit;width:100%}
-textarea.gitops-input{resize:vertical}
-.gitops-info{border-top:1px solid var(--dsw-alias-border-l1);margin-top:8px;padding-top:6px;display:flex;flex-direction:column;gap:3px}
-.gitops-hash{font-family:ui-monospace,monospace;font-size:11px;word-break:break-all}
-.gitops-msg{background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:6px;white-space:pre-wrap;font-size:11px;max-height:120px;overflow:auto}
-.gitops-error{color:var(--dsw-alias-state-error-primary)}
-.gitops-ok{color:var(--dsw-alias-state-success-primary)}
-.gitops-group-title{color:var(--dsw-alias-label-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 0}
-.gitops-mono{font-family:ui-monospace,monospace}
-.gitops-pane{padding:10px}
-.gitops-setup{flex:1;display:flex;flex-direction:column;gap:10px;padding:16px 20px;overflow:auto}
-.gitops-setup-h{font-size:14px;font-weight:600}
-.gitops-setup-path{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:6px 8px}
-.gitops-setup-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.gitops-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
-.gitops-danger{color:var(--dsw-alias-state-error-primary)}
-.gitops-tools{position:relative;flex:none;display:flex;align-items:center;gap:3px;flex-wrap:wrap;padding:5px 80px 5px 7px;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.gitops-tool{display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:0 0;color:var(--dsw-alias-label-primary);border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit;cursor:pointer;flex:none;line-height:16px}
-.gitops-tool:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-tool:disabled{opacity:.4;cursor:default}
-.gitops-tool-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l1)}
-.gitops-tool-ico{justify-content:center;width:26px;height:26px;padding:0}
-.gitops-tool-badge{display:inline-grid;place-items:center;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:9px;line-height:1}
-.gitops-grow{flex:1;min-width:8px}
-.gitops-banner{flex:none;display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--dsw-alias-bg-layer-2);border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
-.gitops-banner-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-state-warn-primary)}
-.gitops-left{width:200px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--dsw-alias-border-l1)}
-.gitops-left .gitops-side{width:auto;flex:1;min-height:0;border-right:0}
-.gitops-prompt{flex:none;display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.gitops-prompt .gitops-input{flex:1 1 auto;width:auto}
-.gitops-grip{position:absolute;z-index:40;touch-action:none}
-.gitops-grip-n{top:0;left:10px;right:10px;height:5px;cursor:ns-resize}
-.gitops-grip-w{left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize}
-.gitops-grip-e{right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize}
-.gitops-grip-nw{left:0;top:0;width:12px;height:12px;cursor:nwse-resize}
-.gitops-grip-ne{right:0;top:0;width:12px;height:12px;cursor:nesw-resize}
-.gitops-grip:hover{background:var(--dsw-alias-brand-primary);opacity:.3}
-.gitops-sync{display:flex;align-items:center;gap:2px;flex:none}
-.gitops-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px}
-.gitops-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.gitops-ab{flex:none;color:var(--dsw-alias-label-secondary);font-size:10px}
-.gitops-repo-path{flex:1 1 140px;min-width:110px;width:auto}
-.gitops-set{display:flex;flex-direction:column;gap:14px;padding:4px 2px;max-width:660px}
-.gitops-set-h{font-size:14px;font-weight:600}
-.gitops-set-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.gitops-set-label{flex:none;min-width:170px;font-size:12px;color:var(--dsw-alias-label-primary)}
-.gitops-set-input{flex:1 1 160px;width:auto;max-width:260px}
-.gitops-set-num{flex:none;width:74px}
-.gitops-set-check{display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}
-.gitops-set-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
-.gitops-set-group{margin-top:6px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary)}
-.gitops-hidden{display:none}
+.dsh-git-trow-scope{box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
+.dsh-git-trow-scope .dsh-git-tname{color:var(--dsw-alias-brand-primary)}
+.dsh-git-tw{flex:none;width:10px;color:var(--dsw-alias-label-secondary);font-size:9px;cursor:pointer}
+.dsh-git-tname{overflow:hidden;text-overflow:ellipsis}
+.dsh-git-tdim{margin-left:auto;padding-right:6px;color:var(--dsw-alias-label-secondary);font-size:11px}
+.dsh-git-st{flex:none;width:12px;font-family:ui-monospace,monospace;font-weight:700}
+.dsh-git-st-M{color:var(--dsw-alias-state-warn-primary)}
+.dsh-git-st-A{color:var(--dsw-alias-state-success-primary)}
+.dsh-git-st-D{color:var(--dsw-alias-state-error-primary)}
+.dsh-git-st-R{color:var(--dsw-alias-brand-primary)}
+.dsh-git-st-C{color:var(--dsw-alias-brand-primary)}
+.dsh-git-st-U{color:var(--dsw-alias-state-error-primary)}
+.dsh-git-cbox{flex:none;width:14px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dsh-git-cbox-on{color:var(--dsw-alias-brand-primary)}
+.dsh-git-cbox-part{color:var(--dsw-alias-state-warn-primary)}
+.dsh-git-changes{flex:1;display:flex;min-height:0}
+.dsh-git-changes-tree{flex:1;min-width:0;overflow:auto;padding:4px 0}
+.dsh-git-commitpane{width:304px;flex:none;border-left:1px solid var(--dsw-alias-border-l1);padding:8px;display:flex;flex-direction:column;gap:8px}
+.dsh-git-crow{display:flex;align-items:center;gap:8px;height:26px;box-sizing:border-box;padding:0 8px;cursor:pointer;white-space:nowrap;-webkit-user-select:none;user-select:none}
+.dsh-git-crow:hover{background:var(--dsw-alias-bg-layer-2)}
+.dsh-git-crow-sel{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-subject{flex:1;overflow:hidden;text-overflow:ellipsis}
+.dsh-git-author{flex:none;width:84px;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary);font-size:11px}
+.dsh-git-date{flex:none;width:82px;text-align:right;color:var(--dsw-alias-label-secondary);font-size:11px}
+.dsh-git-refs{display:flex;gap:4px;flex:none;max-width:240px;overflow:hidden}
+.dsh-git-ref{border-radius:999px;padding:0 6px;font-size:10px;line-height:16px;font-weight:600;white-space:nowrap}
+.dsh-git-ref-head{background:var(--dsw-alias-brand-primary);color:#fff}
+.dsh-git-ref-remote{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-ref-tag{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary);border:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-logwrap{position:relative}
+.dsh-git-graph{position:absolute;left:0;top:0;pointer-events:none}
+.dsh-git-btn{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-family:inherit;flex:none}
+.dsh-git-btn:disabled{opacity:.45;cursor:default}
+.dsh-git-primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
+.dsh-git-clearable{position:relative;display:inline-flex;align-items:center;min-width:0;flex:1 1 auto}
+.dsh-git-clearable-set{flex:1 1 160px;max-width:260px}
+.dsh-git-clearable-path{flex:1 1 140px;min-width:110px}
+.dsh-git-clearable-area{flex:0 0 auto;align-items:flex-start}
+.dsh-git-clearable > input,.dsh-git-clearable > textarea{padding-right:22px}
+.dsh-git-clear-x{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:1;cursor:pointer}
+.dsh-git-clear-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-git-clearable-area .dsh-git-clear-x{top:5px;transform:none}
+.dsh-git-input{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border-radius:4px;padding:4px 6px;font-size:12px;font-family:inherit;width:100%}
+textarea.dsh-git-input{resize:vertical}
+.dsh-git-info{border-top:1px solid var(--dsw-alias-border-l1);margin-top:8px;padding-top:6px;display:flex;flex-direction:column;gap:3px}
+.dsh-git-hash{font-family:ui-monospace,monospace;font-size:11px;word-break:break-all}
+.dsh-git-msg{background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:6px;white-space:pre-wrap;font-size:11px;max-height:120px;overflow:auto}
+.dsh-git-error{color:var(--dsw-alias-state-error-primary)}
+.dsh-git-ok{color:var(--dsw-alias-state-success-primary)}
+.dsh-git-group-title{color:var(--dsw-alias-label-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 0}
+.dsh-git-mono{font-family:ui-monospace,monospace}
+.dsh-git-pane{padding:10px}
+.dsh-git-setup{flex:1;display:flex;flex-direction:column;gap:10px;padding:16px 20px;overflow:auto}
+.dsh-git-setup-h{font-size:14px;font-weight:600}
+.dsh-git-setup-path{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:6px 8px}
+.dsh-git-setup-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsh-git-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
+.dsh-git-danger{color:var(--dsw-alias-state-error-primary)}
+.dsh-git-tools{position:relative;flex:none;display:flex;align-items:center;gap:3px;flex-wrap:wrap;padding:5px 80px 5px 7px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-tool{display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:0 0;color:var(--dsw-alias-label-primary);border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit;cursor:pointer;flex:none;line-height:16px}
+.dsh-git-tool:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-tool:disabled{opacity:.4;cursor:default}
+.dsh-git-tool-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l1)}
+.dsh-git-tool-ico{justify-content:center;width:26px;height:26px;padding:0}
+.dsh-git-tool-badge{display:inline-grid;place-items:center;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:9px;line-height:1}
+.dsh-git-grow{flex:1;min-width:8px}
+.dsh-git-banner{flex:none;display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--dsw-alias-bg-layer-2);border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
+.dsh-git-banner-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-state-warn-primary)}
+.dsh-git-left{width:200px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-left .dsh-git-side{width:auto;flex:1;min-height:0;border-right:0}
+.dsh-git-prompt{flex:none;display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-prompt .dsh-git-input{flex:1 1 auto;width:auto}
+.dsh-git-grip{position:absolute;z-index:40;touch-action:none}
+.dsh-git-grip-n{top:0;left:10px;right:10px;height:5px;cursor:ns-resize}
+.dsh-git-grip-w{left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize}
+.dsh-git-grip-e{right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize}
+.dsh-git-grip-nw{left:0;top:0;width:12px;height:12px;cursor:nwse-resize}
+.dsh-git-grip-ne{right:0;top:0;width:12px;height:12px;cursor:nesw-resize}
+.dsh-git-grip:hover{background:var(--dsw-alias-brand-primary);opacity:.3}
+.dsh-git-sync{display:flex;align-items:center;gap:2px;flex:none}
+.dsh-git-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px}
+.dsh-git-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.dsh-git-ab{flex:none;color:var(--dsw-alias-label-secondary);font-size:10px}
+.dsh-git-repo-path{flex:1 1 140px;min-width:110px;width:auto}
+.dsh-git-set{display:flex;flex-direction:column;gap:14px;padding:4px 2px;max-width:660px}
+.dsh-git-set-h{font-size:14px;font-weight:600}
+.dsh-git-set-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsh-git-set-label{flex:none;min-width:170px;font-size:12px;color:var(--dsw-alias-label-primary)}
+.dsh-git-set-input{flex:1 1 160px;width:auto;max-width:260px}
+.dsh-git-set-num{flex:none;width:74px}
+.dsh-git-set-check{display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}
+.dsh-git-set-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
+.dsh-git-set-group{margin-top:6px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary)}
+.dsh-git-hidden{display:none}
 /* Only while the header's switcher is open: the card hangs off the header and
    must be allowed past the panel's own clip, or a panel dragged short enough
    would cut the branch list in half. Nothing else overflows, so the rounded
    corners still look the same. */
-.gitops-pop-overflow{overflow:visible}
+.dsh-git-pop-overflow{overflow:visible}
 
 /* ── branch switcher ──
    One card in two places: hanging under the panel header's chip, and floating
    above the composer when the chip is hovered. The layer wrapper generates no
    box, so the panel still positions itself against the slot's own container. */
-.gitops-layer{display:contents}
-.gitops-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px;cursor:pointer;font-family:inherit}
-.gitops-branch-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-branch-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
-.gitops-switch{position:absolute;z-index:40;width:456px;display:flex;flex-direction:column;overflow:visible;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
+.dsh-git-layer{display:contents}
+.dsh-git-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px;cursor:pointer;font-family:inherit}
+.dsh-git-branch-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-branch-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
+.dsh-git-switch{position:absolute;z-index:40;width:456px;display:flex;flex-direction:column;overflow:visible;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
 /* Hung off the header box, not off the chip: the header spans the whole panel, so
    the card starts at the panel's own left margin however the header wraps. It is
    also capped to that box, or a panel dragged to its 420px minimum would push the
    card past its own right edge. */
-.gitops-switch-panel{top:calc(100% + 6px);left:8px;max-width:calc(100% - 16px)}
-.gitops-switch-hover{left:8px;bottom:100%;margin-bottom:8px;max-width:calc(100% - 16px)}
-.gitops-bs{display:flex;flex-direction:column;min-height:0;position:relative}
-.gitops-bs-head{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:6px 9px;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.gitops-bs-mag{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
+.dsh-git-switch-panel{top:calc(100% + 6px);left:8px;max-width:calc(100% - 16px)}
+.dsh-git-switch-hover{left:8px;bottom:100%;margin-bottom:8px;max-width:calc(100% - 16px)}
+.dsh-git-bs{display:flex;flex-direction:column;min-height:0;position:relative}
+.dsh-git-bs-head{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:6px 9px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-bs-mag{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
 /* A borderless search line, the way a switcher's filter reads: the box itself
    would compete with the list for attention. */
-.gitops-bs-search{flex:1 1 120px;width:auto;min-width:84px;border:0;background:transparent;outline:none;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);padding:2px 0}
-.gitops-bs-search::placeholder{color:var(--dsw-alias-label-secondary)}
-.gitops-bs-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
-.gitops-bs-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-git-bs-search{flex:1 1 120px;width:auto;min-width:84px;border:0;background:transparent;outline:none;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);padding:2px 0}
+.dsh-git-bs-search::placeholder{color:var(--dsw-alias-label-secondary)}
+.dsh-git-bs-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dsh-git-bs-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 /* The repository-wide actions are chips on the search line, not rows inside the
    list: they cost no vertical space that way, and they stay reachable while the
    branch tree is scrolled. */
-.gitops-bs-head-acts{display:flex;align-items:center;flex-wrap:wrap;gap:4px;flex:none}
-.gitops-bs-chip{display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap}
-.gitops-bs-chip:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l2)}
-.gitops-bs-chip-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-brand-primary)}
-.gitops-bs-chip:disabled{opacity:.45;cursor:default}
-.gitops-bs-chip .gitops-bs-ico{width:12px}
-.gitops-bs-chip .gitops-bs-name{flex:0 1 auto;max-width:120px}
-.gitops-bs-chip .gitops-bs-ab{font-size:10px}
-.gitops-bs-chip-new{border-style:dashed}
-.gitops-bs-sort{margin-left:auto}
-.gitops-bs-list{position:relative;max-height:330px;overflow:auto;padding:4px 4px 6px}
-.gitops-bs-row{display:flex;align-items:center;gap:7px;min-height:30px;padding:3px 8px 3px 4px;border-radius:6px;cursor:pointer;border:0;background:transparent;font:inherit;font-size:12px;color:inherit;text-align:left;width:100%;box-sizing:border-box}
-.gitops-bs-row-on{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-bs-head-acts{display:flex;align-items:center;flex-wrap:wrap;gap:4px;flex:none}
+.dsh-git-bs-chip{display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap}
+.dsh-git-bs-chip:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l2)}
+.dsh-git-bs-chip-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-brand-primary)}
+.dsh-git-bs-chip:disabled{opacity:.45;cursor:default}
+.dsh-git-bs-chip .dsh-git-bs-ico{width:12px}
+.dsh-git-bs-chip .dsh-git-bs-name{flex:0 1 auto;max-width:120px}
+.dsh-git-bs-chip .dsh-git-bs-ab{font-size:10px}
+.dsh-git-bs-chip-new{border-style:dashed}
+.dsh-git-bs-sort{margin-left:auto}
+.dsh-git-bs-list{position:relative;max-height:330px;overflow:auto;padding:4px 4px 6px}
+.dsh-git-bs-row{display:flex;align-items:center;gap:7px;min-height:30px;padding:3px 8px 3px 4px;border-radius:6px;cursor:pointer;border:0;background:transparent;font:inherit;font-size:12px;color:inherit;text-align:left;width:100%;box-sizing:border-box}
+.dsh-git-bs-row-on{background:var(--dsw-alias-interactive-bg-hover)}
 /* the row the open submenu belongs to */
-.gitops-bs-row-fly{background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-bs-row-cur .gitops-bs-name{font-weight:600}
-.gitops-bs-busy{opacity:.6}
-.gitops-bs-ico{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;color:var(--dsw-alias-brand-primary)}
-.gitops-bs-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gitops-bs-up{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
-.gitops-bs-ab{flex:none;font-size:11px;color:var(--dsw-alias-brand-primary)}
-.gitops-bs-star{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
-.gitops-bs-row:hover .gitops-bs-star{color:var(--dsw-alias-label-secondary)}
-.gitops-bs-star-on,.gitops-bs-row:hover .gitops-bs-star-on{color:var(--dsw-alias-state-warn-primary)}
-.gitops-bs-more{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
-.gitops-bs-row:hover .gitops-bs-more{color:var(--dsw-alias-label-secondary)}
-.gitops-bs-group{display:flex;align-items:center;gap:5px;padding:8px 8px 3px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer;user-select:none}
-.gitops-bs-caret{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px}
-.gitops-bs-count{flex:none;color:var(--dsw-alias-border-l2)}
+.dsh-git-bs-row-fly{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-bs-row-cur .dsh-git-bs-name{font-weight:600}
+.dsh-git-bs-busy{opacity:.6}
+.dsh-git-bs-ico{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;color:var(--dsw-alias-brand-primary)}
+.dsh-git-bs-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-git-bs-up{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.dsh-git-bs-ab{flex:none;font-size:11px;color:var(--dsw-alias-brand-primary)}
+.dsh-git-bs-star{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
+.dsh-git-bs-row:hover .dsh-git-bs-star{color:var(--dsw-alias-label-secondary)}
+.dsh-git-bs-star-on,.dsh-git-bs-row:hover .dsh-git-bs-star-on{color:var(--dsw-alias-state-warn-primary)}
+.dsh-git-bs-more{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-border-l1);cursor:pointer}
+.dsh-git-bs-row:hover .dsh-git-bs-more{color:var(--dsw-alias-label-secondary)}
+.dsh-git-bs-group{display:flex;align-items:center;gap:5px;padding:8px 8px 3px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer;user-select:none}
+.dsh-git-bs-caret{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px}
+.dsh-git-bs-count{flex:none;color:var(--dsw-alias-border-l2)}
 /* IDEA's branch submenu: hovering a row opens its actions to the right of the
    tree. The card is only 420px wide, so the flyout hangs past its edge, the way
    the real one hangs over the editor; the card therefore no longer clips. */
-.gitops-bs-fly{position:absolute;left:calc(100% - 6px);z-index:6;width:198px;padding:4px;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft)}
-.gitops-bs-fly-head{display:flex;align-items:center;gap:5px;padding:3px 8px 6px;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gitops-bs-fly-sep{height:1px;margin:3px 6px;background:var(--dsw-alias-border-l1)}
-.gitops-bs-fly-item{display:flex;align-items:center;gap:7px;width:100%;box-sizing:border-box;padding:5px 8px;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:16px;text-align:left;cursor:pointer}
-.gitops-bs-fly-item:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
-.gitops-bs-fly-item:disabled{opacity:.45;cursor:default}
-.gitops-bs-fly-danger{color:var(--dsw-alias-state-error-primary)}
-.gitops-bs-fly-ico{display:inline-flex;flex:none;width:14px;color:var(--dsw-alias-label-secondary)}
-.gitops-bs-empty{padding:8px 10px;font-size:11px;color:var(--dsw-alias-label-secondary)}
-.gitops-bs-foot{display:flex;flex-direction:column;gap:6px;padding:6px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
-.gitops-bs-create{display:flex;align-items:center;gap:6px;padding:7px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
-.gitops-bs-new{flex:1 1 auto;width:auto;min-width:0}
-.gitops-bs-check{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer}
-.gitops-bs-rescue{align-self:flex-start;padding:3px 10px;border-radius:6px;border:1px solid var(--dsw-alias-state-warn-primary);background:transparent;color:var(--dsw-alias-state-warn-primary);font:inherit;font-size:11px;cursor:pointer}
-.gitops-warn{color:var(--dsw-alias-state-warn-primary)}
+.dsh-git-bs-fly{position:absolute;left:calc(100% - 6px);z-index:6;width:198px;padding:4px;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft)}
+.dsh-git-bs-fly-head{display:flex;align-items:center;gap:5px;padding:3px 8px 6px;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsh-git-bs-fly-sep{height:1px;margin:3px 6px;background:var(--dsw-alias-border-l1)}
+.dsh-git-bs-fly-item{display:flex;align-items:center;gap:7px;width:100%;box-sizing:border-box;padding:5px 8px;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:16px;text-align:left;cursor:pointer}
+.dsh-git-bs-fly-item:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-bs-fly-item:disabled{opacity:.45;cursor:default}
+.dsh-git-bs-fly-danger{color:var(--dsw-alias-state-error-primary)}
+.dsh-git-bs-fly-ico{display:inline-flex;flex:none;width:14px;color:var(--dsw-alias-label-secondary)}
+.dsh-git-bs-empty{padding:8px 10px;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.dsh-git-bs-foot{display:flex;flex-direction:column;gap:6px;padding:6px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-bs-create{display:flex;align-items:center;gap:6px;padding:7px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-bs-new{flex:1 1 auto;width:auto;min-width:0}
+.dsh-git-bs-check{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dsh-git-bs-rescue{align-self:flex-start;padding:3px 10px;border-radius:6px;border:1px solid var(--dsw-alias-state-warn-primary);background:transparent;color:var(--dsw-alias-state-warn-primary);font:inherit;font-size:11px;cursor:pointer}
+.dsh-git-warn{color:var(--dsw-alias-state-warn-primary)}
 `)
-    }, 'gitops panel styles')
+    }, 'dsh-git-idea panel styles')
 
     function GraphCanvas(props) {
       const rows = props.rows
@@ -1008,7 +986,7 @@ textarea.gitops-input{resize:vertical}
           strokeWidth: 1.5,
         }))
       }
-      return h('svg', { className: 'gitops-graph', width: width, height: height }, shapes)
+      return h('svg', { className: 'dsh-git-graph', width: width, height: height }, shapes)
     }
     /* Redrawn only when the history itself changes: picking a commit, hovering a
        row or typing in the filter box does not move a single one of these lines. */
@@ -1023,18 +1001,18 @@ textarea.gitops-input{resize:vertical}
       const refs = splitRefs(commit.refs)
       const chips = []
       for (let k = 0; k < refs.length; k += 1) {
-        chips.push(h('span', { className: 'gitops-ref gitops-ref-' + refKind(refs[k]), key: 'r' + k }, refs[k]))
+        chips.push(h('span', { className: 'dsh-git-ref dsh-git-ref-' + refKind(refs[k]), key: 'r' + k }, refs[k]))
       }
       return h('div', {
-        className: 'gitops-crow' + (props.selected === true ? ' gitops-crow-sel' : ''),
+        className: 'dsh-git-crow' + (props.selected === true ? ' dsh-git-crow-sel' : ''),
         key: commit.hash,
         title: commit.hash + '\n' + commit.subject,
         onClick: function () { props.onPick(commit.hash) },
       },
-        h('span', { className: 'gitops-subject' }, commit.subject),
-        chips.length > 0 ? h('span', { className: 'gitops-refs' }, chips) : null,
-        h('span', { className: 'gitops-author' }, commit.author),
-        h('span', { className: 'gitops-date' }, relativeDate(commit.date)))
+        h('span', { className: 'dsh-git-subject' }, commit.subject),
+        chips.length > 0 ? h('span', { className: 'dsh-git-refs' }, chips) : null,
+        h('span', { className: 'dsh-git-author' }, commit.author),
+        h('span', { className: 'dsh-git-date' }, relativeDate(commit.date)))
     }
     const CommitRowMemo = memo(CommitRow)
 
@@ -1051,9 +1029,9 @@ textarea.gitops-input{resize:vertical}
         const reason = graph != null && graph.error === 'not-a-repository'
           ? ('不是 git 仓库：' + text(graph.repo))
           : '无法读取提交历史'
-        return h('div', { className: 'gitops-pane gitops-error' }, reason)
+        return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
-      if (count === 0) return h('div', { className: 'gitops-pane gitops-dim' }, '没有匹配的提交')
+      if (count === 0) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '没有匹配的提交')
 
       const laneNum = Math.max(1, graph.lanes)
       const graphWidth = laneNum * LANE_W + 6
@@ -1073,11 +1051,11 @@ textarea.gitops-input{resize:vertical}
       const padTop = win.first * ROW_H
       const padBottom = (count - win.last) * ROW_H
       return h('div', {
-        className: 'gitops-log',
+        className: 'dsh-git-log',
         ref: win.attach,
         onScroll: win.measure,
       },
-        h('div', { className: 'gitops-logwrap', style: { minHeight: (count * ROW_H) + 'px' } },
+        h('div', { className: 'dsh-git-logwrap', style: { minHeight: (count * ROW_H) + 'px' } },
           h(GraphCanvasMemo, { rows: graph.rows, commits: commits, lanes: graph.lanes, first: win.first, last: win.last }),
           h('div', { style: { marginLeft: graphWidth + 'px' } },
             padTop > 0 ? h('div', { key: 'pad-top', style: { height: padTop + 'px' } }) : null,
@@ -1087,23 +1065,23 @@ textarea.gitops-input{resize:vertical}
 
     function RefTree(props) {
       const refs = props.refs
-      if (refs == null || refs.ok !== true) return h('div', { className: 'gitops-side gitops-dim' }, '无法读取分支')
+      if (refs == null || refs.ok !== true) return h('div', { className: 'dsh-git-side dsh-git-dim' }, '无法读取分支')
       const rows = []
 
-      rows.push(h('div', { className: 'gitops-trow', key: 'head-title', style: { paddingLeft: '6px' },
+      rows.push(h('div', { className: 'dsh-git-trow', key: 'head-title', style: { paddingLeft: '6px' },
         onClick: function () { props.onToggle('@head') } },
-        h('span', { className: 'gitops-tw' }, props.collapsed['@head'] === true ? '▶' : '▼'),
-        h('span', { className: 'gitops-tname gitops-dim' }, 'HEAD（当前分支）')))
+        h('span', { className: 'dsh-git-tw' }, props.collapsed['@head'] === true ? '▶' : '▼'),
+        h('span', { className: 'dsh-git-tname dsh-git-dim' }, 'HEAD（当前分支）')))
       if (props.collapsed['@head'] !== true) {
         if (refs.current.length === 0) {
-          rows.push(h('div', { className: 'gitops-trow gitops-dim', key: 'head-none', style: { paddingLeft: '18px' } }, '(游离 HEAD)'))
+          rows.push(h('div', { className: 'dsh-git-trow dsh-git-dim', key: 'head-none', style: { paddingLeft: '18px' } }, '(游离 HEAD)'))
         } else {
           for (let i = 0; i < refs.current.length; i += 1) {
             const name = refs.current[i]
             rows.push(h('div', {
-              className: 'gitops-trow'
-                + (props.selectedKey === name ? ' gitops-trow-sel' : '')
-                + (props.activeRef === name ? ' gitops-trow-scope' : ''),
+              className: 'dsh-git-trow'
+                + (props.selectedKey === name ? ' dsh-git-trow-sel' : '')
+                + (props.activeRef === name ? ' dsh-git-trow-scope' : ''),
               key: 'cur:' + name,
               style: { paddingLeft: '18px' },
               /* Single click only moves the selection: the graph follows on a
@@ -1113,18 +1091,18 @@ textarea.gitops-input{resize:vertical}
               onClick: function () { props.onSelect(name) },
               onDoubleClick: function () { props.onSelect(name); props.onPick(name) },
             },
-              h('span', { className: 'gitops-tw' }, '★'),
-              h('span', { className: 'gitops-tname' }, name)))
+              h('span', { className: 'dsh-git-tw' }, '★'),
+              h('span', { className: 'dsh-git-tname' }, name)))
           }
         }
       }
 
       const section = function (title, key, entries) {
-        rows.push(h('div', { className: 'gitops-trow', key: key + ':title', style: { paddingLeft: '6px' },
+        rows.push(h('div', { className: 'dsh-git-trow', key: key + ':title', style: { paddingLeft: '6px' },
           onClick: function () { props.onToggle(key) } },
-          h('span', { className: 'gitops-tw' }, props.collapsed[key] === true ? '▶' : '▼'),
-          h('span', { className: 'gitops-tname gitops-dim' }, title),
-          h('span', { className: 'gitops-tdim' }, String(entries.length))))
+          h('span', { className: 'dsh-git-tw' }, props.collapsed[key] === true ? '▶' : '▼'),
+          h('span', { className: 'dsh-git-tname dsh-git-dim' }, title),
+          h('span', { className: 'dsh-git-tdim' }, String(entries.length))))
         if (props.collapsed[key] === true) return
         const tree = buildTree(entries)
         const flat = flattenTree(tree, 2, key, props.collapsed, [], key)
@@ -1132,7 +1110,7 @@ textarea.gitops-input{resize:vertical}
           const node = flat[i]
           if (node.kind === 'dir') {
             rows.push(h('div', {
-              className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+              className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
               key: node.id,
               style: { paddingLeft: (6 + node.depth * 12) + 'px' },
               title: node.name + '（双击展开/折叠）',
@@ -1140,22 +1118,22 @@ textarea.gitops-input{resize:vertical}
               onDoubleClick: function () { props.onToggle(node.path) },
             },
               twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-              h('span', { className: 'gitops-tname' }, node.name),
-              h('span', { className: 'gitops-tdim' }, String(node.count))))
+              h('span', { className: 'dsh-git-tname' }, node.name),
+              h('span', { className: 'dsh-git-tdim' }, String(node.count))))
           } else {
             const branchName = text(node.data)
             rows.push(h('div', {
-              className: 'gitops-trow'
-                + (props.selectedKey === branchName ? ' gitops-trow-sel' : '')
-                + (props.activeRef === branchName ? ' gitops-trow-scope' : ''),
+              className: 'dsh-git-trow'
+                + (props.selectedKey === branchName ? ' dsh-git-trow-sel' : '')
+                + (props.activeRef === branchName ? ' dsh-git-trow-scope' : ''),
               key: node.id,
               style: { paddingLeft: (6 + node.depth * 12) + 'px' },
               title: branchName + '（双击只看这个分支的历史）',
               onClick: function () { props.onSelect(branchName) },
               onDoubleClick: function () { props.onSelect(branchName); props.onPick(branchName) },
             },
-              h('span', { className: 'gitops-tw' }),
-              h('span', { className: 'gitops-tname' }, node.name)))
+              h('span', { className: 'dsh-git-tw' }),
+              h('span', { className: 'dsh-git-tname' }, node.name)))
           }
         }
       }
@@ -1164,13 +1142,13 @@ textarea.gitops-input{resize:vertical}
       for (let i = 0; i < refs.remote.length; i += 1) {
         section('远程 · ' + refs.remote[i].name, '@remote:' + refs.remote[i].name, refs.remote[i].refs)
       }
-      return h('div', { className: 'gitops-side' }, rows)
+      return h('div', { className: 'dsh-git-side' }, rows)
     }
 
     function CommitDetail(props) {
       const detail = props.detail
-      if (detail == null) return h('div', { className: 'gitops-detail gitops-dim' }, '选择一个提交')
-      if (detail.ok !== true) return h('div', { className: 'gitops-detail gitops-error' }, '无法读取提交详情')
+      if (detail == null) return h('div', { className: 'dsh-git-detail dsh-git-dim' }, '选择一个提交')
+      if (detail.ok !== true) return h('div', { className: 'dsh-git-detail dsh-git-error' }, '无法读取提交详情')
 
       const entries = []
       for (let i = 0; i < detail.files.length; i += 1) {
@@ -1185,7 +1163,7 @@ textarea.gitops-input{resize:vertical}
         const node = flat[i]
         if (node.kind === 'dir') {
           fileRows.push(h('div', {
-            className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: (node.depth * 12) + 'px' },
             title: node.name + '（双击展开/折叠）',
@@ -1193,35 +1171,35 @@ textarea.gitops-input{resize:vertical}
             onDoubleClick: function () { props.onToggle(node.path) },
           },
             twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-            h('span', { className: 'gitops-tname' }, node.name),
-            h('span', { className: 'gitops-tdim' }, String(node.count) + ' 个文件')))
+            h('span', { className: 'dsh-git-tname' }, node.name),
+            h('span', { className: 'dsh-git-tdim' }, String(node.count) + ' 个文件')))
         } else {
           const file = node.data || {}
           fileRows.push(h('div', {
-            className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: (node.depth * 12) + 'px' },
             title: text(file.path),
             onClick: function () { props.onSelect(node.id) },
           },
-            h('span', { className: 'gitops-tw' }),
-            h('span', { className: 'gitops-st' + statusClass(file.status) }, statusLabel(file.status)),
-            h('span', { className: 'gitops-tname' }, node.name)))
+            h('span', { className: 'dsh-git-tw' }),
+            h('span', { className: 'dsh-git-st' + statusClass(file.status) }, statusLabel(file.status)),
+            h('span', { className: 'dsh-git-tname' }, node.name)))
         }
       }
 
       const inBranches = detail.branches.length > 0 ? detail.branches.join('、') : '（没有分支引用此提交）'
       const fullMessage = (detail.subject + (detail.body.length > 0 ? '\n\n' + detail.body : '')).replace(/\n+$/, '')
 
-      return h('div', { className: 'gitops-detail' },
-        h('div', { className: 'gitops-group-title' }, String(detail.files.length) + ' 个文件'),
+      return h('div', { className: 'dsh-git-detail' },
+        h('div', { className: 'dsh-git-group-title' }, String(detail.files.length) + ' 个文件'),
         fileRows,
-        h('div', { className: 'gitops-info' },
-          h('div', { className: 'gitops-hash' }, detail.hash),
-          h('div', { className: 'gitops-dim' }, detail.author + ' <' + detail.email + '>'),
-          h('div', { className: 'gitops-dim' }, detail.date.replace('T', ' ').slice(0, 16)),
-          h('div', { className: 'gitops-dim' }, '所在分支：' + inBranches),
-          h('div', { className: 'gitops-msg' }, fullMessage)))
+        h('div', { className: 'dsh-git-info' },
+          h('div', { className: 'dsh-git-hash' }, detail.hash),
+          h('div', { className: 'dsh-git-dim' }, detail.author + ' <' + detail.email + '>'),
+          h('div', { className: 'dsh-git-dim' }, detail.date.replace('T', ' ').slice(0, 16)),
+          h('div', { className: 'dsh-git-dim' }, '所在分支：' + inBranches),
+          h('div', { className: 'dsh-git-msg' }, fullMessage)))
     }
 
     function mergeChanges(work) {
@@ -1260,12 +1238,12 @@ textarea.gitops-input{resize:vertical}
 
     function ChangesPane(props) {
       const work = props.work
-      if (work == null) return h('div', { className: 'gitops-pane gitops-dim' }, '正在读取工作区…')
+      if (work == null) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '正在读取工作区…')
       if (work.ok !== true) {
         const reason = work.error === 'not-a-repository'
           ? ('不是 git 仓库：' + text(work.repo))
           : '无法读取工作区状态'
-        return h('div', { className: 'gitops-pane gitops-error' }, reason)
+        return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
 
       const changes = mergeChanges(work)
@@ -1289,7 +1267,7 @@ textarea.gitops-input{resize:vertical}
           const allStaged = total > 0 && stagedCount === total
           const someStaged = stagedCount > 0 && stagedCount < total
           rows.push(h('div', {
-            className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: indent },
             title: node.name + '（双击展开/折叠）',
@@ -1297,7 +1275,7 @@ textarea.gitops-input{resize:vertical}
             onDoubleClick: function () { props.onToggle(node.path) },
           },
             h('span', {
-              className: 'gitops-cbox' + (allStaged ? ' gitops-cbox-on' : (someStaged ? ' gitops-cbox-part' : '')),
+              className: 'dsh-git-cbox' + (allStaged ? ' dsh-git-cbox-on' : (someStaged ? ' dsh-git-cbox-part' : '')),
               title: allStaged ? '取消暂存该目录' : '暂存该目录',
               onClick: function (event) {
                 event.stopPropagation()
@@ -1305,28 +1283,28 @@ textarea.gitops-input{resize:vertical}
               },
             }, allStaged ? '☑' : (someStaged ? '▣' : '☐')),
             twisty({ collapsed: node.collapsed, onToggle: function () { props.onToggle(node.path) } }),
-            h('span', { className: 'gitops-tname' }, node.name),
-            h('span', { className: 'gitops-tdim' }, String(total) + ' 个文件')))
+            h('span', { className: 'dsh-git-tname' }, node.name),
+            h('span', { className: 'dsh-git-tdim' }, String(total) + ' 个文件')))
         } else {
           const file = node.data || {}
           rows.push(h('div', {
-            className: 'gitops-trow' + (props.selectedKey === node.id ? ' gitops-trow-sel' : ''),
+            className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: indent },
             title: text(file.path),
             onClick: function () { props.onSelect(node.id) },
           },
             h('span', {
-              className: 'gitops-cbox' + (file.staged === true ? ' gitops-cbox-on' : ''),
+              className: 'dsh-git-cbox' + (file.staged === true ? ' dsh-git-cbox-on' : ''),
               title: file.staged === true ? '取消暂存' : '暂存',
               onClick: function (event) {
                 event.stopPropagation()
                 props.onSetStaged([file], file.staged !== true)
               },
             }, file.staged === true ? '☑' : '☐'),
-            h('span', { className: 'gitops-tw' }),
-            h('span', { className: 'gitops-st' + statusClass(file.displayCode) }, statusLabel(file.displayCode)),
-            h('span', { className: 'gitops-tname' }, node.name)))
+            h('span', { className: 'dsh-git-tw' }),
+            h('span', { className: 'dsh-git-st' + statusClass(file.displayCode) }, statusLabel(file.displayCode)),
+            h('span', { className: 'dsh-git-tname' }, node.name)))
         }
       }
 
@@ -1337,30 +1315,30 @@ textarea.gitops-input{resize:vertical}
         ? ('提交 ' + String(stagedCount) + ' 个文件')
         : ('全部暂存并提交（' + String(totalChanges) + '）')
 
-      const side = h('div', { className: 'gitops-commitpane' },
-        h('div', { className: 'gitops-group-title' }, '提交信息'),
+      const side = h('div', { className: 'dsh-git-commitpane' },
+        h('div', { className: 'dsh-git-group-title' }, '提交信息'),
         clearable('msg', h('textarea', {
-          className: 'gitops-input',
+          className: 'dsh-git-input',
           rows: 6,
           placeholder: '提交信息（必填）',
           value: props.message,
           onChange: function (event) { props.onMessage(event.target.value) },
-        }), props.message.length > 0, function () { props.onMessage('') }, 'gitops-clearable-area'),
-        h('div', { className: 'gitops-dim' }, '已暂存 ' + String(stagedCount) + ' / 共 ' + String(totalChanges) + ' 个文件'),
+        }), props.message.length > 0, function () { props.onMessage('') }, 'dsh-git-clearable-area'),
+        h('div', { className: 'dsh-git-dim' }, '已暂存 ' + String(stagedCount) + ' / 共 ' + String(totalChanges) + ' 个文件'),
         h('button', {
           type: 'button',
-          className: 'gitops-btn gitops-primary',
+          className: 'dsh-git-btn dsh-git-primary',
           disabled: !canCommit,
           onClick: props.onCommit,
         }, props.busy === true ? '处理中…' : label),
         totalChanges > 0 ? h('button', {
-          type: 'button', className: 'gitops-btn',
+          type: 'button', className: 'dsh-git-btn',
           disabled: props.busy === true,
           onClick: props.onSetStagedAll,
         }, stagedCount > 0 ? '取消全部暂存' : '全部暂存') : null)
 
-      return h('div', { className: 'gitops-changes' },
-        h('div', { className: 'gitops-changes-tree' }, rows.length > 0 ? rows : h('div', { className: 'gitops-pane gitops-ok' }, '工作区干净')),
+      return h('div', { className: 'dsh-git-changes' },
+        h('div', { className: 'dsh-git-changes-tree' }, rows.length > 0 ? rows : h('div', { className: 'dsh-git-pane dsh-git-ok' }, '工作区干净')),
         side)
     }
 
@@ -1411,44 +1389,44 @@ textarea.gitops-input{resize:vertical}
         })
       }
 
-      return h('div', { className: 'gitops-setup' },
-        h('div', { className: 'gitops-setup-h' }, info.title),
-        h('div', { className: 'gitops-setup-path' }, props.initial.length > 0 ? props.initial : '（没能确定路径）'),
-        info.hint.length > 0 ? h('div', { className: 'gitops-hint' }, info.hint) : null,
-        props.stderr.length > 0 ? h('div', { className: 'gitops-hint gitops-error gitops-mono' }, props.stderr) : null,
+      return h('div', { className: 'dsh-git-setup' },
+        h('div', { className: 'dsh-git-setup-h' }, info.title),
+        h('div', { className: 'dsh-git-setup-path' }, props.initial.length > 0 ? props.initial : '（没能确定路径）'),
+        info.hint.length > 0 ? h('div', { className: 'dsh-git-hint' }, info.hint) : null,
+        props.stderr.length > 0 ? h('div', { className: 'dsh-git-hint dsh-git-error dsh-git-mono' }, props.stderr) : null,
         clearable('path', h('input', {
-          className: 'gitops-input',
+          className: 'dsh-git-input',
           placeholder: '仓库目录的绝对路径',
           autoFocus: true,
           value: draft,
           onChange: function (event) { setDraft(event.target.value); setArmed(false) },
           onKeyDown: function (event) { if (event.key === 'Enter') open() },
         }), draft.length > 0, function () { setDraft(''); setArmed(false) }),
-        h('div', { className: 'gitops-setup-actions' },
+        h('div', { className: 'dsh-git-setup-actions' },
           h('button', {
-            type: 'button', className: 'gitops-btn gitops-primary',
+            type: 'button', className: 'dsh-git-btn dsh-git-primary',
             disabled: target.length === 0,
             onClick: open,
           }, '打开这个目录'),
           armed
             ? h('button', {
-                type: 'button', className: 'gitops-btn gitops-danger',
+                type: 'button', className: 'dsh-git-btn dsh-git-danger',
                 disabled: busy || target.length === 0,
                 onClick: doInit,
               }, busy ? '正在初始化…' : '确认初始化（会写入 .git）')
             : h('button', {
-                type: 'button', className: 'gitops-btn',
+                type: 'button', className: 'dsh-git-btn',
                 disabled: busy || target.length === 0,
                 onClick: function () { setArmed(true); setProblem(null) },
               }, '在此初始化仓库'),
           armed ? h('button', {
-            type: 'button', className: 'gitops-btn',
+            type: 'button', className: 'dsh-git-btn',
             disabled: busy,
             onClick: function () { setArmed(false) },
           }, '取消') : null),
-        armed ? h('div', { className: 'gitops-hint gitops-danger' },
+        armed ? h('div', { className: 'dsh-git-hint dsh-git-danger' },
           '将在 ' + target + ' 下执行 git init' + (plugin.initBranch.length > 0 ? ' -b ' + plugin.initBranch : '') + ' —— 这会创建一个 .git 目录并写入文件，无法通过界面撤销。') : null,
-        problem !== null ? h('div', { className: 'gitops-hint gitops-error' }, problem) : null)
+        problem !== null ? h('div', { className: 'dsh-git-hint dsh-git-error' }, problem) : null)
     }
 
     /* git puts what is worth reading in stderr for one command and stdout for
@@ -1595,12 +1573,12 @@ textarea.gitops-input{resize:vertical}
     /* One field, one clear button: the × sits inside the box, where the eye
        already is, so no row of buttons has to exist for it. */
     function clearable(key, input, hasValue, onClear, variant) {
-      const classes = ['gitops-clearable']
+      const classes = ['dsh-git-clearable']
       if (variant != null && variant.length > 0) classes.push(variant)
       return h('div', { key: key, className: classes.join(' ') },
         input,
         hasValue === true ? h('button', {
-          key: 'x', type: 'button', className: 'gitops-clear-x', title: '清空',
+          key: 'x', type: 'button', className: 'dsh-git-clear-x', title: '清空',
           onClick: function (event) {
             stopEvent(event)
             if (event != null && typeof event.preventDefault === 'function') event.preventDefault()
@@ -1708,8 +1686,8 @@ textarea.gitops-input{resize:vertical}
       if (when.length > 0) tip.push(when)
       tip.push(trackTitle(ahead, behind))
       return h('div', {
-        className: 'gitops-bs-row' + (props.active === true ? ' gitops-bs-row-on' : '') + (isCurrent ? ' gitops-bs-row-cur' : '')
-          + (props.busy === true ? ' gitops-bs-busy' : '') + (props.flying === true ? ' gitops-bs-row-fly' : ''),
+        className: 'dsh-git-bs-row' + (props.active === true ? ' dsh-git-bs-row-on' : '') + (isCurrent ? ' dsh-git-bs-row-cur' : '')
+          + (props.busy === true ? ' dsh-git-bs-busy' : '') + (props.flying === true ? ' dsh-git-bs-row-fly' : ''),
         title: tip.join('\n'),
         onMouseEnter: function (event) { props.onEnter(props.rowKey, props.at, event) },
         onMouseLeave: function () { props.onLeave() },
@@ -1717,19 +1695,19 @@ textarea.gitops-input{resize:vertical}
       },
         h('button', {
           key: 's', type: 'button',
-          className: 'gitops-bs-star' + (starred ? ' gitops-bs-star-on' : ''),
+          className: 'dsh-git-bs-star' + (starred ? ' dsh-git-bs-star-on' : ''),
           title: starred ? '取消收藏' : '收藏这个分支',
           onClick: function (event) { props.onStar(name, event) },
         }, h(Icon, { name: 'star', size: 12, filled: starred })),
-        h('span', { key: 'i', className: 'gitops-bs-ico' },
+        h('span', { key: 'i', className: 'dsh-git-bs-ico' },
           isCurrent ? h(Icon, { name: 'pencil', size: 14 }) : h(BranchIcon, { size: 14 })),
-        h('span', { key: 'n', className: 'gitops-bs-name' }, name),
-        ahead > 0 ? h('span', { key: 'a', className: 'gitops-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
-        behind > 0 ? h('span', { key: 'b', className: 'gitops-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
-        upstream.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, upstream)
-          : (where.length > 0 ? h('span', { key: 'u', className: 'gitops-bs-up' }, where) : null),
+        h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab', title: '领先上游 ' + String(ahead) }, '↗' + (ahead > 99 ? '99+' : String(ahead))) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab', title: '落后上游 ' + String(behind) }, '↙' + (behind > 99 ? '99+' : String(behind))) : null,
+        upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
+          : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         h('button', {
-          key: 'm', type: 'button', className: 'gitops-bs-more',
+          key: 'm', type: 'button', className: 'dsh-git-bs-more',
           title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
           onClick: function (event) { props.onMenu(props.rowKey, event) },
         }, h(Icon, { name: 'right', size: 12 })))
@@ -2066,43 +2044,43 @@ textarea.gitops-input{resize:vertical}
         const items = []
         if (remote === true) {
           items.push(h('button', {
-            key: 'sw', type: 'button', className: 'gitops-bs-fly-item',
+            key: 'sw', type: 'button', className: 'dsh-git-bs-fly-item',
             title: 'git switch ' + name + ' —— 会在本地建一个跟踪分支',
             onClick: function (event) { stopEvent(event); choose(name, stash) },
-          }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })), '检出为本地分支'))
+          }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })), '检出为本地分支'))
         } else if (isCurrent !== true) {
           items.push(h('button', {
-            key: 'sw', type: 'button', className: 'gitops-bs-fly-item',
+            key: 'sw', type: 'button', className: 'dsh-git-bs-fly-item',
             title: 'git switch ' + name,
             onClick: function (event) { stopEvent(event); choose(name, stash) },
-          }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })),
+          }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })),
             stash === true ? '暂存并切换' : '检出'))
         }
         items.push(h('button', {
-          key: 'nb', type: 'button', className: 'gitops-bs-fly-item',
+          key: 'nb', type: 'button', className: 'dsh-git-bs-fly-item',
           title: '以 ' + name + ' 为起点新建分支并切过去',
           onClick: function (event) { stopEvent(event); setFly(null); setCreating({ at: name, value: '' }) },
-        }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'plus', size: 12 })),
+        }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'plus', size: 12 })),
           '从此分支新建分支…'))
         if (remote !== true && isCurrent !== true) {
-          items.push(h('div', { key: 's1', className: 'gitops-bs-fly-sep' }))
+          items.push(h('div', { key: 's1', className: 'dsh-git-bs-fly-sep' }))
           items.push(h('button', {
-            key: 'mg', type: 'button', className: 'gitops-bs-fly-item',
+            key: 'mg', type: 'button', className: 'dsh-git-bs-fly-item',
             title: 'git merge ' + name + ' —— 合入当前分支',
             onClick: function (event) { stopEvent(event); setFly(null); act('git/sequence', { op: 'merge', action: 'start', target: name }, '合并 ' + name) },
-          }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'pull', size: 12 })), '合并到当前分支'))
-          items.push(h('div', { key: 's2', className: 'gitops-bs-fly-sep' }))
+          }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'pull', size: 12 })), '合并到当前分支'))
+          items.push(h('div', { key: 's2', className: 'dsh-git-bs-fly-sep' }))
           if (armedDelete === name) {
             items.push(h('button', {
-              key: 'dx', type: 'button', className: 'gitops-bs-fly-item gitops-bs-fly-danger',
+              key: 'dx', type: 'button', className: 'dsh-git-bs-fly-item dsh-git-bs-fly-danger',
               title: 'git branch -D ' + name + ' —— 丢弃没合并的提交',
               onClick: function (event) { stopEvent(event); remove(name, true) },
-            }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '强制删除'))
+            }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '强制删除'))
           } else {
             items.push(h('button', {
-              key: 'dl', type: 'button', className: 'gitops-bs-fly-item gitops-bs-fly-danger',
+              key: 'dl', type: 'button', className: 'dsh-git-bs-fly-item dsh-git-bs-fly-danger',
               onClick: function (event) { stopEvent(event); remove(name, false) },
-            }, h('span', { key: 'i', className: 'gitops-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '删除'))
+            }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '删除'))
           }
         }
         return items
@@ -2115,15 +2093,15 @@ textarea.gitops-input{resize:vertical}
         const def = actions[i]
         const on = nav[index] !== undefined && nav[index].kind === 'action' && nav[index].def === def
         const parts = [
-          h('span', { key: 'i', className: 'gitops-bs-ico' }, h(Icon, { name: def.icon, size: 12 })),
-          h('span', { key: 'n', className: 'gitops-bs-name' }, def.short),
+          h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(Icon, { name: def.icon, size: 12 })),
+          h('span', { key: 'n', className: 'dsh-git-bs-name' }, def.short),
         ]
-        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'gitops-bs-ab' }, def.badge))
+        if (def.badge !== undefined) parts.push(h('span', { key: 'b', className: 'dsh-git-bs-ab' }, def.badge))
         chips.push(h('button', {
           key: 'a:' + def.id, type: 'button',
-          className: 'gitops-bs-chip'
-            + (on ? ' gitops-bs-chip-on' : '')
-            + (def.id === 'new' ? ' gitops-bs-chip-new' : ''),
+          className: 'dsh-git-bs-chip'
+            + (on ? ' dsh-git-bs-chip-on' : '')
+            + (def.id === 'new' ? ' dsh-git-bs-chip-new' : ''),
           title: def.label,
           disabled: busy === true,
           onMouseEnter: function () { setIndex(i) },
@@ -2136,15 +2114,15 @@ textarea.gitops-input{resize:vertical}
         const group = groups[g]
         const shut = collapsed[group.id] === true
         items.push(h('div', {
-          key: 'g:' + group.id, className: 'gitops-bs-group',
+          key: 'g:' + group.id, className: 'dsh-git-bs-group',
           onClick: function () { setCollapsed(function (prev) { const next = Object.assign({}, prev); next[group.id] = prev[group.id] !== true; return next }) },
         },
-          h('span', { key: 'c', className: 'gitops-bs-caret' }, h(Icon, { name: shut ? 'right' : 'down', size: 12 })),
+          h('span', { key: 'c', className: 'dsh-git-bs-caret' }, h(Icon, { name: shut ? 'right' : 'down', size: 12 })),
           h('span', { key: 'l' }, group.label),
-          h('span', { key: 'n', className: 'gitops-bs-count' }, String(group.rows.length))))
+          h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(group.rows.length))))
         if (shut) continue
         if (group.rows.length === 0) {
-          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'gitops-bs-empty' },
+          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' },
             needle.length > 0 ? '没有匹配的分支' : '这个仓库还没有本地分支'))
           continue
         }
@@ -2173,27 +2151,27 @@ textarea.gitops-input{resize:vertical}
         }
       }
 
-      if (data == null) items.push(h('div', { key: 'wait', className: 'gitops-bs-empty' }, '正在读取分支…'))
+      if (data == null) items.push(h('div', { key: 'wait', className: 'dsh-git-bs-empty' }, '正在读取分支…'))
 
       const foot = []
       if (pending.length > 0) {
         foot.push(h('button', {
-          key: 'rescue', type: 'button', className: 'gitops-bs-rescue',
+          key: 'rescue', type: 'button', className: 'dsh-git-bs-rescue',
           onClick: function () { setStash(true); choose(pending, true) },
         }, '先暂存本地改动，再切到 ' + pending))
       }
       if (props.dirty > 0) {
         foot.push(h('label', {
-          key: 'stash', className: 'gitops-bs-check',
+          key: 'stash', className: 'dsh-git-bs-check',
           title: '把本地改动 stash 起来，切过去之后再自动 pop 回来',
         },
           h('input', { key: 'c', type: 'checkbox', checked: stash === true, onChange: function (event) { setStash(event.target.checked) } }),
           h('span', { key: 't' }, '有 ' + String(props.dirty) + ' 个未提交改动 —— 先暂存再切（切完自动恢复）')))
       }
 
-      const createRow = creating === null ? null : h('div', { key: 'create', className: 'gitops-bs-create' },
+      const createRow = creating === null ? null : h('div', { key: 'create', className: 'dsh-git-bs-create' },
         clearable('i', h('input', {
-          key: 'i', className: 'gitops-input gitops-bs-new',
+          key: 'i', className: 'dsh-git-input dsh-git-bs-new',
           placeholder: creating.at.length > 0 ? '以 ' + creating.at + ' 为起点的新分支名' : '新分支名，回车创建',
           value: creating.value,
           autoFocus: true,
@@ -2203,8 +2181,8 @@ textarea.gitops-input{resize:vertical}
             else if (event.key === 'Escape') { event.preventDefault(); setCreating(null) }
           },
         }), creating.value.length > 0, function () { setCreating({ at: creating.at, value: '' }) }),
-        h('button', { key: 'ok', type: 'button', className: 'gitops-btn', onClick: function () { submitNew(creating) } }, '创建并切换'),
-        h('button', { key: 'no', type: 'button', className: 'gitops-btn', onClick: function () { setCreating(null) } }, '取消'))
+        h('button', { key: 'ok', type: 'button', className: 'dsh-git-btn', onClick: function () { submitNew(creating) } }, '创建并切换'),
+        h('button', { key: 'no', type: 'button', className: 'dsh-git-btn', onClick: function () { setCreating(null) } }, '取消'))
 
       /* The submenu element: which branch it belongs to is read back from the
          key the row handed us, so nothing has to be kept in sync by hand. */
@@ -2222,7 +2200,7 @@ textarea.gitops-input{resize:vertical}
           const flyName = text(foundRow.name)
           const flyCurrent = foundRow.current === true
           flyNode = h('div', {
-            key: 'fly', className: 'gitops-bs-fly',
+            key: 'fly', className: 'dsh-git-bs-fly',
             style: { top: String(Math.max(0, fly.top)) + 'px' },
             /* Crossing from the row into the panel must not count as leaving —
                in hover mode the card closes itself on pointerleave, so both
@@ -2230,8 +2208,8 @@ textarea.gitops-input{resize:vertical}
             onPointerEnter: function () { clearFlyTimer(); clearHoverTimer() },
             onPointerLeave: function () { flyCloseSoon() },
           },
-            h('div', { key: 'h', className: 'gitops-bs-fly-head' },
-              h('span', { key: 'n', className: 'gitops-bs-name' }, flyName),
+            h('div', { key: 'h', className: 'dsh-git-bs-fly-head' },
+              h('span', { key: 'n', className: 'dsh-git-bs-name' }, flyName),
               flyCurrent === true ? h('span', { key: 'c' }, '（当前）') : null),
             rowActions(flyName, foundRemote, flyCurrent))
         }
@@ -2260,11 +2238,11 @@ textarea.gitops-input{resize:vertical}
         }
       }
 
-      return h('div', { className: 'gitops-bs' },
-        h('div', { key: 'h', className: 'gitops-bs-head' },
-          h('span', { key: 'i', className: 'gitops-bs-mag' }, h(Icon, { name: 'search', size: 14 })),
+      return h('div', { className: 'dsh-git-bs' },
+        h('div', { key: 'h', className: 'dsh-git-bs-head' },
+          h('span', { key: 'i', className: 'dsh-git-bs-mag' }, h(Icon, { name: 'search', size: 14 })),
           h('input', {
-            key: 'q', className: 'gitops-bs-search',
+            key: 'q', className: 'dsh-git-bs-search',
             placeholder: '搜索分支',
             value: query,
             ref: function (node) { pickerInputNode = node },
@@ -2273,26 +2251,26 @@ textarea.gitops-input{resize:vertical}
           }),
           /* The repository-wide actions share the header line with the search
              box instead of owning a row of their own below it. */
-          chips.length > 0 ? h('div', { key: 'acts', className: 'gitops-bs-head-acts' }, chips) : null,
+          chips.length > 0 ? h('div', { key: 'acts', className: 'dsh-git-bs-head-acts' }, chips) : null,
           h('button', {
-            key: 'sort', type: 'button', className: 'gitops-bs-icon gitops-bs-sort',
+            key: 'sort', type: 'button', className: 'dsh-git-bs-icon dsh-git-bs-sort',
             title: branchSort === 'name'
               ? '当前按名称排序（A→Z），点击改为按最近提交'
               : '当前按最近提交排序，点击改为按名称（A→Z）',
             onClick: function () { setBranchSort(branchSort === 'name' ? 'recent' : 'name') },
           }, h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 14 }))),
         h('div', {
-          key: 'l', className: 'gitops-bs-list',
+          key: 'l', className: 'dsh-git-bs-list',
           ref: function (node) { pickerList = node },
           /* A flyout is anchored to a row's screen position, so a scroll would
              leave it pointing at the wrong one. */
           onScroll: function () { clearFlyTimer(); setFly(null) },
         }, items),
         flyNode,
-        note !== null ? h('div', { key: 'n', className: 'gitops-hint gitops-warn' }, note) : null,
-        error !== null ? h('div', { key: 'e', className: 'gitops-hint gitops-error' }, error) : null,
+        note !== null ? h('div', { key: 'n', className: 'dsh-git-hint dsh-git-warn' }, note) : null,
+        error !== null ? h('div', { key: 'e', className: 'dsh-git-hint dsh-git-error' }, error) : null,
         createRow,
-        foot.length > 0 ? h('div', { key: 'f', className: 'gitops-bs-foot' }, foot) : null)
+        foot.length > 0 ? h('div', { key: 'f', className: 'dsh-git-bs-foot' }, foot) : null)
     }
 
     function GitPanel(props) {
@@ -2694,14 +2672,14 @@ textarea.gitops-input{resize:vertical}
 
       const tool = function (key, label, title, onClick, options) {
         const opts = options == null ? {} : options
-        const classes = ['gitops-tool']
-        if (opts.danger === true) classes.push('gitops-danger')
-        if (opts.on === true) classes.push('gitops-tool-on')
+        const classes = ['dsh-git-tool']
+        if (opts.danger === true) classes.push('dsh-git-danger')
+        if (opts.on === true) classes.push('dsh-git-tool-on')
         /* An icon-only tool: same hit area as the labelled ones, no text. */
-        if (opts.ico === true) classes.push('gitops-tool-ico')
+        if (opts.ico === true) classes.push('dsh-git-tool-ico')
         const parts = [label]
         if (typeof opts.badge === 'number' && opts.badge > 0) {
-          parts.push(h('span', { key: 'b', className: 'gitops-tool-badge' }, String(opts.badge)))
+          parts.push(h('span', { key: 'b', className: 'dsh-git-tool-badge' }, String(opts.badge)))
         }
         return h('button', {
           key: key, type: 'button', className: classes.join(' '),
@@ -2713,7 +2691,7 @@ textarea.gitops-input{resize:vertical}
          beside the branch it acts on — not in the commit graph's own toolbar,
          which is about the selected commit. The middle toolbar keeps only what
          the selection scopes. */
-      const syncGroup = h('div', { className: 'gitops-sync' },
+      const syncGroup = h('div', { className: 'dsh-git-sync' },
         tool('refresh', '⟳', '重新读取仓库（忽略缓存）', refresh, { disabled: !repoOk || busy }),
         tool('fetch', '⇣', 'fetch：从所有远端取回最新引用', function () { runOp('git/fetch') }, { disabled: !repoOk || busy }),
         tool('pull', '↓', 'pull：拉取并合入当前分支', function () { runOp('git/pull') }, { disabled: !repoOk || busy, badge: behind }),
@@ -2727,21 +2705,21 @@ textarea.gitops-input{resize:vertical}
          the most frequent branch operation there is. */
       const branchChip = h('button', {
         key: 'chip', type: 'button',
-        className: 'gitops-branch-chip' + (switcher === 'panel' ? ' gitops-branch-chip-on' : ''),
+        className: 'dsh-git-branch-chip' + (switcher === 'panel' ? ' dsh-git-branch-chip-on' : ''),
         title: branchTitle + ' · 点击切换分支',
         onClick: function () { setSwitchMode(switcher === 'panel' ? null : 'panel') },
       },
         h(BranchIcon, { key: 'i', size: 13 }),
-        h('span', { key: 'n', className: 'gitops-branch-name' }, currentName.length > 0 ? currentName : 'HEAD'),
-        ahead > 0 ? h('span', { key: 'a', className: 'gitops-ab' }, '↑' + String(ahead)) : null,
-        behind > 0 ? h('span', { key: 'b', className: 'gitops-ab' }, '↓' + String(behind)) : null)
+        h('span', { key: 'n', className: 'dsh-git-branch-name' }, currentName.length > 0 ? currentName : 'HEAD'),
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-ab' }, '↑' + String(ahead)) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-ab' }, '↓' + String(behind)) : null)
 
       /* Inside the header, which spans the panel: the card then starts at the
          panel's left margin however many rows the header wraps to, and there is
          no measured offset to keep in sync. */
       const switchCard = switcher === 'panel'
         ? h('div', {
-            key: 'sw', className: 'gitops-switch gitops-switch-panel',
+            key: 'sw', className: 'dsh-git-switch dsh-git-switch-panel',
             /* The same mark the hover card carries. Without it the card counts as
                "the panel behind the switcher", so pressing a branch row dismissed
                the card on pointerdown and the click never reached the row. */
@@ -2763,7 +2741,7 @@ textarea.gitops-input{resize:vertical}
          then one search box, then every filter as an inline "name: value"
          trigger that clears itself. No bordered select boxes and no second row,
          so the graph keeps the height that row used to cost. */
-      const lfCaret = h('span', { key: 'c', className: 'gitops-lf-caret' }, h(Icon, { name: 'down', size: 10 }))
+      const lfCaret = h('span', { key: 'c', className: 'dsh-git-lf-caret' }, h(Icon, { name: 'down', size: 10 }))
       /* A native select is as wide as its WIDEST option, not the value it is
          showing: with the arrow suppressed that left "作者：mays" floating in a
          112px box with the caret and the × parked at the far end. Sizing the
@@ -2778,7 +2756,7 @@ textarea.gitops-input{resize:vertical}
       const lfWidth = function (label) { return { width: String(labelWidth(label)) + 'px' } }
       const lfClear = function (key, name, onClear) {
         return h('button', {
-          key: key, type: 'button', className: 'gitops-lf-x', title: '清除' + name + '筛选',
+          key: key, type: 'button', className: 'dsh-git-lf-x', title: '清除' + name + '筛选',
           onClick: function (event) {
             stopEvent(event)
             /* The trigger is a <label> around a <select>: without preventDefault
@@ -2791,12 +2769,12 @@ textarea.gitops-input{resize:vertical}
       }
 
       const searchBox = h('div', {
-        key: 'search', className: 'gitops-logsearch',
+        key: 'search', className: 'dsh-git-logsearch',
         title: '按提交信息筛选（字面量匹配），回车生效',
       },
-        h('span', { key: 'i', className: 'gitops-logsearch-ico' }, h(Icon, { name: 'search', size: 13 })),
+        h('span', { key: 'i', className: 'dsh-git-logsearch-ico' }, h(Icon, { name: 'search', size: 13 })),
         h('input', {
-          key: 'q', className: 'gitops-logsearch-input',
+          key: 'q', className: 'dsh-git-logsearch-input',
           placeholder: '搜索提交信息…',
           value: searchDraft,
           onChange: function (event) { setSearchDraft(event.target.value) },
@@ -2805,7 +2783,7 @@ textarea.gitops-input{resize:vertical}
         /* Shown as soon as there is anything to clear, applied or not: the box
            holds the draft, so an un-applied query is still one click from gone. */
         searchDraft.length > 0 || search.length > 0 ? h('button', {
-          key: 'x', type: 'button', className: 'gitops-logsearch-x', title: '清空搜索',
+          key: 'x', type: 'button', className: 'dsh-git-logsearch-x', title: '清空搜索',
           onClick: function () { setSearchDraft(''); setSearch('') },
         }, '×') : null)
 
@@ -2815,11 +2793,11 @@ textarea.gitops-input{resize:vertical}
       }
       const branchScoped = allRefs || activeRef.length > 0
       const branchFilter = h('label', {
-        key: 'f:branch', className: 'gitops-lf gitops-lf-on', title: '分支范围：历史只显示这个分支能到达的提交',
+        key: 'f:branch', className: 'dsh-git-lf dsh-git-lf-on', title: '分支范围：历史只显示这个分支能到达的提交',
       },
-        h('span', { key: 'k', className: 'gitops-lf-k' }, '分支：'),
+        h('span', { key: 'k', className: 'dsh-git-lf-k' }, '分支：'),
         h('select', {
-          key: 's', className: 'gitops-lf-select', style: lfWidth(branchLabel), value: branchValue,
+          key: 's', className: 'dsh-git-lf-select', style: lfWidth(branchLabel), value: branchValue,
           onChange: function (event) {
             const next = event.target.value
             setSelectedKey(null)
@@ -2839,11 +2817,11 @@ textarea.gitops-input{resize:vertical}
 
       const authorOn = author.length > 0
       const authorFilter = h('label', {
-        key: 'f:author', className: 'gitops-lf' + (authorOn ? ' gitops-lf-on' : ''), title: '作者',
+        key: 'f:author', className: 'dsh-git-lf' + (authorOn ? ' dsh-git-lf-on' : ''), title: '作者',
       },
-        authorOn ? h('span', { key: 'k', className: 'gitops-lf-k' }, '作者：') : null,
+        authorOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '作者：') : null,
         h('select', {
-          key: 's', className: 'gitops-lf-select', value: author,
+          key: 's', className: 'dsh-git-lf-select', value: author,
           style: lfWidth(authorLabels[author] !== undefined ? authorLabels[author] : '作者'),
           onChange: function (event) { setAuthor(event.target.value) },
         }, authorOptions),
@@ -2856,11 +2834,11 @@ textarea.gitops-input{resize:vertical}
       }
       const dateOn = datePreset !== 'all'
       const dateFilter = h('label', {
-        key: 'f:date', className: 'gitops-lf' + (dateOn ? ' gitops-lf-on' : ''), title: '时间范围',
+        key: 'f:date', className: 'dsh-git-lf' + (dateOn ? ' dsh-git-lf-on' : ''), title: '时间范围',
       },
-        dateOn ? h('span', { key: 'k', className: 'gitops-lf-k' }, '时间：') : null,
+        dateOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '时间：') : null,
         h('select', {
-          key: 's', className: 'gitops-lf-select', value: datePreset,
+          key: 's', className: 'dsh-git-lf-select', value: datePreset,
           style: lfWidth(dateLabel),
           onChange: function (event) { setDatePreset(event.target.value) },
         }, DATE_PRESETS.map(function (preset) {
@@ -2872,11 +2850,11 @@ textarea.gitops-input{resize:vertical}
 
       const pathOn = pathDraft.length > 0 || pathFilter.length > 0
       const pathFilterNode = h('label', {
-        key: 'f:path', className: 'gitops-lf' + (pathOn ? ' gitops-lf-on' : ''), title: '只看某个路径的历史，回车生效',
+        key: 'f:path', className: 'dsh-git-lf' + (pathOn ? ' dsh-git-lf-on' : ''), title: '只看某个路径的历史，回车生效',
       },
-        pathOn ? h('span', { key: 'k', className: 'gitops-lf-k' }, '路径：') : null,
+        pathOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '路径：') : null,
         h('input', {
-          key: 'i', className: 'gitops-lf-input',
+          key: 'i', className: 'dsh-git-lf-input',
           /* Grows with what is typed, so a draft never scrolls inside 44px. */
           style: { width: String(Math.min(110, Math.max(pathOn ? 40 : 46, 24 + pathDraft.length * 6))) + 'px' },
           placeholder: pathOn ? '' : '路径',
@@ -2889,7 +2867,7 @@ textarea.gitops-input{resize:vertical}
         }),
         pathOn ? lfClear('x', '路径', function () { setPathDraft(''); setPathFilter('') }) : null)
 
-      const toolbar = h('div', { className: 'gitops-tools' },
+      const toolbar = h('div', { className: 'dsh-git-tools' },
         tool('pick', h(Icon, { name: 'pick', size: 15 }), '拣选：cherry-pick，把这个提交应用到当前分支',
           function () {
             runOp('git/sequence', {
@@ -2907,23 +2885,23 @@ textarea.gitops-input{resize:vertical}
         tool('branch', h(BranchIcon, { size: 15 }), '分支：从这个提交新建分支并切过去',
           function () { setArmed(''); setPrompt({ kind: 'branch', value: '' }) },
           { disabled: !canAct, ico: true }),
-        h('span', { key: 'sep', className: 'gitops-tsep' }),
+        h('span', { key: 'sep', className: 'dsh-git-tsep' }),
         searchBox,
         branchFilter,
         authorFilter,
         dateFilter,
         pathFilterNode,
         filterCount >= 2 ? h('button', {
-          key: 'clear', type: 'button', className: 'gitops-lclear', title: '清除全部筛选',
+          key: 'clear', type: 'button', className: 'dsh-git-lclear', title: '清除全部筛选',
           onClick: function () { resetFilters() },
         }, '全部清除') : null,
-        h('span', { key: 'count', className: 'gitops-count gitops-dim' },
+        h('span', { key: 'count', className: 'dsh-git-count dsh-git-dim' },
           String(commitCount) + (hasFilter ? ' 条匹配' : ' 条')))
 
-      const promptRow = prompt === null ? null : h('div', { className: 'gitops-prompt' },
-        h('span', { key: 'l', className: 'gitops-hint' }, prompt.kind === 'tag' ? '标签名' : '新分支名'),
+      const promptRow = prompt === null ? null : h('div', { className: 'dsh-git-prompt' },
+        h('span', { key: 'l', className: 'dsh-git-hint' }, prompt.kind === 'tag' ? '标签名' : '新分支名'),
         clearable('i', h('input', {
-          key: 'i', className: 'gitops-input', autoFocus: true, value: prompt.value,
+          key: 'i', className: 'dsh-git-input', autoFocus: true, value: prompt.value,
           placeholder: prompt.kind === 'tag' ? '例如 v1.0.0' : '例如 feature/login',
           onChange: function (event) { setPrompt({ kind: prompt.kind, value: event.target.value }) },
           onKeyDown: function (event) {
@@ -2932,11 +2910,11 @@ textarea.gitops-input{resize:vertical}
           },
         }), prompt.value.length > 0, function () { setPrompt({ kind: prompt.kind, value: '' }) }),
         h('button', {
-          key: 'ok', type: 'button', className: 'gitops-btn gitops-primary',
+          key: 'ok', type: 'button', className: 'dsh-git-btn dsh-git-primary',
           disabled: prompt.value.trim().length === 0, onClick: submitPrompt,
         }, '创建'),
         h('button', {
-          key: 'no', type: 'button', className: 'gitops-btn',
+          key: 'no', type: 'button', className: 'dsh-git-btn',
           onClick: function () { setPrompt(null) },
         }, '取消'))
 
@@ -2946,8 +2924,8 @@ textarea.gitops-input{resize:vertical}
         setArmed('')
         runOp('git/sequence', { op: sequencer, action: 'abort' })
       }
-      const banner = sequencer.length === 0 ? null : h('div', { className: 'gitops-banner' },
-        h('span', { key: 't', className: 'gitops-banner-text' },
+      const banner = sequencer.length === 0 ? null : h('div', { className: 'dsh-git-banner' },
+        h('span', { key: 't', className: 'dsh-git-banner-text' },
           '正在' + seqLabel + '：' + (conflicts > 0 ? String(conflicts) + ' 个文件冲突' : '等待提交')),
         tool('seq-cont', sequencer === 'merge' ? '提交合并' : '继续',
           sequencer === 'merge' ? '冲突解决并暂存后提交这次合并' : '冲突解决并暂存后继续',
@@ -2962,46 +2940,46 @@ textarea.gitops-input{resize:vertical}
               function () { setArmed('abort') }, { disabled: busy }))
 
       const upstreamHint = needsUpstream && refs != null && refs.ok === true && refs.remote.length > 0
-        ? h('div', { className: 'gitops-prompt' },
-            h('span', { key: 'l', className: 'gitops-hint' }, '这个分支还没有上游'),
+        ? h('div', { className: 'dsh-git-prompt' },
+            h('span', { key: 'l', className: 'dsh-git-hint' }, '这个分支还没有上游'),
             h('button', {
-              key: 'u', type: 'button', className: 'gitops-btn gitops-primary', disabled: busy,
+              key: 'u', type: 'button', className: 'dsh-git-btn dsh-git-primary', disabled: busy,
               onClick: function () {
                 runOp('git/push', { setUpstream: true, remote: refs.remote[0].name, branch: currentName })
               },
             }, '推送并设为上游'),
-            h('button', { key: 'n', type: 'button', className: 'gitops-btn', onClick: function () { setNeedsUpstream(false) } }, '忽略'))
+            h('button', { key: 'n', type: 'button', className: 'dsh-git-btn', onClick: function () { setNeedsUpstream(false) } }, '忽略'))
         : null
 
       const shownRef = allRefs ? '' : (activeRef.length > 0 ? activeRef : (graph != null && graph.ok === true ? text(graph.ref) : ''))
       const effectiveSelection = selectedKey !== null ? selectedKey : shownRef
 
-      const header = h('div', { className: 'gitops-top' },
-        h('span', { className: 'gitops-title' }, 'Git'),
+      const header = h('div', { className: 'dsh-git-top' },
+        h('span', { className: 'dsh-git-title' }, 'Git'),
         needsSetup
-          ? h('span', { className: 'gitops-hint' }, '未检测到仓库')
-          : h('div', { className: 'gitops-tabs' },
-              h('button', { type: 'button', className: 'gitops-tab' + (tab === 'changes' ? ' gitops-tab-on' : ''),
+          ? h('span', { className: 'dsh-git-hint' }, '未检测到仓库')
+          : h('div', { className: 'dsh-git-tabs' },
+              h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'changes' ? ' dsh-git-tab-on' : ''),
                 onClick: function () { setTab('changes') } }, '变更'),
-              h('button', { type: 'button', className: 'gitops-tab' + (tab === 'log' ? ' gitops-tab-on' : ''),
+              h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'log' ? ' dsh-git-tab-on' : ''),
                 onClick: function () { setTab('log') } }, '历史')),
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
-        h('span', { key: 'grow', className: 'gitops-grow' }),
+        h('span', { key: 'grow', className: 'dsh-git-grow' }),
         needsSetup ? null : clearable('repo', h('input', {
-          className: 'gitops-input gitops-repo-path',
+          className: 'dsh-git-input dsh-git-repo-path',
           placeholder: '仓库路径（留空用会话工作区）',
           value: repoPath,
           onChange: function (event) { setRepoPath(event.target.value) },
           onKeyDown: function (event) { if (event.key === 'Enter') applyRepo(repoPath.trim()) },
-        }), repoPath.length > 0, function () { setRepoPath(''); applyRepo('') }, 'gitops-clearable-path'),
-        needsSetup ? null : h('button', { type: 'button', className: 'gitops-btn',
+        }), repoPath.length > 0, function () { setRepoPath(''); applyRepo('') }, 'dsh-git-clearable-path'),
+        needsSetup ? null : h('button', { type: 'button', className: 'dsh-git-btn',
           onClick: function () { applyRepo(repoPath.trim()) } }, '应用'),
         switchCard)
 
       let body
       if (work == null) {
-        body = h('div', { className: 'gitops-pane gitops-dim' }, '正在读取仓库…')
+        body = h('div', { className: 'dsh-git-pane dsh-git-dim' }, '正在读取仓库…')
       } else if (needsSetup) {
         body = h(RepoSetup, {
           key: 'setup:' + appliedRepo + '|' + text(work.repo),
@@ -3033,14 +3011,14 @@ textarea.gitops-input{resize:vertical}
           onCommit: commit,
         })
       } else {
-        body = h('div', { className: 'gitops-body' },
-          h('div', { className: 'gitops-left' },
+        body = h('div', { className: 'dsh-git-body' },
+          h('div', { className: 'dsh-git-left' },
             h(RefTree, {
               refs: refs, collapsed: collapsed, selectedKey: effectiveSelection,
               onToggle: toggle, onSelect: function (key) { setSelectedKey(key) },
               onPick: function (name) { setAllRefs(false); setActiveRef(name) }, activeRef: shownRef,
             })),
-          h('div', { className: 'gitops-main' },
+          h('div', { className: 'dsh-git-main' },
             toolbar,
             promptRow,
             upstreamHint,
@@ -3052,22 +3030,22 @@ textarea.gitops-input{resize:vertical}
       }
 
       const popProps = {
-        className: 'gitops-pop' + (props.active === true ? '' : ' gitops-hidden')
-          + (switcher === 'panel' ? ' gitops-pop-overflow' : ''),
+        className: 'dsh-git-pop' + (props.active === true ? '' : ' dsh-git-hidden')
+          + (switcher === 'panel' ? ' dsh-git-pop-overflow' : ''),
         ref: function (node) { panelNode = node },
       }
       if (size.w > 0) popProps.style = { width: size.w + 'px', left: '50%', right: 'auto', transform: 'translateX(-50%)' }
       if (size.h > 0) popProps.style = Object.assign({}, popProps.style, { height: size.h + 'px' })
 
       return h('div', popProps,
-        h('div', { key: 'gn', className: 'gitops-grip gitops-grip-n', title: '拖动调整高度', onPointerDown: startDrag('n') }),
-        h('div', { key: 'gw', className: 'gitops-grip gitops-grip-w', title: '拖动调整宽度', onPointerDown: startDrag('w') }),
-        h('div', { key: 'ge', className: 'gitops-grip gitops-grip-e', title: '拖动调整宽度', onPointerDown: startDrag('e') }),
-        h('div', { key: 'gnw', className: 'gitops-grip gitops-grip-nw', title: '拖动调整宽高', onPointerDown: startDrag('nw') }),
-        h('div', { key: 'gne', className: 'gitops-grip gitops-grip-ne', title: '拖动调整宽高', onPointerDown: startDrag('ne') }),
+        h('div', { key: 'gn', className: 'dsh-git-grip dsh-git-grip-n', title: '拖动调整高度', onPointerDown: startDrag('n') }),
+        h('div', { key: 'gw', className: 'dsh-git-grip dsh-git-grip-w', title: '拖动调整宽度', onPointerDown: startDrag('w') }),
+        h('div', { key: 'ge', className: 'dsh-git-grip dsh-git-grip-e', title: '拖动调整宽度', onPointerDown: startDrag('e') }),
+        h('div', { key: 'gnw', className: 'dsh-git-grip dsh-git-grip-nw', title: '拖动调整宽高', onPointerDown: startDrag('nw') }),
+        h('div', { key: 'gne', className: 'dsh-git-grip dsh-git-grip-ne', title: '拖动调整宽高', onPointerDown: startDrag('ne') }),
         header,
         banner,
-        error !== null ? h('div', { className: 'gitops-error', style: { padding: '4px 10px' } }, error) : null,
+        error !== null ? h('div', { className: 'dsh-git-error', style: { padding: '4px 10px' } }, error) : null,
         body)
     }
 
@@ -3103,33 +3081,33 @@ textarea.gitops-input{resize:vertical}
       const watchOff = draft.watchEnabled !== true
 
       return h('div', {
-        className: 'gitops-set',
+        className: 'dsh-git-set',
         ref: function (node) {
           loadSettings(node != null ? node.ownerDocument : null)
           loadPluginConfig()
         },
       },
-        h('div', { className: 'gitops-set-h' }, 'Git'),
-        h('div', { className: 'gitops-set-hint' }, '分两层：跟随插件的配置，和只影响本浏览器的外观与节奏。'),
+        h('div', { className: 'dsh-git-set-h' }, 'Git'),
+        h('div', { className: 'dsh-git-set-hint' }, '分两层：跟随插件的配置，和只影响本浏览器的外观与节奏。'),
 
-        h('div', { className: 'gitops-set-group' }, '插件配置'),
-        h('div', { className: 'gitops-set-hint' },
+        h('div', { className: 'dsh-git-set-group' }, '插件配置'),
+        h('div', { className: 'dsh-git-set-hint' },
           pluginConfigPath.length > 0
             ? ('保存在 ' + pluginConfigPath + ' —— 换浏览器也一致')
-            : '保存在部署配置目录旁的 gitops.json —— 换浏览器也一致'),
+            : '保存在部署配置目录旁的 dsh-git-idea.json —— 换浏览器也一致'),
 
-        h('div', { className: 'gitops-set-row' },
-          h('span', { className: 'gitops-set-label' }, '初始化仓库的默认分支'),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '初始化仓库的默认分支'),
           clearable('init', h('input', {
-            className: 'gitops-input gitops-set-input',
+            className: 'dsh-git-input dsh-git-set-input',
             placeholder: 'main',
             value: pdraft.initBranch,
             onChange: function (event) { setPlugin('initBranch', event.target.value) },
-          }), pdraft.initBranch.length > 0, function () { setPlugin('initBranch', '') }, 'gitops-clearable-set'),
-          h('span', { className: 'gitops-set-hint' }, '引导页「在此初始化仓库」会用它执行 git init -b；留空则用 git 自己的默认值')),
+          }), pdraft.initBranch.length > 0, function () { setPlugin('initBranch', '') }, 'dsh-git-clearable-set'),
+          h('span', { className: 'dsh-git-set-hint' }, '引导页「在此初始化仓库」会用它执行 git init -b；留空则用 git 自己的默认值')),
 
-        h('div', { className: 'gitops-set-row' },
-          h('label', { className: 'gitops-set-check' },
+        h('div', { className: 'dsh-git-set-row' },
+          h('label', { className: 'dsh-git-set-check' },
             h('input', {
               type: 'checkbox', checked: pdraft.cherryPickRecord === true,
               onChange: function (event) { setPlugin('cherryPickRecord', event.target.checked) },
@@ -3137,78 +3115,78 @@ textarea.gitops-input{resize:vertical}
             h('span', null, 'cherry-pick 时记录来源（-x）'))),
 
         pluginConfigError.length > 0
-          ? h('div', { className: 'gitops-set-row gitops-error' }, '保存失败：' + pluginConfigError)
+          ? h('div', { className: 'dsh-git-set-row dsh-git-error' }, '保存失败：' + pluginConfigError)
           : null,
 
-        h('div', { className: 'gitops-set-group' }, '本浏览器'),
-        h('div', { className: 'gitops-set-hint' }, '这些只是外观和使用节奏，换浏览器各管各的。'),
+        h('div', { className: 'dsh-git-set-group' }, '本浏览器'),
+        h('div', { className: 'dsh-git-set-hint' }, '这些只是外观和使用节奏，换浏览器各管各的。'),
 
-        h('div', { className: 'gitops-set-row' },
-          h('label', { className: 'gitops-set-check' },
+        h('div', { className: 'dsh-git-set-row' },
+          h('label', { className: 'dsh-git-set-check' },
             h('input', {
               type: 'checkbox', checked: draft.watchEnabled === true,
               onChange: function (event) { set('watchEnabled', event.target.checked) },
             }),
             h('span', null, '后台监测仓库变化，发现变化就自动刷新'))),
 
-        h('div', { className: 'gitops-set-row' },
-          h('span', { className: 'gitops-set-label' }, '面板打开时每'),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '面板打开时每'),
           h('input', {
-            className: 'gitops-input gitops-set-num', type: 'number', min: 1, max: 120,
+            className: 'dsh-git-input dsh-git-set-num', type: 'number', min: 1, max: 120,
             disabled: watchOff,
             value: String(draft.watchFastSec),
             onChange: function (event) { num('watchFastSec', event.target.value, 1, 120) },
           }),
-          h('span', { className: 'gitops-set-hint' }, '秒检查一次')),
+          h('span', { className: 'dsh-git-set-hint' }, '秒检查一次')),
 
-        h('div', { className: 'gitops-set-row' },
-          h('span', { className: 'gitops-set-label' }, '只有按钮时每'),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '只有按钮时每'),
           h('input', {
-            className: 'gitops-input gitops-set-num', type: 'number', min: 2, max: 600,
+            className: 'dsh-git-input dsh-git-set-num', type: 'number', min: 2, max: 600,
             disabled: watchOff,
             value: String(draft.watchSlowSec),
             onChange: function (event) { num('watchSlowSec', event.target.value, 2, 600) },
           }),
-          h('span', { className: 'gitops-set-hint' }, '秒检查一次')),
+          h('span', { className: 'dsh-git-set-hint' }, '秒检查一次')),
 
-        h('div', { className: 'gitops-set-row' },
-          h('label', { className: 'gitops-set-check' },
+        h('div', { className: 'dsh-git-set-row' },
+          h('label', { className: 'dsh-git-set-check' },
             h('input', {
               type: 'checkbox', checked: draft.watchChip === true, disabled: watchOff,
               onChange: function (event) { set('watchChip', event.target.checked) },
             }),
             h('span', null, '面板关着时也监测，让按钮上的分支名和改动数保持实时'))),
 
-        h('div', { className: 'gitops-set-row' },
-          h('label', { className: 'gitops-set-check' },
+        h('div', { className: 'dsh-git-set-row' },
+          h('label', { className: 'dsh-git-set-check' },
             h('input', {
               type: 'checkbox', checked: draft.hoverSwitch === true,
               onChange: function (event) { set('hoverSwitch', event.target.checked) },
             }),
             h('span', null, '鼠标停在输入框旁的 Git 按钮上，弹出分支切换卡片（点一下就切）'))),
 
-        h('div', { className: 'gitops-set-row' },
-          h('span', { className: 'gitops-set-label' }, '面板尺寸'),
-          h('span', { className: 'gitops-set-hint' },
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '面板尺寸'),
+          h('span', { className: 'dsh-git-set-hint' },
             panelSize.w > 0 || panelSize.h > 0
               ? (String(panelSize.w) + ' × ' + String(panelSize.h) + ' 像素')
               : '跟随输入框宽度 / 74vh'),
           h('button', {
-            type: 'button', className: 'gitops-btn',
+            type: 'button', className: 'dsh-git-btn',
             onClick: function () { publishPanelSize({ w: 0, h: 0 }); savePanelSize() },
           }, '恢复默认尺寸')),
 
-        h('div', { className: 'gitops-set-row' },
-          h('span', { className: 'gitops-set-label' }, '切换器的记忆'),
-          h('span', { className: 'gitops-set-hint' }, '最近使用与收藏只写在这个浏览器里'),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '切换器的记忆'),
+          h('span', { className: 'dsh-git-set-hint' }, '最近使用与收藏只写在这个浏览器里'),
           h('button', {
-            type: 'button', className: 'gitops-btn',
+            type: 'button', className: 'dsh-git-btn',
             onClick: function () { clearBranchMemory() },
           }, '清除最近使用与收藏')),
 
-        h('div', { className: 'gitops-set-row' },
+        h('div', { className: 'dsh-git-set-row' },
           h('button', {
-            type: 'button', className: 'gitops-btn',
+            type: 'button', className: 'dsh-git-btn',
             onClick: function () { apply(Object.assign({}, SETTINGS_DEFAULTS)) },
           }, '本浏览器全部恢复默认')))
     }
@@ -3294,14 +3272,14 @@ textarea.gitops-input{resize:vertical}
       else title = where + ' 不在任何 Git 仓库中 —— 点击选择路径或在这里初始化'
 
       const children = [h(BranchIcon, { key: 'icon', size: 14, plus: !isRepo && info.phase === 'none' })]
-      if (isRepo) children.push(h('span', { className: 'gitops-chip-label', key: 'label' }, info.label))
-      if (isRepo && info.pending > 0) children.push(h('span', { className: 'gitops-badge', key: 'badge' }, String(info.pending)))
+      if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
+      if (isRepo && info.pending > 0) children.push(h('span', { className: 'dsh-git-badge', key: 'badge' }, String(info.pending)))
 
       return h('button', {
         type: 'button',
-        className: 'gitops-chip'
-          + (isRepo ? ' gitops-chip-repo' : ' gitops-chip-idle')
-          + (isOpen ? ' gitops-chip-open' : ''),
+        className: 'dsh-git-chip'
+          + (isRepo ? ' dsh-git-chip-repo' : ' dsh-git-chip-idle')
+          + (isOpen ? ' dsh-git-chip-open' : ''),
         title: isRepo ? title + ' · 悬停可直接切换分支' : title,
         ref: function (node) { chipNode = node },
         onClick: function () { clearHoverTimer(); setSwitchMode(null); setOpen(!isOpen) },
@@ -3373,11 +3351,11 @@ textarea.gitops-input{resize:vertical}
       /* display:contents so the wrapper adds no box: the panel keeps positioning
          itself against the same ancestor it always did, and the hover card is an
          absolutely positioned sibling that cannot push it around. */
-      return h('div', { className: 'gitops-layer' },
+      return h('div', { className: 'dsh-git-layer' },
         h(GitPanel, { key: 'panel', sessionId: props.sessionId, active: isOpen, ready: everOpened }),
         mode === 'hover' && isOpen !== true
           ? h('div', {
-              key: 'switch', className: 'gitops-switch gitops-switch-hover',
+              key: 'switch', className: 'dsh-git-switch dsh-git-switch-hover',
               ref: function (node) { switcherNode = node },
               onPointerEnter: function () { clearHoverTimer() },
               onPointerLeave: function () { hoverCloseSoon() },
@@ -3396,21 +3374,21 @@ textarea.gitops-input{resize:vertical}
 
     ctx.effect(function () {
       return slots.inject('conversation.input.left', function () {
-        return slots.register({ name: 'conversation.input.left', id: 'gitops-git-chip', order: 10 }, GitChip)
+        return slots.register({ name: 'conversation.input.left', id: 'dsh-git-idea-chip', order: 10 }, GitChip)
       })
-    }, 'gitops composer chip')
+    }, 'dsh-git-idea composer chip')
 
     ctx.effect(function () {
       return slots.inject('conversation.input.overlay', function () {
-        return slots.register({ name: 'conversation.input.overlay', id: 'gitops-git-panel', order: 10 }, GitPopover)
+        return slots.register({ name: 'conversation.input.overlay', id: 'dsh-git-idea-panel', order: 10 }, GitPopover)
       })
-    }, 'gitops composer panel')
+    }, 'dsh-git-idea composer panel')
 
     /* A page of its own in Settings, between Agent presets (20) and Market (40). */
     ctx.effect(function () {
       return slots.inject('settings.section', function () {
-        return slots.register({ name: 'settings.section', id: 'gitops', order: 30, label: 'Git' }, GitSettingsSection)
+        return slots.register({ name: 'settings.section', id: 'dsh-git-idea', order: 30, label: 'Git' }, GitSettingsSection)
       })
-    }, 'gitops settings section')
+    }, 'dsh-git-idea settings section')
   },
 }

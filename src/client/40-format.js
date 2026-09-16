@@ -32,12 +32,12 @@
 
     function statusClass(status) {
       const head = text(status).charAt(0)
-      if (head === 'A') return ' gitops-st-A'
-      if (head === 'D') return ' gitops-st-D'
-      if (head === 'R') return ' gitops-st-R'
-      if (head === 'C') return ' gitops-st-C'
-      if (head === '?') return ' gitops-st-U'
-      return ' gitops-st-M'
+      if (head === 'A') return ' dsh-git-st-A'
+      if (head === 'D') return ' dsh-git-st-D'
+      if (head === 'R') return ' dsh-git-st-R'
+      if (head === 'C') return ' dsh-git-st-C'
+      if (head === '?') return ' dsh-git-st-U'
+      return ' dsh-git-st-M'
     }
 
     function statusLabel(status) {

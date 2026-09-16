@@ -89,11 +89,11 @@ function collect(node, out = []) {
 const buttons = (t) => collect(t).filter((n) => n.type === 'button')
 const inputs = (t) => collect(t).filter((n) => n.type === 'input')
 const byClass = (t, s) => collect(t).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(s) >= 0)
-const rows = (t) => byClass(t, 'gitops-bs-row')
-/* 操作行与分支行共用 .gitops-bs-row，取分支行时要排掉操作行 */
-const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexOf('gitops-bs-action') < 0)
+const rows = (t) => byClass(t, 'dsh-git-bs-row')
+/* 操作行与分支行共用 .dsh-git-bs-row，取分支行时要排掉操作行 */
+const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
-const groups = (t) => byClass(t, 'gitops-bs-group')
+const groups = (t) => byClass(t, 'dsh-git-bs-group')
 
 let currentLabel = ''
 function renderRoot(element, label) {
@@ -164,7 +164,7 @@ const host = {
     if (method === 'git/watch') return Promise.resolve({ ok: true, repo: '/tmp/ws', sig: 'SIG' })
     if (method === 'git/commit-detail') return Promise.resolve({ ok: true, hash: 'a', files: [], branches: [] })
     if (method === 'git/flush') return Promise.resolve({ ok: true })
-    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/gitops.json', config: { initBranch: 'main', cherryPickRecord: false } })
+    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/dsh-git-idea.json', config: { initBranch: 'main', cherryPickRecord: false } })
     if (method === 'git/checkout') return Promise.resolve(checkoutReply)
     return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
   },
@@ -186,9 +186,9 @@ const styles = { insert: () => () => {} }
 new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
-const chip = registered.find((r) => r.options.id === 'gitops-git-chip').component
-const popover = registered.find((r) => r.options.id === 'gitops-git-panel').component
-const section = registered.find((r) => r.options.id === 'gitops').component
+const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
+const popover = registered.find((r) => r.options.id === 'dsh-git-idea-panel').component
+const section = registered.find((r) => r.options.id === 'dsh-git-idea').component
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms || 10))
 const popTree = (l) => renderUntilStable(makeElement(popover, { sessionId: 's-1' }), l || 'pop')
@@ -196,12 +196,12 @@ const chipTree = (l) => renderUntilStable(makeElement(chip, { sessionId: 's-1' }
 async function settle(l) { let t = null; for (let i = 0; i < 4; i += 1) { t = await popTree(l); await wait(10) } return t }
 async function openPanel() {
   let t = await chipTree()
-  if (t.props.className.indexOf('gitops-chip-open') < 0) { t.props.onClick(); await wait(10) }
+  if (t.props.className.indexOf('dsh-git-chip-open') < 0) { t.props.onClick(); await wait(10) }
   return await settle()
 }
 async function openSwitcher() {
   const t = await openPanel()
-  const chipBtn = byClass(t, 'gitops-branch-chip')[0]
+  const chipBtn = byClass(t, 'dsh-git-branch-chip')[0]
   chipBtn.props.onClick()
   await wait(10)
   return await settle()
@@ -221,7 +221,7 @@ host.call = function (method, args) {
 const heavy = () => calls.filter((c) => c.tree !== 'chip' && ['git/panel', 'git/refs', 'git/authors', 'git/graph', 'git/commit-detail'].indexOf(c.method) >= 0).map((c) => c.method)
 const chipClose = async () => {
   const t = await chipTree()
-  if (t.props.className.indexOf('gitops-chip-open') >= 0) { t.props.onClick(); await wait(10) }
+  if (t.props.className.indexOf('dsh-git-chip-open') >= 0) { t.props.onClick(); await wait(10) }
   await settle('pop')
 }
 const tick = async () => {
@@ -288,7 +288,7 @@ ct.props.onPointerEnter()
 timers.filter((t) => t.kind === 'timeout' && !t.dead).forEach((t) => { t.dead = true; t.cb() })
 await wait(15)
 const card = await popTree()
-ok('卡片出现', byClass(card, 'gitops-switch-hover').length === 1)
+ok('卡片出现', byClass(card, 'dsh-git-switch-hover').length === 1)
 ok('首帧就有分支行（不是空列表）', branchRows(card).length > 0)
 console.log('  卡片自己发的 RPC:', JSON.stringify(calls.map((c) => c.method)))
 ok('同时还在后台刷新', calls.some((c) => c.method === 'git/branches'))

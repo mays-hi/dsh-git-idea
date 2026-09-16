@@ -53,11 +53,11 @@
       /* display:contents so the wrapper adds no box: the panel keeps positioning
          itself against the same ancestor it always did, and the hover card is an
          absolutely positioned sibling that cannot push it around. */
-      return h('div', { className: 'gitops-layer' },
+      return h('div', { className: 'dsh-git-layer' },
         h(GitPanel, { key: 'panel', sessionId: props.sessionId, active: isOpen, ready: everOpened }),
         mode === 'hover' && isOpen !== true
           ? h('div', {
-              key: 'switch', className: 'gitops-switch gitops-switch-hover',
+              key: 'switch', className: 'dsh-git-switch dsh-git-switch-hover',
               ref: function (node) { switcherNode = node },
               onPointerEnter: function () { clearHoverTimer() },
               onPointerLeave: function () { hoverCloseSoon() },

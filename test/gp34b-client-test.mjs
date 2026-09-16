@@ -89,16 +89,16 @@ function collect(node, out = []) {
 const buttons = (t) => collect(t).filter((n) => n.type === 'button')
 const inputs = (t) => collect(t).filter((n) => n.type === 'input')
 const byClass = (t, s) => collect(t).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(s) >= 0)
-const rows = (t) => byClass(t, 'gitops-bs-row')
-/* 仓库级操作已改成列表上方的 chip 条，.gitops-bs-row 现在只剩分支行 */
+const rows = (t) => byClass(t, 'dsh-git-bs-row')
+/* 仓库级操作已改成列表上方的 chip 条，.dsh-git-bs-row 现在只剩分支行 */
 const branchRows = (t) => rows(t)
-const chips = (t) => byClass(t, 'gitops-bs-chip')
-const head = (t) => byClass(t, 'gitops-bs-head')[0]
-const headActs = (t) => byClass(t, 'gitops-bs-head-acts')[0]
+const chips = (t) => byClass(t, 'dsh-git-bs-chip')
+const head = (t) => byClass(t, 'dsh-git-bs-head')[0]
+const headActs = (t) => byClass(t, 'dsh-git-bs-head-acts')[0]
 const chipWith = (t, label) => chips(t).find((c) => textOf(c).indexOf(label) >= 0)
-const sortBtn = (t) => byClass(t, 'gitops-bs-sort')[0]
+const sortBtn = (t) => byClass(t, 'dsh-git-bs-sort')[0]
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
-const groups = (t) => byClass(t, 'gitops-bs-group')
+const groups = (t) => byClass(t, 'dsh-git-bs-group')
 
 function renderRoot(element, label) {
   const pending = []
@@ -167,7 +167,7 @@ const host = {
     if (method === 'git/watch') return Promise.resolve({ ok: true, repo: '/tmp/ws', sig: 'SIG' })
     if (method === 'git/commit-detail') return Promise.resolve({ ok: true, hash: 'a', files: [], branches: [] })
     if (method === 'git/flush') return Promise.resolve({ ok: true })
-    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/gitops.json', config: { initBranch: 'main', cherryPickRecord: false } })
+    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/dsh-git-idea.json', config: { initBranch: 'main', cherryPickRecord: false } })
     if (method === 'git/checkout') return Promise.resolve(checkoutReply)
     return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
   },
@@ -189,9 +189,9 @@ const styles = { insert: () => () => {} }
 new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
-const chip = registered.find((r) => r.options.id === 'gitops-git-chip').component
-const popover = registered.find((r) => r.options.id === 'gitops-git-panel').component
-const section = registered.find((r) => r.options.id === 'gitops').component
+const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
+const popover = registered.find((r) => r.options.id === 'dsh-git-idea-panel').component
+const section = registered.find((r) => r.options.id === 'dsh-git-idea').component
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms || 10))
 const popTree = (l) => renderUntilStable(makeElement(popover, { sessionId: 's-1' }), l || 'pop')
@@ -199,12 +199,12 @@ const chipTree = (l) => renderUntilStable(makeElement(chip, { sessionId: 's-1' }
 async function settle(l) { let t = null; for (let i = 0; i < 4; i += 1) { t = await popTree(l); await wait(10) } return t }
 async function openPanel() {
   let t = await chipTree()
-  if (t.props.className.indexOf('gitops-chip-open') < 0) { t.props.onClick(); await wait(10) }
+  if (t.props.className.indexOf('dsh-git-chip-open') < 0) { t.props.onClick(); await wait(10) }
   return await settle()
 }
 async function openSwitcher() {
   const t = await openPanel()
-  const chipBtn = byClass(t, 'gitops-branch-chip')[0]
+  const chipBtn = byClass(t, 'dsh-git-branch-chip')[0]
   chipBtn.props.onClick()
   await wait(10)
   return await settle()
@@ -212,7 +212,7 @@ async function openSwitcher() {
 
 const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + label + (value ? '' : '   ← 不符合预期'))
 
-console.log('== 改名迁移：老键里的偏好被搬到新键 ==')
+console.log('== 存储键：只认 dsh.git-idea.*，gitops 时代的键一律不读 ==')
 store['dsh.gitops.settings'] = JSON.stringify({ watchEnabled: true, watchChip: true, watchFastSec: 9, watchSlowSec: 20, hoverSwitch: true })
 store['dsh.gitops.panel'] = JSON.stringify({ w: 1111, h: 555 })
 store['dsh.gitops.mru'] = JSON.stringify(['legacy-branch'])
@@ -220,22 +220,21 @@ store['dsh.gitops.stars'] = JSON.stringify(['legacy-star'])
 store['dsh.gitops.sort'] = 'name'
 {
   const t = await openSwitcher()
-  ok('settings 搬到 dsh.git-idea.settings', String(store['dsh.git-idea.settings'] || '').indexOf('9') >= 0)
-  ok('panel 尺寸搬过去', String(store['dsh.git-idea.panel'] || '').indexOf('1111') >= 0)
-  ok('最近使用搬过去', String(store['dsh.git-idea.mru'] || '').indexOf('legacy-branch') >= 0)
-  ok('收藏搬过去', String(store['dsh.git-idea.stars'] || '').indexOf('legacy-star') >= 0)
-  ok('排序搬过去', store['dsh.git-idea.sort'] === 'name')
-  ok('新键已存在时不会被老键覆盖', true)
-  // 迁移那一步把内存里的排序也设成了 name，拨回默认再清干净
-  byClass(t, 'gitops-bs-icon')[0].props.onClick()
-  await wait(10)
+  ok('老 settings 键不再被读取', String(store['dsh.git-idea.settings'] || '').indexOf('9') < 0)
+  ok('老 panel 键不再被读取', String(store['dsh.git-idea.panel'] || '').indexOf('1111') < 0)
+  ok('老 mru 键不再被读取', String(store['dsh.git-idea.mru'] || '').indexOf('legacy-branch') < 0)
+  ok('老 stars 键不再被读取', String(store['dsh.git-idea.stars'] || '').indexOf('legacy-star') < 0)
+  ok('老 sort 键不再被读取（仍是默认的最近提交）', store['dsh.git-idea.sort'] !== 'name')
+  ok('老键本身没有被改写', store['dsh.gitops.sort'] === 'name')
   // 清干净，后面的用例从默认状态开始
   delete store['dsh.git-idea.settings']
   delete store['dsh.git-idea.panel']
   delete store['dsh.git-idea.stars']
   delete store['dsh.git-idea.sort']
   delete store['dsh.git-idea.mru']
-  byClass(t, 'gitops-branch-chip')[0].props.onClick()
+  byClass(t, 'dsh-git-branch-chip')[0].props.onClick()
+  await wait(10)
+  await settle('pop')
   await wait(10)
   await settle('pop')
 }
@@ -243,10 +242,10 @@ store['dsh.gitops.sort'] = 'name'
 console.log('')
 console.log('== 打开切换器 ==')
 let tree = await openSwitcher()
-ok('切换器出现', byClass(tree, 'gitops-switch').length === 1)
-ok('搜索框 placeholder 是「搜索分支」', byClass(tree, 'gitops-bs-search')[0].props.placeholder === '搜索分支')
-ok('搜索框前面有放大镜', byClass(tree, 'gitops-bs-mag').length === 1)
-ok('右侧有排序图标按钮', byClass(tree, 'gitops-bs-icon').length === 1)
+ok('切换器出现', byClass(tree, 'dsh-git-switch').length === 1)
+ok('搜索框 placeholder 是「搜索分支」', byClass(tree, 'dsh-git-bs-search')[0].props.placeholder === '搜索分支')
+ok('搜索框前面有放大镜', byClass(tree, 'dsh-git-bs-mag').length === 1)
+ok('右侧有排序图标按钮', byClass(tree, 'dsh-git-bs-icon').length === 1)
 
 console.log('')
 console.log('== 操作区（IDEA 的 Update/Commit/Push 那一栏，chip 化）==')
@@ -260,9 +259,9 @@ ok('chip 是可点的 button', strip.every((c) => c.type === 'button' && typeof 
 ok('chip 的 title 保留完整说明', chipWith(tree, '获取').props.title.indexOf('获取远端最新') === 0
   && chipWith(tree, '推送').props.title.indexOf('推送当前分支') === 0)
 ok('chip 搬进了搜索框那一行（不再有自己的第二排）', headActs(tree) !== undefined
-  && byClass(headActs(tree), 'gitops-bs-chip').length === strip.length
-  && byClass(tree, 'gitops-bs-acts-bar').length === 0)
-ok('搜索框和 chip 是同一行的兄弟', (head(tree).props.children || []).some((c) => c && c.props && c.props.className === 'gitops-bs-head-acts'))
+  && byClass(headActs(tree), 'dsh-git-bs-chip').length === strip.length
+  && byClass(tree, 'dsh-git-bs-acts-bar').length === 0)
+ok('搜索框和 chip 是同一行的兄弟', (head(tree).props.children || []).some((c) => c && c.props && c.props.className === 'dsh-git-bs-head-acts'))
 
 console.log('')
 console.log('== 排序按钮：两种模式两个图标 ==')
@@ -291,10 +290,10 @@ sortBtn(tree).props.onClick()
 await wait(10)
 tree = await settle('pop')
 ok('再点一次切回原来的图标', sortState(tree).icon === s0.icon)
-ok('列表里没有任何操作行', byClass(tree, 'gitops-bs-list')[0] !== undefined
-  && branchRows(byClass(tree, 'gitops-bs-list')[0]).length === rows(tree).length)
-ok('旧的整行操作区与分隔线都没了', byClass(tree, 'gitops-bs-action').length === 0 && byClass(tree, 'gitops-bs-sep').length === 0)
-ok('列表自己可以滚（多出的一行高度还给了它）', byClass(tree, 'gitops-bs-list')[0].props.className.indexOf('gitops-bs-list') >= 0)
+ok('列表里没有任何操作行', byClass(tree, 'dsh-git-bs-list')[0] !== undefined
+  && branchRows(byClass(tree, 'dsh-git-bs-list')[0]).length === rows(tree).length)
+ok('旧的整行操作区与分隔线都没了', byClass(tree, 'dsh-git-bs-action').length === 0 && byClass(tree, 'dsh-git-bs-sep').length === 0)
+ok('列表自己可以滚（多出的一行高度还给了它）', byClass(tree, 'dsh-git-bs-list')[0].props.className.indexOf('dsh-git-bs-list') >= 0)
 
 console.log('')
 console.log('== 分组 ==')
@@ -304,7 +303,7 @@ ok('「最近」此时为空（还没切过）', groups(tree).every((g) => textO
 ok('当前分支也在列表里（用铅笔标记）', rowWith(tree, 'main') !== undefined)
 ok('本地分组计数是 4', groups(tree).some((g) => textOf(g).indexOf('本地') >= 0 && textOf(g).indexOf('4') >= 0))
 ok('远端行显示 remote-only', rowWith(tree, 'remote-only') !== undefined)
-ok('远端行右侧写着 origin', (rowWith(tree, 'remote-only').props.children || []).some((c) => c && c.props && c.props.className === 'gitops-bs-up' && textOf(c) === 'origin'))
+ok('远端行右侧写着 origin', (rowWith(tree, 'remote-only').props.children || []).some((c) => c && c.props && c.props.className === 'dsh-git-bs-up' && textOf(c) === 'origin'))
 
 console.log('')
 console.log('== 行内信息：领先/落后与上游 ==')
@@ -319,7 +318,7 @@ ok('tooltip 里带提交主题与时间', String(mainRow.props.title).indexOf('t
 console.log('')
 console.log('== 排序：按最近提交 ↔ 按名称 ==')
 const beforeSort = branchRows(tree).map(textOf)
-byClass(tree, 'gitops-bs-icon')[0].props.onClick()
+byClass(tree, 'dsh-git-bs-icon')[0].props.onClick()
 await wait(10)
 tree = await settle('pop')
 const afterSort = branchRows(tree).map(textOf)
@@ -327,7 +326,7 @@ console.log('  排序前:', JSON.stringify(beforeSort.slice(0, 5)))
 console.log('  排序后:', JSON.stringify(afterSort.slice(0, 5)))
 ok('落盘了排序偏好', store['dsh.git-idea.sort'] === 'name')
 ok('按名称时 feature/one 排在 zeta 前', afterSort.findIndex((x) => x.indexOf('feature/one') >= 0) < afterSort.findIndex((x) => x.indexOf('zeta') >= 0))
-byClass(tree, 'gitops-bs-icon')[0].props.onClick()
+byClass(tree, 'dsh-git-bs-icon')[0].props.onClick()
 await wait(10)
 tree = await settle('pop')
 ok('能切回按最近提交', store['dsh.git-idea.sort'] === 'recent')
@@ -335,7 +334,7 @@ ok('能切回按最近提交', store['dsh.git-idea.sort'] === 'recent')
 console.log('')
 console.log('== 收藏：星标置顶 ==')
 const soloRow = rowWith(tree, 'solo')
-const starBtn = collect(soloRow).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('gitops-bs-star') >= 0)
+const starBtn = collect(soloRow).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('dsh-git-bs-star') >= 0)
 starBtn.props.onClick({ stopPropagation() {} })
 await wait(10)
 tree = await settle('pop')
@@ -359,52 +358,52 @@ ok('再展开又回来了', rowWith(tree, 'feature/one') !== undefined)
 
 console.log('')
 console.log('== 搜索同时匹配分支和操作 ==')
-let box = byClass(tree, 'gitops-bs-search')[0]
+let box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'push' } })
 await wait(10)
 tree = await settle('pop')
 ok('输入 push 只剩推送 chip', chips(tree).length === 1 && textOf(chips(tree)[0]).indexOf('推送') >= 0)
-box = byClass(tree, 'gitops-bs-search')[0]
+box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: '拉取' } })
 await wait(10)
 tree = await settle('pop')
 ok('输入「拉取」命中拉取 chip（中文短标签也能搜）', chips(tree).length === 1 && textOf(chips(tree)[0]).indexOf('拉取') >= 0)
-box = byClass(tree, 'gitops-bs-search')[0]
+box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'feat' } })
 await wait(10)
 tree = await settle('pop')
 ok('输入 feat 只剩 feature/one', branchRows(tree).length === 1 && textOf(branchRows(tree)[0]).indexOf('feature/one') >= 0)
-box = byClass(tree, 'gitops-bs-search')[0]
+box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: '' } })
 await wait(10)
 tree = await settle('pop')
 
 console.log('')
 console.log('== 键盘：跑操作行 ==')
-box = byClass(tree, 'gitops-bs-search')[0]
+box = byClass(tree, 'dsh-git-bs-search')[0]
 calls.length = 0
 box.props.onKeyDown({ key: 'ArrowDown', preventDefault() {} })
 await wait(5)
 tree = await settle('pop')
-byClass(tree, 'gitops-bs-search')[0].props.onKeyDown({ key: 'Enter', preventDefault() {} })
+byClass(tree, 'dsh-git-bs-search')[0].props.onKeyDown({ key: 'Enter', preventDefault() {} })
 await wait(15)
 console.log('  发出的 RPC:', JSON.stringify(calls.map((c) => c.method)))
 ok('回车跑了当前高亮的操作行', calls.some((c) => c.method === 'git/pull' || c.method === 'git/fetch'))
 ok('跑完给出内联反馈', textOf(await popTree()).indexOf('完成') >= 0)
 
-/* IDEA 式子菜单：列表之外的独立面板（.gitops-bs-fly），不再是行内展开条。
+/* IDEA 式子菜单：列表之外的独立面板（.dsh-git-bs-fly），不再是行内展开条。
    点 › 会「钉住」它，所以测试里用点击来打开，和鼠标悬浮得到的是同一个东西。 */
 const flyOf = (t, name) => {
-  const fly = byClass(t, 'gitops-bs-fly')[0]
+  const fly = byClass(t, 'dsh-git-bs-fly')[0]
   if (fly === undefined) return undefined
-  return textOf(byClass(fly, 'gitops-bs-fly-head')[0] || fly).indexOf(name) >= 0 ? fly : undefined
+  return textOf(byClass(fly, 'dsh-git-bs-fly-head')[0] || fly).indexOf(name) >= 0 ? fly : undefined
 }
 const actsFor = (t, name) => flyOf(t, name)
 async function openActs(t, name) {
   let tree = t
   let acts = flyOf(tree, name)
   if (acts === undefined) {
-    const more = collect(rowWith(tree, name)).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('gitops-bs-more') >= 0)
+    const more = collect(rowWith(tree, name)).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('dsh-git-bs-more') >= 0)
     more.props.onClick({ stopPropagation() {} })
     await wait(10)
     tree = await settle('pop')
@@ -416,7 +415,7 @@ async function openActs(t, name) {
 console.log('')
 console.log('== → 展开分支操作 ==')
 tree = await settle('pop')
-const moreBtn = collect(rowWith(tree, 'feature/one')).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('gitops-bs-more') >= 0)
+const moreBtn = collect(rowWith(tree, 'feature/one')).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('dsh-git-bs-more') >= 0)
 moreBtn.props.onClick({ stopPropagation() {} })
 await wait(10)
 tree = await settle('pop')
@@ -463,23 +462,23 @@ const newAction = chips(t3).find((r) => textOf(r).indexOf('新建分支') >= 0)
 newAction.props.onClick({ stopPropagation() {} })
 await wait(10)
 t3 = await settle('pop')
-const createBox = byClass(t3, 'gitops-bs-new')[0]
+const createBox = byClass(t3, 'dsh-git-bs-new')[0]
 ok('出现内联输入框', createBox !== undefined)
-ok('还没输入时没有 ×', byClass(t3, 'gitops-clear-x').length === 0)
+ok('还没输入时没有 ×', byClass(t3, 'dsh-git-clear-x').length === 0)
 createBox.props.onChange({ target: { value: 'feat' } })
 await wait(5)
 t3 = await settle('pop')
-const newX = byClass(byClass(t3, 'gitops-bs-create')[0], 'gitops-clear-x')[0]
+const newX = byClass(byClass(t3, 'dsh-git-bs-create')[0], 'dsh-git-clear-x')[0]
 ok('输入后框里出现快捷清除 ×', newX !== undefined)
 newX.props.onClick({ stopPropagation() {} })
 await wait(5)
 t3 = await settle('pop')
-ok('点 × 把新分支名清空了', byClass(t3, 'gitops-bs-new')[0].props.value === '')
+ok('点 × 把新分支名清空了', byClass(t3, 'dsh-git-bs-new')[0].props.value === '')
 calls.length = 0
-byClass(t3, 'gitops-bs-new')[0].props.onChange({ target: { value: 'feature/new' } })
+byClass(t3, 'dsh-git-bs-new')[0].props.onChange({ target: { value: 'feature/new' } })
 await wait(5)
 t3 = await settle('pop')
-byClass(t3, 'gitops-bs-new')[0].props.onKeyDown({ key: 'Enter', preventDefault() {} })
+byClass(t3, 'dsh-git-bs-new')[0].props.onKeyDown({ key: 'Enter', preventDefault() {} })
 await wait(15)
 console.log('  创建调用:', JSON.stringify(calls.filter((c) => c.method === 'git/branch-create')))
 ok('调用 git/branch-create', calls.some((c) => c.method === 'git/branch-create' && c.args.name === 'feature/new'))
@@ -487,19 +486,19 @@ ok('调用 git/branch-create', calls.some((c) => c.method === 'git/branch-create
 console.log('')
 console.log('== 从某个分支上新建 ==')
 let t4 = await openSwitcher()
-console.log('  切换器开着:', byClass(t4, 'gitops-switch').length === 1, ' 上下文行:', JSON.stringify(branchRows(t4).map(textOf).slice(0, 3)))
+console.log('  切换器开着:', byClass(t4, 'dsh-git-switch').length === 1, ' 上下文行:', JSON.stringify(branchRows(t4).map(textOf).slice(0, 3)))
 const opened4 = await openActs(t4, 'solo')
 console.log('  展开的行:', buttons(opened4.acts).map(textOf).join('/'), ' title:', String(buttons(opened4.acts)[1].props.title || ''))
 t4 = opened4.tree
 buttons(opened4.acts).find((b) => textOf(b).indexOf('从此分支新建分支') >= 0).props.onClick({ stopPropagation() {} })
 await wait(10)
 t4 = await settle('pop')
-ok('输入框提示以 solo 为起点', byClass(t4, 'gitops-bs-new')[0].props.placeholder.indexOf('solo') >= 0)
+ok('输入框提示以 solo 为起点', byClass(t4, 'dsh-git-bs-new')[0].props.placeholder.indexOf('solo') >= 0)
 calls.length = 0
-byClass(t4, 'gitops-bs-new')[0].props.onChange({ target: { value: 'from-solo' } })
+byClass(t4, 'dsh-git-bs-new')[0].props.onChange({ target: { value: 'from-solo' } })
 await wait(5)
 t4 = await settle('pop')
-byClass(t4, 'gitops-bs-new')[0].props.onKeyDown({ key: 'Enter', preventDefault() {} })
+byClass(t4, 'dsh-git-bs-new')[0].props.onKeyDown({ key: 'Enter', preventDefault() {} })
 await wait(15)
 ok('带上了起点 at=solo', calls.some((c) => c.method === 'git/branch-create' && c.args.at === 'solo' && c.args.name === 'from-solo'))
 
@@ -513,7 +512,7 @@ await wait(15)
 ok('调用 git/checkout 切 zeta', calls.some((c) => c.method === 'git/checkout' && c.args.name === 'zeta'))
 ok('记进最近使用', (store['dsh.git-idea.mru'] || '').indexOf('zeta') >= 0)
 t5 = await settle('pop')
-ok('切完自动收起', byClass(t5, 'gitops-switch').length === 0)
+ok('切完自动收起', byClass(t5, 'dsh-git-switch').length === 0)
 t5 = await openSwitcher()
 ok('重开后出现「最近」分组', groups(t5).some((g) => textOf(g).indexOf('最近') >= 0))
 ok('最近里有 zeta', groups(t5).find((g) => textOf(g).indexOf('最近') >= 0) !== undefined)
@@ -536,7 +535,7 @@ watchSig = 'SIG-2'
 iv.cb()
 await wait(20)
 let t6 = await settle('pop')
-const box6 = byClass(t6, 'gitops-bs-check')
+const box6 = byClass(t6, 'dsh-git-bs-check')
 ok('出现暂存勾选项', box6.length === 1)
 collect(box6[0]).find((n) => n.type === 'input').props.onChange({ target: { checked: true } })
 await wait(10)
@@ -578,23 +577,23 @@ ok('收藏被清空', store['dsh.git-idea.stars'] === '[]')
 
 console.log('')
 console.log('== 设置页的文本框也有快捷清除 ==')
-const initWrap = byClass(settings, 'gitops-clearable-set')[0]
+const initWrap = byClass(settings, 'dsh-git-clearable-set')[0]
 ok('初始化分支那一栏是「可清除」的框', initWrap !== undefined)
-byClass(settings, 'gitops-set-input')[0].props.onChange({ target: { value: 'trunk' } })
+byClass(settings, 'dsh-git-set-input')[0].props.onChange({ target: { value: 'trunk' } })
 await wait(10)
 const settings2 = await renderUntilStable(makeElement(section, { close: () => {} }), 'settings')
-const initX = byClass(byClass(settings2, 'gitops-clearable-set')[0], 'gitops-clear-x')[0]
+const initX = byClass(byClass(settings2, 'dsh-git-clearable-set')[0], 'dsh-git-clear-x')[0]
 ok('填了内容就出现 ×', initX !== undefined)
 initX.props.onClick({ stopPropagation() {} })
 await wait(10)
 const settings3 = await renderUntilStable(makeElement(section, { close: () => {} }), 'settings')
-ok('点 × 清空了这一栏', byClass(settings3, 'gitops-set-input')[0].props.value === '')
+ok('点 × 清空了这一栏', byClass(settings3, 'dsh-git-set-input')[0].props.value === '')
 
 console.log('')
 console.log('== 面板本体没被改坏 ==')
 fibers.clear()
 calls.length = 0
 const panelTree = await openPanel()
-ok('面板仍然渲染出三栏', byClass(panelTree, 'gitops-left').length === 1 && byClass(panelTree, 'gitops-main').length === 1)
-ok('工具栏还在', byClass(panelTree, 'gitops-tools').length === 1)
-ok('头部同步按钮还在', byClass(panelTree, 'gitops-sync').length === 1)
+ok('面板仍然渲染出三栏', byClass(panelTree, 'dsh-git-left').length === 1 && byClass(panelTree, 'dsh-git-main').length === 1)
+ok('工具栏还在', byClass(panelTree, 'dsh-git-tools').length === 1)
+ok('头部同步按钮还在', byClass(panelTree, 'dsh-git-sync').length === 1)

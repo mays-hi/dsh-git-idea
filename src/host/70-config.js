@@ -36,7 +36,7 @@ async function readConfigFile() {
     if (info === undefined) { configCache = normalizeConfig(null); return configCache }
     configCache = normalizeConfig(JSON.parse(await fsService.readText(target)))
   } catch (error) {
-    console.error('gitops: could not read the plugin config', String(error))
+    console.error('dsh-git-idea: could not read the plugin config', String(error))
     configCache = normalizeConfig(null)
   }
   return configCache

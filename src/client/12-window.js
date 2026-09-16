@@ -28,11 +28,14 @@
           return
         }
         const top = node != null && typeof node.scrollTop === 'number' && node.scrollTop > 0 ? node.scrollTop : 0
-        const first = Math.max(0, Math.floor(top / rowHeight) - VIRTUAL_OVERSCAN)
-        const last = Math.min(count, Math.ceil((top + viewport) / rowHeight) + VIRTUAL_OVERSCAN)
+        /* Both ends are clamped to the list: a filter can leave the scroller
+           further down than the list is long, and a window that starts past the
+           end would paint a spacer taller than the list and nothing else. */
+        const first = Math.max(0, Math.min(count, Math.floor(top / rowHeight) - VIRTUAL_OVERSCAN))
+        const last = Math.max(first, Math.min(count, Math.ceil((top + viewport) / rowHeight) + VIRTUAL_OVERSCAN))
         setWin(function (previous) {
           if (previous !== null && previous.first === first && previous.last === last) return previous
-          return { first: first, last: Math.max(first, last) }
+          return { first: first, last: last }
         })
       }
       /* Deliberately no dependency list: measuring is idempotent and costs two

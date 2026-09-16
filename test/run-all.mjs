@@ -19,6 +19,7 @@ const COUNTING = [
   'gp37-logpanel-test.mjs',
   'gp38-flyout-test.mjs',
   'gp39-session-test.mjs',
+  'gp40-refactor-test.mjs',
 ]
 /* Suites that report by exit code and print their own lines. */
 const PROSE = ['gp34a-host-test.mjs', 'gp34d-config-test.mjs', 'gp34e-bridge-test.mjs']

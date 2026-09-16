@@ -4,7 +4,7 @@ function define(name, definition) {
   definition.name = name
   ctx.effect(function () {
     return harness.registerTool(ctx, harness.defineTool(definition))
-  }, 'gitops tool ' + name)
+  }, 'dsh-git-idea tool ' + name)
 }
 
 define('git', {

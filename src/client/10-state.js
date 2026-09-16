@@ -99,39 +99,14 @@
       }
     }
 
-    /* The plugin answered to "gitops" before it was named dsh-git-idea, and the
-       keys it wrote then are the same preferences this version reads now. A
-       rename must not silently reset someone's panel size, cadence or
-       favourites, so the old key is copied across once, on the first store the
-       page hands over, and only when the new one is still absent. */
-    const STORE_RENAMES = [
-      ['dsh.gitops.settings', 'dsh.git-idea.settings'],
-      ['dsh.gitops.panel', 'dsh.git-idea.panel'],
-      ['dsh.gitops.mru', 'dsh.git-idea.mru'],
-      ['dsh.gitops.stars', 'dsh.git-idea.stars'],
-      ['dsh.gitops.sort', 'dsh.git-idea.sort'],
-    ]
-    let storeMigrated = false
-
     function readStored(key) {
       const store = localStore(null)
       if (store == null) return null
-      let value = null
       try {
-        if (storeMigrated !== true) {
-          storeMigrated = true
-          for (let i = 0; i < STORE_RENAMES.length; i += 1) {
-            const from = STORE_RENAMES[i][0]
-            const to = STORE_RENAMES[i][1]
-            const previous = store.getItem(from)
-            if (previous != null && store.getItem(to) == null) store.setItem(to, previous)
-          }
-        }
-        value = store.getItem(key)
+        return store.getItem(key)
       } catch (error) {
         return null
       }
-      return value
     }
 
     function writeStored(key, value) {

@@ -6,17 +6,17 @@ const fireTimers = () => {
   live.forEach((t) => { t.dead = true; t.cb() })
   return live.length
 }
-const flyPanel = (t) => byClass(t, 'gitops-bs-fly')[0]
+const flyPanel = (t) => byClass(t, 'dsh-git-bs-fly')[0]
 const flyItems = (t) => {
   const fly = flyPanel(t)
   return fly === undefined ? [] : buttons(fly).map(textOf)
 }
 const flyHead = (t) => {
   const fly = flyPanel(t)
-  return fly === undefined ? '' : textOf(byClass(fly, 'gitops-bs-fly-head')[0])
+  return fly === undefined ? '' : textOf(byClass(fly, 'dsh-git-bs-fly-head')[0])
 }
 const listKids = (t) => {
-  const list = byClass(t, 'gitops-bs-list')[0]
+  const list = byClass(t, 'dsh-git-bs-list')[0]
   return list === undefined ? 0 : (list.props.children || []).filter((c) => c != null && typeof c === 'object').length
 }
 const rowEnter = (t, name, top) => rowWith(t, name).props.onMouseEnter({ currentTarget: { offsetTop: top } })
@@ -39,10 +39,10 @@ ok('子菜单挂在列表之外（没有往列表里塞行）', listKids(t) === 
 ok('子菜单标题是悬浮的那个分支', flyHead(t).indexOf('solo') >= 0)
 ok('子菜单里是 IDEA 那套动作', flyItems(t).join('/') === '检出/从此分支新建分支…/合并到当前分支/删除')
 ok('子菜单按行位置定位（offsetTop 60 → top 56px）', flyPanel(t).props.style.top === '56px')
-ok('子菜单在卡片之内（点它不会被当成点外面）', byClass(t, 'gitops-bs').length === 1
-  && collect(byClass(t, 'gitops-bs')[0]).indexOf(flyPanel(t)) >= 0)
-ok('那一行被标成「子菜单属于我」', String(rowWith(t, 'solo').props.className).indexOf('gitops-bs-row-fly') >= 0)
-ok('旧的整行操作条彻底没了', byClass(t, 'gitops-bs-acts').length === 0)
+ok('子菜单在卡片之内（点它不会被当成点外面）', byClass(t, 'dsh-git-bs').length === 1
+  && collect(byClass(t, 'dsh-git-bs')[0]).indexOf(flyPanel(t)) >= 0)
+ok('那一行被标成「子菜单属于我」', String(rowWith(t, 'solo').props.className).indexOf('dsh-git-bs-row-fly') >= 0)
+ok('旧的整行操作条彻底没了', byClass(t, 'dsh-git-bs-acts').length === 0)
 
 console.log('')
 console.log('== 离开：先等一等，走进子菜单就取消关闭 ==')
@@ -75,18 +75,18 @@ console.log('== 悬浮卡片（hover 模式）：走到子菜单上不能把卡�
    在指针底下卸载，点击落到空气上。 */
 async function closePanel() {
   let t = await chipTree()
-  if (t.props.className.indexOf('gitops-chip-open') >= 0) { t.props.onClick(); await wait(10) }
+  if (t.props.className.indexOf('dsh-git-chip-open') >= 0) { t.props.onClick(); await wait(10) }
   return await chipTree()
 }
 await closePanel()
 let chipTreeNow = await chipTree()
-ok('面板已收起，卡片按钮是关的', chipTreeNow.props.className.indexOf('gitops-chip-open') < 0)
+ok('面板已收起，卡片按钮是关的', chipTreeNow.props.className.indexOf('dsh-git-chip-open') < 0)
 chipTreeNow.props.onPointerEnter()
 fireTimers()
 await wait(15)
 let hover = await settle('pop')
-ok('悬浮 chip 后出现 hover 卡片', byClass(hover, 'gitops-switch-hover').length === 1)
-const hoverRows = byClass(hover, 'gitops-bs-row')
+ok('悬浮 chip 后出现 hover 卡片', byClass(hover, 'dsh-git-switch-hover').length === 1)
+const hoverRows = byClass(hover, 'dsh-git-bs-row')
 ok('hover 卡片里有分支行', hoverRows.length > 0)
 hoverRows.find((r) => textOf(r).indexOf('solo') >= 0).props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
 fireTimers()
@@ -95,14 +95,14 @@ hover = await settle('pop')
 ok('hover 卡片里也弹出了子菜单', flyPanel(hover) !== undefined)
 /* 模拟「指针离开卡片、然后进入子菜单」：卡片的收起计时器先安排上，子菜单的
    pointerenter 必须把它清掉。 */
-byClass(hover, 'gitops-switch-hover')[0].props.onPointerLeave()
+byClass(hover, 'dsh-git-switch-hover')[0].props.onPointerLeave()
 ok('离开卡片后有一个待收起的计时器', timers.filter((x) => x.kind === 'timeout' && !x.dead && x.delay === 200).length === 1)
 flyPanel(hover).props.onPointerEnter()
 ok('进入子菜单后那个计时器被清掉了', timers.filter((x) => x.kind === 'timeout' && !x.dead && x.delay === 200).length === 0)
 fireTimers()
 await wait(15)
 hover = await settle('pop')
-ok('因此卡片和子菜单都还在（点击才有落点）', byClass(hover, 'gitops-switch-hover').length === 1 && flyPanel(hover) !== undefined)
+ok('因此卡片和子菜单都还在（点击才有落点）', byClass(hover, 'dsh-git-switch-hover').length === 1 && flyPanel(hover) !== undefined)
 const hoverFly = flyPanel(hover)
 ok('hover 卡片上的子菜单项可以点', buttons(hoverFly).length === 4)
 calls.length = 0
@@ -123,7 +123,7 @@ ok('换成了 zeta 的子菜单', flyHead(t).indexOf('zeta') >= 0)
 console.log('')
 console.log('== 点 › 钉住：鼠标移开也不收 ==')
 const kidsNow = listKids(t)
-const moreBtn = collect(rowWith(t, 'solo')).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('gitops-bs-more') >= 0)
+const moreBtn = collect(rowWith(t, 'solo')).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('dsh-git-bs-more') >= 0)
 moreBtn.props.onClick({ stopPropagation() {}, currentTarget: { offsetTop: 60 } })
 fireTimers()
 await wait(10)
@@ -135,7 +135,7 @@ await wait(10)
 t = await settle('pop')
 ok('钉住之后鼠标移开也不收', flyPanel(t) !== undefined)
 ok('钉住时不会把 list 撑高', listKids(t) === kidsNow)
-const moreBtn2 = collect(rowWith(t, 'solo')).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('gitops-bs-more') >= 0)
+const moreBtn2 = collect(rowWith(t, 'solo')).find((n) => typeof n.props.className === 'string' && n.props.className.indexOf('dsh-git-bs-more') >= 0)
 moreBtn2.props.onClick({ stopPropagation() {}, currentTarget: { offsetTop: 60 } })
 await wait(10)
 t = await settle('pop')
@@ -205,7 +205,7 @@ fireTimers()
 await wait(10)
 t = await settle('pop')
 ok('滚动前是开着的', flyPanel(t) !== undefined)
-byClass(t, 'gitops-bs-list')[0].props.onScroll()
+byClass(t, 'dsh-git-bs-list')[0].props.onScroll()
 await wait(10)
 t = await settle('pop')
 ok('滚动后收起', flyPanel(t) === undefined)

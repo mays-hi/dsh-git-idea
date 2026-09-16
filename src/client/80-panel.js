@@ -397,14 +397,14 @@
 
       const tool = function (key, label, title, onClick, options) {
         const opts = options == null ? {} : options
-        const classes = ['gitops-tool']
-        if (opts.danger === true) classes.push('gitops-danger')
-        if (opts.on === true) classes.push('gitops-tool-on')
+        const classes = ['dsh-git-tool']
+        if (opts.danger === true) classes.push('dsh-git-danger')
+        if (opts.on === true) classes.push('dsh-git-tool-on')
         /* An icon-only tool: same hit area as the labelled ones, no text. */
-        if (opts.ico === true) classes.push('gitops-tool-ico')
+        if (opts.ico === true) classes.push('dsh-git-tool-ico')
         const parts = [label]
         if (typeof opts.badge === 'number' && opts.badge > 0) {
-          parts.push(h('span', { key: 'b', className: 'gitops-tool-badge' }, String(opts.badge)))
+          parts.push(h('span', { key: 'b', className: 'dsh-git-tool-badge' }, String(opts.badge)))
         }
         return h('button', {
           key: key, type: 'button', className: classes.join(' '),
@@ -416,7 +416,7 @@
          beside the branch it acts on — not in the commit graph's own toolbar,
          which is about the selected commit. The middle toolbar keeps only what
          the selection scopes. */
-      const syncGroup = h('div', { className: 'gitops-sync' },
+      const syncGroup = h('div', { className: 'dsh-git-sync' },
         tool('refresh', '⟳', '重新读取仓库（忽略缓存）', refresh, { disabled: !repoOk || busy }),
         tool('fetch', '⇣', 'fetch：从所有远端取回最新引用', function () { runOp('git/fetch') }, { disabled: !repoOk || busy }),
         tool('pull', '↓', 'pull：拉取并合入当前分支', function () { runOp('git/pull') }, { disabled: !repoOk || busy, badge: behind }),
@@ -430,21 +430,21 @@
          the most frequent branch operation there is. */
       const branchChip = h('button', {
         key: 'chip', type: 'button',
-        className: 'gitops-branch-chip' + (switcher === 'panel' ? ' gitops-branch-chip-on' : ''),
+        className: 'dsh-git-branch-chip' + (switcher === 'panel' ? ' dsh-git-branch-chip-on' : ''),
         title: branchTitle + ' · 点击切换分支',
         onClick: function () { setSwitchMode(switcher === 'panel' ? null : 'panel') },
       },
         h(BranchIcon, { key: 'i', size: 13 }),
-        h('span', { key: 'n', className: 'gitops-branch-name' }, currentName.length > 0 ? currentName : 'HEAD'),
-        ahead > 0 ? h('span', { key: 'a', className: 'gitops-ab' }, '↑' + String(ahead)) : null,
-        behind > 0 ? h('span', { key: 'b', className: 'gitops-ab' }, '↓' + String(behind)) : null)
+        h('span', { key: 'n', className: 'dsh-git-branch-name' }, currentName.length > 0 ? currentName : 'HEAD'),
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-ab' }, '↑' + String(ahead)) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-ab' }, '↓' + String(behind)) : null)
 
       /* Inside the header, which spans the panel: the card then starts at the
          panel's left margin however many rows the header wraps to, and there is
          no measured offset to keep in sync. */
       const switchCard = switcher === 'panel'
         ? h('div', {
-            key: 'sw', className: 'gitops-switch gitops-switch-panel',
+            key: 'sw', className: 'dsh-git-switch dsh-git-switch-panel',
             /* The same mark the hover card carries. Without it the card counts as
                "the panel behind the switcher", so pressing a branch row dismissed
                the card on pointerdown and the click never reached the row. */
@@ -466,7 +466,7 @@
          then one search box, then every filter as an inline "name: value"
          trigger that clears itself. No bordered select boxes and no second row,
          so the graph keeps the height that row used to cost. */
-      const lfCaret = h('span', { key: 'c', className: 'gitops-lf-caret' }, h(Icon, { name: 'down', size: 10 }))
+      const lfCaret = h('span', { key: 'c', className: 'dsh-git-lf-caret' }, h(Icon, { name: 'down', size: 10 }))
       /* A native select is as wide as its WIDEST option, not the value it is
          showing: with the arrow suppressed that left "作者：mays" floating in a
          112px box with the caret and the × parked at the far end. Sizing the
@@ -481,7 +481,7 @@
       const lfWidth = function (label) { return { width: String(labelWidth(label)) + 'px' } }
       const lfClear = function (key, name, onClear) {
         return h('button', {
-          key: key, type: 'button', className: 'gitops-lf-x', title: '清除' + name + '筛选',
+          key: key, type: 'button', className: 'dsh-git-lf-x', title: '清除' + name + '筛选',
           onClick: function (event) {
             stopEvent(event)
             /* The trigger is a <label> around a <select>: without preventDefault
@@ -494,12 +494,12 @@
       }
 
       const searchBox = h('div', {
-        key: 'search', className: 'gitops-logsearch',
+        key: 'search', className: 'dsh-git-logsearch',
         title: '按提交信息筛选（字面量匹配），回车生效',
       },
-        h('span', { key: 'i', className: 'gitops-logsearch-ico' }, h(Icon, { name: 'search', size: 13 })),
+        h('span', { key: 'i', className: 'dsh-git-logsearch-ico' }, h(Icon, { name: 'search', size: 13 })),
         h('input', {
-          key: 'q', className: 'gitops-logsearch-input',
+          key: 'q', className: 'dsh-git-logsearch-input',
           placeholder: '搜索提交信息…',
           value: searchDraft,
           onChange: function (event) { setSearchDraft(event.target.value) },
@@ -508,7 +508,7 @@
         /* Shown as soon as there is anything to clear, applied or not: the box
            holds the draft, so an un-applied query is still one click from gone. */
         searchDraft.length > 0 || search.length > 0 ? h('button', {
-          key: 'x', type: 'button', className: 'gitops-logsearch-x', title: '清空搜索',
+          key: 'x', type: 'button', className: 'dsh-git-logsearch-x', title: '清空搜索',
           onClick: function () { setSearchDraft(''); setSearch('') },
         }, '×') : null)
 
@@ -518,11 +518,11 @@
       }
       const branchScoped = allRefs || activeRef.length > 0
       const branchFilter = h('label', {
-        key: 'f:branch', className: 'gitops-lf gitops-lf-on', title: '分支范围：历史只显示这个分支能到达的提交',
+        key: 'f:branch', className: 'dsh-git-lf dsh-git-lf-on', title: '分支范围：历史只显示这个分支能到达的提交',
       },
-        h('span', { key: 'k', className: 'gitops-lf-k' }, '分支：'),
+        h('span', { key: 'k', className: 'dsh-git-lf-k' }, '分支：'),
         h('select', {
-          key: 's', className: 'gitops-lf-select', style: lfWidth(branchLabel), value: branchValue,
+          key: 's', className: 'dsh-git-lf-select', style: lfWidth(branchLabel), value: branchValue,
           onChange: function (event) {
             const next = event.target.value
             setSelectedKey(null)
@@ -542,11 +542,11 @@
 
       const authorOn = author.length > 0
       const authorFilter = h('label', {
-        key: 'f:author', className: 'gitops-lf' + (authorOn ? ' gitops-lf-on' : ''), title: '作者',
+        key: 'f:author', className: 'dsh-git-lf' + (authorOn ? ' dsh-git-lf-on' : ''), title: '作者',
       },
-        authorOn ? h('span', { key: 'k', className: 'gitops-lf-k' }, '作者：') : null,
+        authorOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '作者：') : null,
         h('select', {
-          key: 's', className: 'gitops-lf-select', value: author,
+          key: 's', className: 'dsh-git-lf-select', value: author,
           style: lfWidth(authorLabels[author] !== undefined ? authorLabels[author] : '作者'),
           onChange: function (event) { setAuthor(event.target.value) },
         }, authorOptions),
@@ -559,11 +559,11 @@
       }
       const dateOn = datePreset !== 'all'
       const dateFilter = h('label', {
-        key: 'f:date', className: 'gitops-lf' + (dateOn ? ' gitops-lf-on' : ''), title: '时间范围',
+        key: 'f:date', className: 'dsh-git-lf' + (dateOn ? ' dsh-git-lf-on' : ''), title: '时间范围',
       },
-        dateOn ? h('span', { key: 'k', className: 'gitops-lf-k' }, '时间：') : null,
+        dateOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '时间：') : null,
         h('select', {
-          key: 's', className: 'gitops-lf-select', value: datePreset,
+          key: 's', className: 'dsh-git-lf-select', value: datePreset,
           style: lfWidth(dateLabel),
           onChange: function (event) { setDatePreset(event.target.value) },
         }, DATE_PRESETS.map(function (preset) {
@@ -575,11 +575,11 @@
 
       const pathOn = pathDraft.length > 0 || pathFilter.length > 0
       const pathFilterNode = h('label', {
-        key: 'f:path', className: 'gitops-lf' + (pathOn ? ' gitops-lf-on' : ''), title: '只看某个路径的历史，回车生效',
+        key: 'f:path', className: 'dsh-git-lf' + (pathOn ? ' dsh-git-lf-on' : ''), title: '只看某个路径的历史，回车生效',
       },
-        pathOn ? h('span', { key: 'k', className: 'gitops-lf-k' }, '路径：') : null,
+        pathOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '路径：') : null,
         h('input', {
-          key: 'i', className: 'gitops-lf-input',
+          key: 'i', className: 'dsh-git-lf-input',
           /* Grows with what is typed, so a draft never scrolls inside 44px. */
           style: { width: String(Math.min(110, Math.max(pathOn ? 40 : 46, 24 + pathDraft.length * 6))) + 'px' },
           placeholder: pathOn ? '' : '路径',
@@ -592,7 +592,7 @@
         }),
         pathOn ? lfClear('x', '路径', function () { setPathDraft(''); setPathFilter('') }) : null)
 
-      const toolbar = h('div', { className: 'gitops-tools' },
+      const toolbar = h('div', { className: 'dsh-git-tools' },
         tool('pick', h(Icon, { name: 'pick', size: 15 }), '拣选：cherry-pick，把这个提交应用到当前分支',
           function () {
             runOp('git/sequence', {
@@ -610,23 +610,23 @@
         tool('branch', h(BranchIcon, { size: 15 }), '分支：从这个提交新建分支并切过去',
           function () { setArmed(''); setPrompt({ kind: 'branch', value: '' }) },
           { disabled: !canAct, ico: true }),
-        h('span', { key: 'sep', className: 'gitops-tsep' }),
+        h('span', { key: 'sep', className: 'dsh-git-tsep' }),
         searchBox,
         branchFilter,
         authorFilter,
         dateFilter,
         pathFilterNode,
         filterCount >= 2 ? h('button', {
-          key: 'clear', type: 'button', className: 'gitops-lclear', title: '清除全部筛选',
+          key: 'clear', type: 'button', className: 'dsh-git-lclear', title: '清除全部筛选',
           onClick: function () { resetFilters() },
         }, '全部清除') : null,
-        h('span', { key: 'count', className: 'gitops-count gitops-dim' },
+        h('span', { key: 'count', className: 'dsh-git-count dsh-git-dim' },
           String(commitCount) + (hasFilter ? ' 条匹配' : ' 条')))
 
-      const promptRow = prompt === null ? null : h('div', { className: 'gitops-prompt' },
-        h('span', { key: 'l', className: 'gitops-hint' }, prompt.kind === 'tag' ? '标签名' : '新分支名'),
+      const promptRow = prompt === null ? null : h('div', { className: 'dsh-git-prompt' },
+        h('span', { key: 'l', className: 'dsh-git-hint' }, prompt.kind === 'tag' ? '标签名' : '新分支名'),
         clearable('i', h('input', {
-          key: 'i', className: 'gitops-input', autoFocus: true, value: prompt.value,
+          key: 'i', className: 'dsh-git-input', autoFocus: true, value: prompt.value,
           placeholder: prompt.kind === 'tag' ? '例如 v1.0.0' : '例如 feature/login',
           onChange: function (event) { setPrompt({ kind: prompt.kind, value: event.target.value }) },
           onKeyDown: function (event) {
@@ -635,11 +635,11 @@
           },
         }), prompt.value.length > 0, function () { setPrompt({ kind: prompt.kind, value: '' }) }),
         h('button', {
-          key: 'ok', type: 'button', className: 'gitops-btn gitops-primary',
+          key: 'ok', type: 'button', className: 'dsh-git-btn dsh-git-primary',
           disabled: prompt.value.trim().length === 0, onClick: submitPrompt,
         }, '创建'),
         h('button', {
-          key: 'no', type: 'button', className: 'gitops-btn',
+          key: 'no', type: 'button', className: 'dsh-git-btn',
           onClick: function () { setPrompt(null) },
         }, '取消'))
 
@@ -649,8 +649,8 @@
         setArmed('')
         runOp('git/sequence', { op: sequencer, action: 'abort' })
       }
-      const banner = sequencer.length === 0 ? null : h('div', { className: 'gitops-banner' },
-        h('span', { key: 't', className: 'gitops-banner-text' },
+      const banner = sequencer.length === 0 ? null : h('div', { className: 'dsh-git-banner' },
+        h('span', { key: 't', className: 'dsh-git-banner-text' },
           '正在' + seqLabel + '：' + (conflicts > 0 ? String(conflicts) + ' 个文件冲突' : '等待提交')),
         tool('seq-cont', sequencer === 'merge' ? '提交合并' : '继续',
           sequencer === 'merge' ? '冲突解决并暂存后提交这次合并' : '冲突解决并暂存后继续',
@@ -665,46 +665,46 @@
               function () { setArmed('abort') }, { disabled: busy }))
 
       const upstreamHint = needsUpstream && refs != null && refs.ok === true && refs.remote.length > 0
-        ? h('div', { className: 'gitops-prompt' },
-            h('span', { key: 'l', className: 'gitops-hint' }, '这个分支还没有上游'),
+        ? h('div', { className: 'dsh-git-prompt' },
+            h('span', { key: 'l', className: 'dsh-git-hint' }, '这个分支还没有上游'),
             h('button', {
-              key: 'u', type: 'button', className: 'gitops-btn gitops-primary', disabled: busy,
+              key: 'u', type: 'button', className: 'dsh-git-btn dsh-git-primary', disabled: busy,
               onClick: function () {
                 runOp('git/push', { setUpstream: true, remote: refs.remote[0].name, branch: currentName })
               },
             }, '推送并设为上游'),
-            h('button', { key: 'n', type: 'button', className: 'gitops-btn', onClick: function () { setNeedsUpstream(false) } }, '忽略'))
+            h('button', { key: 'n', type: 'button', className: 'dsh-git-btn', onClick: function () { setNeedsUpstream(false) } }, '忽略'))
         : null
 
       const shownRef = allRefs ? '' : (activeRef.length > 0 ? activeRef : (graph != null && graph.ok === true ? text(graph.ref) : ''))
       const effectiveSelection = selectedKey !== null ? selectedKey : shownRef
 
-      const header = h('div', { className: 'gitops-top' },
-        h('span', { className: 'gitops-title' }, 'Git'),
+      const header = h('div', { className: 'dsh-git-top' },
+        h('span', { className: 'dsh-git-title' }, 'Git'),
         needsSetup
-          ? h('span', { className: 'gitops-hint' }, '未检测到仓库')
-          : h('div', { className: 'gitops-tabs' },
-              h('button', { type: 'button', className: 'gitops-tab' + (tab === 'changes' ? ' gitops-tab-on' : ''),
+          ? h('span', { className: 'dsh-git-hint' }, '未检测到仓库')
+          : h('div', { className: 'dsh-git-tabs' },
+              h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'changes' ? ' dsh-git-tab-on' : ''),
                 onClick: function () { setTab('changes') } }, '变更'),
-              h('button', { type: 'button', className: 'gitops-tab' + (tab === 'log' ? ' gitops-tab-on' : ''),
+              h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'log' ? ' dsh-git-tab-on' : ''),
                 onClick: function () { setTab('log') } }, '历史')),
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
-        h('span', { key: 'grow', className: 'gitops-grow' }),
+        h('span', { key: 'grow', className: 'dsh-git-grow' }),
         needsSetup ? null : clearable('repo', h('input', {
-          className: 'gitops-input gitops-repo-path',
+          className: 'dsh-git-input dsh-git-repo-path',
           placeholder: '仓库路径（留空用会话工作区）',
           value: repoPath,
           onChange: function (event) { setRepoPath(event.target.value) },
           onKeyDown: function (event) { if (event.key === 'Enter') applyRepo(repoPath.trim()) },
-        }), repoPath.length > 0, function () { setRepoPath(''); applyRepo('') }, 'gitops-clearable-path'),
-        needsSetup ? null : h('button', { type: 'button', className: 'gitops-btn',
+        }), repoPath.length > 0, function () { setRepoPath(''); applyRepo('') }, 'dsh-git-clearable-path'),
+        needsSetup ? null : h('button', { type: 'button', className: 'dsh-git-btn',
           onClick: function () { applyRepo(repoPath.trim()) } }, '应用'),
         switchCard)
 
       let body
       if (work == null) {
-        body = h('div', { className: 'gitops-pane gitops-dim' }, '正在读取仓库…')
+        body = h('div', { className: 'dsh-git-pane dsh-git-dim' }, '正在读取仓库…')
       } else if (needsSetup) {
         body = h(RepoSetup, {
           key: 'setup:' + appliedRepo + '|' + text(work.repo),
@@ -736,14 +736,14 @@
           onCommit: commit,
         })
       } else {
-        body = h('div', { className: 'gitops-body' },
-          h('div', { className: 'gitops-left' },
+        body = h('div', { className: 'dsh-git-body' },
+          h('div', { className: 'dsh-git-left' },
             h(RefTree, {
               refs: refs, collapsed: collapsed, selectedKey: effectiveSelection,
               onToggle: toggle, onSelect: function (key) { setSelectedKey(key) },
               onPick: function (name) { setAllRefs(false); setActiveRef(name) }, activeRef: shownRef,
             })),
-          h('div', { className: 'gitops-main' },
+          h('div', { className: 'dsh-git-main' },
             toolbar,
             promptRow,
             upstreamHint,
@@ -755,22 +755,22 @@
       }
 
       const popProps = {
-        className: 'gitops-pop' + (props.active === true ? '' : ' gitops-hidden')
-          + (switcher === 'panel' ? ' gitops-pop-overflow' : ''),
+        className: 'dsh-git-pop' + (props.active === true ? '' : ' dsh-git-hidden')
+          + (switcher === 'panel' ? ' dsh-git-pop-overflow' : ''),
         ref: function (node) { panelNode = node },
       }
       if (size.w > 0) popProps.style = { width: size.w + 'px', left: '50%', right: 'auto', transform: 'translateX(-50%)' }
       if (size.h > 0) popProps.style = Object.assign({}, popProps.style, { height: size.h + 'px' })
 
       return h('div', popProps,
-        h('div', { key: 'gn', className: 'gitops-grip gitops-grip-n', title: '拖动调整高度', onPointerDown: startDrag('n') }),
-        h('div', { key: 'gw', className: 'gitops-grip gitops-grip-w', title: '拖动调整宽度', onPointerDown: startDrag('w') }),
-        h('div', { key: 'ge', className: 'gitops-grip gitops-grip-e', title: '拖动调整宽度', onPointerDown: startDrag('e') }),
-        h('div', { key: 'gnw', className: 'gitops-grip gitops-grip-nw', title: '拖动调整宽高', onPointerDown: startDrag('nw') }),
-        h('div', { key: 'gne', className: 'gitops-grip gitops-grip-ne', title: '拖动调整宽高', onPointerDown: startDrag('ne') }),
+        h('div', { key: 'gn', className: 'dsh-git-grip dsh-git-grip-n', title: '拖动调整高度', onPointerDown: startDrag('n') }),
+        h('div', { key: 'gw', className: 'dsh-git-grip dsh-git-grip-w', title: '拖动调整宽度', onPointerDown: startDrag('w') }),
+        h('div', { key: 'ge', className: 'dsh-git-grip dsh-git-grip-e', title: '拖动调整宽度', onPointerDown: startDrag('e') }),
+        h('div', { key: 'gnw', className: 'dsh-git-grip dsh-git-grip-nw', title: '拖动调整宽高', onPointerDown: startDrag('nw') }),
+        h('div', { key: 'gne', className: 'dsh-git-grip dsh-git-grip-ne', title: '拖动调整宽高', onPointerDown: startDrag('ne') }),
         header,
         banner,
-        error !== null ? h('div', { className: 'gitops-error', style: { padding: '4px 10px' } }, error) : null,
+        error !== null ? h('div', { className: 'dsh-git-error', style: { padding: '4px 10px' } }, error) : null,
         body)
     }
 
