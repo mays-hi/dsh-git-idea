@@ -540,4 +540,35 @@ const failedCard = await settle('pop')
 ok('失败之后卡片仍在原地（错误不会被丢掉）', byClass(failedCard, 'dsh-git-switch-hover').length === 1)
 ok('错误信息看得见', textOf(failedCard).indexOf('overwritten') >= 0)
 ok('并且给出「先暂存再切」的补救按钮', buttons(failedCard).some((b) => textOf(b).indexOf('先暂存') >= 0))
+
+/* 另一种失败：git 报的是 Permission denied，而真正的原因是文件沙箱不允许写这个
+   仓库（.git/index.lock 建不出来）。读者得能分清「我的仓库坏了」和「沙箱不让写」。 */
+let denied = null
+host.call = function (method, args) {
+  if (method === 'git/checkout') {
+    calls.push({ method, args })
+    return Promise.resolve({
+      ok: false, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, sandboxDenied: true,
+      stdout: '', stderr: "fatal: Unable to create '/mnt/d/work/idea_work/holox_cloud/.git/index.lock': Permission denied",
+      exitCode: 1,
+    })
+  }
+  return plainCheckout.call(host, method, args)
+}
+let deniedTree = await settle('pop')
+const deniedFly = flyPanel(deniedTree)
+byClass(deniedTree, 'dsh-git-bs-row').find((r) => textOf(r).indexOf('zeta') >= 0).props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
+fireTimers()
+await wait(15)
+deniedTree = await settle('pop')
+const deniedRow = flyPanel(deniedTree)
+if (deniedRow !== undefined) {
+  buttons(deniedRow).find((b) => textOf(b) === '检出').props.onClick({ stopPropagation() {} })
+  await wait(20)
+  denied = await settle('pop')
+}
+console.log('  卡片里看到的错误:', JSON.stringify(textOf(denied === null ? deniedTree : denied).slice(0, 120)))
+ok('沙箱拒绝时，卡片说的是沙箱不允许写，而不是仓库有问题',
+  denied !== null && textOf(denied).indexOf('文件沙箱不允许写这个仓库') >= 0)
+ok('git 的原话也还在（读者能自查）', denied !== null && textOf(denied).indexOf('index.lock') >= 0)
 host.call = plainCheckout

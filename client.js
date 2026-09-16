@@ -1662,8 +1662,14 @@ textarea.dsh-git-input{resize:vertical}
     function commandDetail(result) {
       if (result == null) return ''
       const err = text(result.stderr).replace(/\s+$/, '')
-      if (err.length > 0) return err.slice(0, 400)
-      return text(result.stdout).replace(/\s+$/, '').slice(0, 400)
+      const detail = err.length > 0 ? err.slice(0, 400) : text(result.stdout).replace(/\s+$/, '').slice(0, 400)
+      /* git says "Unable to create ... .git/index.lock: Permission denied", which
+         reads as a broken repository. It is the file sandbox refusing the write,
+         and the reader can act on that (widen the session's file policy, or move
+         the workspace) — so say it, and keep git's own line underneath. */
+      if (result.sandboxDenied !== true) return detail
+      const why = '文件沙箱不允许写这个仓库：读取没问题，暂存、提交、切换、初始化这类写操作需要这个目录在会话的可写范围内。'
+      return detail.length > 0 ? why + '\n' + detail : why
     }
 
     function branchRelative(seconds) {

@@ -238,3 +238,70 @@ check('refs 带上上游名', aheadOne !== undefined && aheadOne.upstream.length
 check('refs 带上领先/落后', aheadOne.ahead === 1 && behindOne.behind === 1)
 check('refs 带上最后提交时间', typeof aheadOne.at === 'number' && aheadOne.at > 0)
 if (searchOk !== true) process.exit(1)
+
+console.log('')
+console.log('=== 写操作跑在谁的沙箱里 ===')
+/* 不带策略的 shell 调用拿到的是**部署默认**（实测：workspace-write，root 是部署
+   自己的目录），不是这个会话的策略 —— 实测里会话是 danger-full-access。于是任何
+   写操作（git 要建 .git/index.lock）在别的目录上都被拒，而读一切正常。 */
+const specs = []
+const fakePolicy = { calls: 0, resolve(request) { this.calls += 1; return { mode: 'danger-full-access', workspaceRoot: '/home/mayou/work/dsh-git-map', sessionId: request.session != null ? request.session.id : undefined } } }
+const fakeSessions = { get(id) { return id === 's-known' ? { id: id, header: { cwd: '/tmp/gp41-one-dir' } } : null } }
+const handlers2 = new Map()
+const ctx2 = {
+  get: (n) => {
+    if (n === 'shell') return { resolve: (r) => r, run: async (spec) => { specs.push(spec); return { exitCode: 0, stdout: { text: '' }, stderr: { text: '' } } } }
+    if (n === 'sandboxPolicy') return fakePolicy
+    if (n === 'sessions') return fakeSessions
+    return undefined
+  },
+  effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
+}
+const harness2 = { defineTool: d => d, registerTool: () => () => {}, handle(n, f) { handlers2.set(n, f); return () => {} } }
+new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
+  ctx2, harness2, console, s => Buffer.from(s, 'binary').toString('base64'),
+  s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx2)
+const H2 = n => handlers2.get(n)
+
+await H2('git/flush')({ repo: '/tmp/gp41-one-dir' })
+await H2('git/panel')({ repo: '/tmp/gp41-one-dir', quick: true, sessionId: 's-known' })
+const withSession = specs[specs.length - 1].sandboxPolicy
+console.log('  带 sessionId 的请求 →', JSON.stringify(withSession))
+check('请求带上了那个会话解析出来的沙箱策略',
+  withSession !== undefined && withSession.mode === 'danger-full-access' && withSession.sessionId === 's-known')
+
+specs.length = 0
+await H2('git/flush')({ repo: '/tmp/gp41-one-dir' })
+await H2('git/panel')({ repo: '/tmp/gp41-one-dir', quick: true, sessionId: 's-unknown' })
+check('会话找不到时不硬编一个策略（交回 shell 层回落）', specs[specs.length - 1].sandboxPolicy === undefined)
+
+specs.length = 0
+await H2('git/flush')({ repo: '/tmp/gp41-one-dir' })
+await H2('git/panel')({ repo: '/tmp/gp41-one-dir', quick: true })
+check('完全没有 sessionId 时也一样不编', specs[specs.length - 1].sandboxPolicy === undefined)
+
+/* 被沙箱拒了要和「仓库有问题」分开说 */
+specs.length = 0
+const previousRun = ctx2.get
+const handlers3 = new Map()
+const ctx3 = {
+  get: (n) => {
+    if (n === 'shell') {
+      return {
+        resolve: (r) => r,
+        run: async () => ({ exitCode: 1, stdout: { text: '' }, stderr: { text: "fatal: Unable to create '/x/.git/index.lock': Permission denied" }, sandbox: { mode: 'workspace-write', denied: true } }),
+      }
+    }
+    if (n === 'sandboxPolicy' || n === 'sessions') return undefined
+    return undefined
+  },
+  effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
+}
+const harness3 = { defineTool: d => d, registerTool: () => () => {}, handle(n, f) { handlers3.set(n, f); return () => {} } }
+new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
+  ctx3, harness3, console, s => Buffer.from(s, 'binary').toString('base64'),
+  s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx3)
+const denied = await handlers3.get('git/stage')({ repo: '/x', paths: ['a.txt'] })
+console.log('  被拒的答复:', JSON.stringify({ ok: denied.ok, sandboxDenied: denied.sandboxDenied, stderr: denied.stderr.slice(0, 40) }))
+check('被沙箱拒绝时答复里明说是沙箱拒绝的', denied.ok !== true && denied.sandboxDenied === true)
+check('git 的原话也还在', denied.stderr.indexOf('index.lock') >= 0)

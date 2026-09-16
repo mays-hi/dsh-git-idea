@@ -36,6 +36,40 @@ function here(args, exec) {
   return cwd === undefined ? null : cwd
 }
 
+/* ── whose sandbox these commands run under ──
+
+   A shell call that names no policy gets the *deployment* default, not the
+   session's. Measured on this deployment: the default is `workspace-write` rooted
+   at the deployment's own directory (/mnt/c/Users/mayou here) while the session is
+   `danger-full-access` — so every writing git command failed with "Permission
+   denied" on `.git/index.lock` for any repository outside that one directory,
+   while reads were fine and it looked like git refusing to work.
+
+   The session's mode and its cwd are exactly what the reader's own commands run
+   under, so they are what this plugin asks for: `sessions` says which session,
+   `sandboxPolicy` says what that session resolved to, and a session that is
+   read-only keeps this plugin read-only. Without either service the request goes
+   out unchanged and the shell layer falls back as before. */
+function sandboxFor(args, exec) {
+  const policy = ctx.get('sandboxPolicy')
+  if (policy === undefined) return undefined
+  let session = null
+  try {
+    if (exec != null && exec.agent != null && exec.agent.session != null) {
+      session = exec.agent.session
+    } else if (args != null && isStr(args.sessionId) && args.sessionId.length > 0) {
+      const sessions = ctx.get('sessions')
+      if (sessions !== undefined) session = sessions.get(args.sessionId)
+    }
+    if (session == null) return undefined
+    const resolved = policy.resolve({ session: session })
+    return resolved == null ? undefined : resolved
+  } catch (error) {
+    console.error('dsh-git-idea: could not resolve this session\'s sandbox policy', String(error))
+    return undefined
+  }
+}
+
 async function invoke(command, args, exec, options) {
   const opts = options == null ? {} : options
   const request = {
@@ -46,6 +80,8 @@ async function invoke(command, args, exec, options) {
   const workdir = workdirFor(args, exec)
   if (workdir !== undefined) request.workdir = workdir
   if (isStr(opts.stdin)) request.stdin = opts.stdin
+  const sandbox = sandboxFor(args, exec)
+  if (sandbox !== undefined) request.sandboxPolicy = sandbox
   const raw = await shell.run(shell.resolve(request))
   const out = raw.stdout == null ? null : raw.stdout
   const err = raw.stderr == null ? null : raw.stderr
@@ -981,9 +1017,14 @@ function repoFrom(input, exec) {
   return undefined
 }
 
+/* Which repository, and on whose behalf. The session id travels with the args so
+   the shell layer can ask for that session's sandbox policy — it is the only
+   thing that says whether these commands may write at all (see `sandboxFor`). */
 function argsFor(input) {
   const repo = repoFrom(input, null)
-  return repo === undefined ? {} : { repo: repo }
+  const out = repo === undefined ? {} : { repo: repo }
+  if (input != null && isStr(input.sessionId) && input.sessionId.length > 0) out.sessionId = input.sessionId
+  return out
 }
 
 /* ─────────────── per-repository read cache ───────────────
@@ -1056,6 +1097,7 @@ function baseWorkdir(input) {
 async function probeShell(input, command) {
   const workdir = baseWorkdir(input)
   const args = workdir === undefined ? {} : { repo: workdir }
+  if (input != null && isStr(input.sessionId) && input.sessionId.length > 0) args.sessionId = input.sessionId
   return await invoke(command, args, null, { timeoutMs: 20000 })
 }
 
@@ -1600,6 +1642,7 @@ async function switchBranch(input, name) {
     out.stderr = result.stderr
     out.exitCode = result.exitCode
     out.command = result.command
+    out.sandboxDenied = result.sandboxDenied === true
     return out
   }
 
@@ -1733,6 +1776,9 @@ async function panelMutate(input, argv, options) {
   return {
     ok: result.exitCode === 0, repo: result.cwd, stdout: result.stdout,
     stderr: result.stderr, exitCode: result.exitCode, command: result.command,
+    /* Says outright that the file sandbox refused the write, so the reader is not
+       left reading git's "Permission denied" as a problem with their repository. */
+    sandboxDenied: result.sandboxDenied === true,
   }
 }
 

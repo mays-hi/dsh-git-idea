@@ -20,9 +20,14 @@ function repoFrom(input, exec) {
   return undefined
 }
 
+/* Which repository, and on whose behalf. The session id travels with the args so
+   the shell layer can ask for that session's sandbox policy — it is the only
+   thing that says whether these commands may write at all (see `sandboxFor`). */
 function argsFor(input) {
   const repo = repoFrom(input, null)
-  return repo === undefined ? {} : { repo: repo }
+  const out = repo === undefined ? {} : { repo: repo }
+  if (input != null && isStr(input.sessionId) && input.sessionId.length > 0) out.sessionId = input.sessionId
+  return out
 }
 
 /* ─────────────── per-repository read cache ───────────────
@@ -95,6 +100,7 @@ function baseWorkdir(input) {
 async function probeShell(input, command) {
   const workdir = baseWorkdir(input)
   const args = workdir === undefined ? {} : { repo: workdir }
+  if (input != null && isStr(input.sessionId) && input.sessionId.length > 0) args.sessionId = input.sessionId
   return await invoke(command, args, null, { timeoutMs: 20000 })
 }
 
@@ -639,6 +645,7 @@ async function switchBranch(input, name) {
     out.stderr = result.stderr
     out.exitCode = result.exitCode
     out.command = result.command
+    out.sandboxDenied = result.sandboxDenied === true
     return out
   }
 
@@ -772,6 +779,9 @@ async function panelMutate(input, argv, options) {
   return {
     ok: result.exitCode === 0, repo: result.cwd, stdout: result.stdout,
     stderr: result.stderr, exitCode: result.exitCode, command: result.command,
+    /* Says outright that the file sandbox refused the write, so the reader is not
+       left reading git's "Permission denied" as a problem with their repository. */
+    sandboxDenied: result.sandboxDenied === true,
   }
 }
 

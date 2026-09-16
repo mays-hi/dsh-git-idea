@@ -29,7 +29,7 @@ bridge.log           （运行时生成）桥每次装载 Host 半侧的结果
 ```sh
 node build.mjs            # 重新生成 host.js / client.js
 node build.mjs --check    # 只检查产物是不是最新的（测试跑之前会先查这个）
-node test/run-all.mjs     # 全部套件（385 条断言）
+node test/run-all.mjs     # 全部套件（392 条断言）
 node test/bench.mjs       # 性能基准：200 个提交的历史列表
 node test/bench-branch.mjs# 性能基准：300 个分支的切换器
 node test/bench-watch.mjs # 性能基准：轮询签名的代价（新旧对比）
@@ -99,6 +99,26 @@ Client（`src/client/`）：
 只有 `models` / `agent-presets` / `plugins` 有专属字形，其余（包括我们）都退回
 齿轮，而注册选项只有 `id` / `order` / `label`，没有图标这一项。**不绕路去改它** ——
 把外壳自己那棵树里的字形换掉不是插件该做的事；等外壳支持了再说。
+
+## 写操作跑在谁的沙箱里
+
+插件的 git 命令走会话的 shell 服务。**不声明策略的调用拿到的是部署默认，不是当前
+会话的策略** —— 本机上实测：部署默认是 `workspace-write`，可写根是
+`/mnt/c/Users/mayou`（dsh 进程的 cwd），而这个会话本身是 `danger-full-access`。
+后果很具体：任何写操作（`git` 要建 `.git/index.lock`）在别的目录上都被拒，报的是
+git 的 `Permission denied`，读一切正常 —— 看起来像仓库有问题，其实是沙箱。
+
+所以 `invoke()` 现在按会话解析策略再发出（`sessions` 找到会话、`sandboxPolicy` 解析
+出该会话的 mode 与 cwd），和读者自己的命令跑在同一个沙箱里：会话是只读，插件就是
+只读；会话是 danger-full-access，插件就能写它被指到的那个仓库。同一台机器上量的：
+
+| 同一条写命令（在 /mnt/d 的仓库里建 .git 下的文件） | 结果 |
+|---|---|
+| 不带策略（部署默认 workspace-write） | exit=1，`denied:true`，Permission denied |
+| 带上会话解析出来的策略（danger-full-access） | exit=0，`denied:false` |
+
+策略仍然可能拒绝（会话本来就是更严的模式），那时答复里带 `sandboxDenied: true`，
+面板说的是「文件沙箱不允许写这个仓库」，git 的原话留在下面 —— 不是「你的仓库坏了」。
 
 ## 一个工作区就是一个目录
 
