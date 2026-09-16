@@ -594,10 +594,17 @@ ok('点开目录里的文件就是它的差异', diffCalls.length - beforeChildD
 toolByTitle(tree, '返回文件列表').props.onClick()
 await wait(10)
 tree = await settle()
-const deepRow = changeRow(tree, 'deep/b.txt')
-ok('多层子路径也照常显示', deepRow !== undefined)
+const deepRow = changeRow(tree, 'b.txt')
+const deepName = deepRow === undefined ? undefined : byClass(deepRow, 'dsh-git-tname')[0]
+const deepPath = deepRow === undefined ? undefined : byClass(deepRow, 'dsh-git-tpath')[0]
+/* 未跟踪目录里的列表是扁平的，所以带层级的那一个显示成「名字 + 目录」：名字在
+   前，目录在后（深浅两层都一样）。 */
+ok('多层子路径也照常显示，目录跟在名字后面',
+  deepName !== undefined && textOf(deepName).indexOf('b.txt') === 0
+  && deepPath !== undefined && textOf(deepPath) === 'deep/')
 const beforeChildStage = calls.length
-byClass(deepRow, 'dsh-git-cbox')[0].props.onClick({ stopPropagation: function () {} })
+const deepBox = deepRow === undefined ? undefined : byClass(deepRow, 'dsh-git-cbox')[0]
+if (deepBox !== undefined) deepBox.props.onClick({ stopPropagation: function () {} })
 await wait(10)
 tree = await settle()
 ok('子行的勾选框暂存的是那个文件本身',
@@ -605,7 +612,8 @@ ok('子行的勾选框暂存的是那个文件本身',
 
 const beforeDirStage = calls.length
 const dirAgain = changeRow(tree, 'newdir/')
-byClass(dirAgain, 'dsh-git-cbox')[0].props.onClick({ stopPropagation: function () {} })
+const dirBox = dirAgain === undefined ? undefined : byClass(dirAgain, 'dsh-git-cbox')[0]
+if (dirBox !== undefined) dirBox.props.onClick({ stopPropagation: function () {} })
 await wait(10)
 await settle()
 ok('目录那一行的勾选框暂存整个目录（git add -- dir 不需要先列出内容）',
@@ -804,7 +812,7 @@ if (typeof doubleRow.props.onDoubleClick === 'function') doubleRow.props.onDoubl
 await wait(10)
 tree = await settle()
 ok('双击未跟踪目录：这才读一次目录内容', dirReads() - beforeDouble === 1)
-ok('双击未跟踪目录：文件列出来了', changeRow(tree, 'a.txt') !== undefined && changeRow(tree, 'deep/b.txt') !== undefined)
+ok('双击未跟踪目录：文件列出来了', changeRow(tree, 'a.txt') !== undefined && changeRow(tree, 'b.txt') !== undefined)
 
 /* 8g. 再展开一次会重新读：暂存/提交之后那份列表就是会变的东西 */
 byClass(newdirRow(tree), 'dsh-git-tw')[0].props.onClick({ stopPropagation: function () {} })
@@ -884,7 +892,7 @@ try {
   afterCrash = error
 }
 ok('读回来之后文件行照常出现（那一帧只是中间态，不是终点）',
-  afterCrash === null && changeRow(tree, 'a.txt') !== undefined && changeRow(tree, 'deep/b.txt') !== undefined)
+  afterCrash === null && changeRow(tree, 'a.txt') !== undefined && changeRow(tree, 'b.txt') !== undefined)
 
 /* ── 10. 两个分组，两个视图 ──
 
@@ -894,7 +902,11 @@ ok('读回来之后文件行照常出现（那一帧只是中间态，不是终�
    是去读每一行的状态字母。
 
    另一条轴是 IDEA 的另一个开关：按目录折叠的树，还是每个文件一行的扁平列表。同一批
-   行、同样的框、同样的手势，差别只在标签和缩进（扁平视图按路径排序）。 */
+   行、同样的框、同样的手势，差别只在标签和缩进（扁平视图按路径排序）。
+
+   这一节还钉住两件后来改掉的事：扁平行里**文件名排在目录前面**（`.../impl/` 那样的
+   长路径先出现的话，行尾裁掉的正好是文件名），以及那个开关**住在面板头部**、只在变更
+   页出现 —— 它以前在列表上方单独占一行，两个词花掉列表一整行的高度。 */
 
 console.log('')
 console.log('== 两组：默认变更列表 / 未跟踪的文件 ==')
@@ -953,21 +965,53 @@ const press = function (node, name, extra) {
 ok('工具条上有两个视图按钮', viewBtn(tree, '树') !== undefined && viewBtn(tree, '扁平') !== undefined)
 ok('默认是树视图（src/ 带条数的那一行在）',
   trackedDirRow(tree) !== undefined && textOf(trackedDirRow(tree)).indexOf('src') >= 0)
+/* 开关不住在列表上方那一行里了：它在面板头部的最右端，和页签、同步按钮、分支同一行。 */
+const topBar = byClass(tree, 'dsh-git-top')[0]
+const topKids = topBar === undefined ? [] : topBar.props.children
+const topLast = topKids.length === 0 ? undefined : topKids[topKids.length - 1]
+ok('视图开关住在面板头部（最右端），不再自己占一行',
+  byClass(tree, 'dsh-git-cbar').length === 0
+  && topBar !== undefined && textOf(topBar).indexOf('扁平') >= 0
+  && topLast !== undefined && String(topLast.props.className).indexOf('dsh-git-cviews') >= 0
+  && byClass(tree, 'dsh-git-clist').length === 1
+  && textOf(byClass(tree, 'dsh-git-clist')[0]).indexOf('扁平') < 0)
+/* 布局是 CSS 的事，量不到（这一套没有真的排版引擎）：钉住那两条规则本身 ——
+   一行把开关推到最右端，另一行让目录压暗、和名字隔开 8px。 */
+const panelCss = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+ok('样式把开关推到头部那一行的最右端（margin-left:auto）',
+  /\.dsh-git-cviews\{[^}]*margin-left:auto/.test(panelCss))
+ok('扁平的目录格是压暗的小字、和名字隔开（.dsh-git-tpath 的二级色 + margin-left）',
+  /\.dsh-git-tpath\{[^}]*color:var\(--dsw-alias-label-secondary\)/.test(panelCss)
+  && /\.dsh-git-tpath\{[^}]*margin-left:8px/.test(panelCss))
 
 press(viewBtn(tree, '扁平'), 'onClick')
 await wait(10)
 tree = await settle()
 const flatTexts = byClass(tree, 'dsh-git-trow').map(function (r) { return textOf(r) })
+const flatRow = function (t, name) {
+  return byClass(t, 'dsh-git-trow').filter(function (r) { return textOf(r).indexOf(name) >= 0 })[0]
+}
 ok('扁平视图：目录行没有了（每个文件一行）', trackedDirRow(tree) === undefined)
-ok('扁平视图：文件行的名字是整条路径',
-  flatTexts.some(function (x) { return x.indexOf('src/app.js') >= 0 })
-  && flatTexts.some(function (x) { return x.indexOf('notes.md') >= 0 }))
-ok('扁平视图：按路径排序（notes.md 在 src/app.js 前面）',
+/* 一行的文本是「名字 + 目录」拼起来的（中间那 8px 是 CSS 的 margin，不在文本里），
+   所以「一个文件一行」要看的是这两部分在同一行上。 */
+const flatHas = function (name, dir) {
+  return flatTexts.some(function (x) { return x.indexOf(name) >= 0 && x.indexOf(dir) >= 0 })
+}
+ok('扁平视图：每个文件还是一行，名字和它的目录在同一行里',
+  flatHas('app.js', 'src/') && flatTexts.some(function (x) { return x.indexOf('notes.md') >= 0 }))
+/* 名字必须排在目录前面：一条 120 字的路径先出现的话，行尾裁掉的正好是文件名。 */
+const flatApp = flatRow(tree, 'app.js')
+ok('扁平视图：文件名排在目录前面（名字在行的开头那一格）',
+  flatApp !== undefined && byClass(flatApp, 'dsh-git-tname').length === 1
+  && textOf(byClass(flatApp, 'dsh-git-tname')[0]).indexOf('app.js') === 0)
+ok('扁平视图：目录单独一格、压暗（.dsh-git-tpath），不再是名字那一格的一部分',
+  flatApp !== undefined && byClass(flatApp, 'dsh-git-tpath').length === 1
+  && textOf(byClass(flatApp, 'dsh-git-tpath')[0]) === 'src/')
+ok('扁平视图：按路径排序（notes.md 排在 src/app.js 前面）',
   flatTexts.findIndex(function (x) { return x.indexOf('notes.md') >= 0 })
-  < flatTexts.findIndex(function (x) { return x.indexOf('src/app.js') >= 0 }))
-ok('扁平视图：未跟踪目录行还在，展开的列表也给完整路径',
-  changeRow(tree, 'newdir/') !== undefined
-  && flatTexts.some(function (x) { return x.indexOf('newdir/a.txt') >= 0 }))
+  < flatTexts.findIndex(function (x) { return x.indexOf('app.js') >= 0 }))
+ok('扁平视图：未跟踪目录行还在，展开的列表也是一行一个名字',
+  changeRow(tree, 'newdir/') !== undefined && flatHas('a.txt', 'newdir/'))
 ok('扁平视图里分组照样是两组', byClass(tree, 'dsh-git-cgroup').length === 2)
 
 const stored = JSON.parse(store['dsh.git-idea.settings'] || '{}')
@@ -981,12 +1025,19 @@ await wait(10)
 tree = await settle()
 ok('重开面板仍然是扁平视图（偏好真的生效）',
   trackedDirRow(tree) === undefined
-  && byClass(tree, 'dsh-git-trow').some(function (r) { return textOf(r).indexOf('src/app.js') >= 0 }))
+  && byClass(tree, 'dsh-git-trow').some(function (r) {
+    const t = textOf(r)
+    return t.indexOf('app.js') >= 0 && t.indexOf('src/') >= 0
+  }))
 
 press(viewBtn(tree, '树'), 'onClick')
 await wait(10)
 tree = await settle()
 ok('切回树视图：目录行回来了', trackedDirRow(tree) !== undefined)
+/* 树视图不重复目录：层级本身就是那条路径。 */
+const treeApp = changeRow(tree, 'app.js')
+ok('树视图的行里没有第二个目录格',
+  treeApp !== undefined && byClass(treeApp, 'dsh-git-tpath').length === 0)
 ok('偏好跟着改回 tree', JSON.parse(store['dsh.git-idea.settings']).changesView === 'tree')
 
 console.log('')
@@ -1006,3 +1057,20 @@ tree = await settle()
 ok('双击分组标题：这一组折起来（行不见了，标题还在）',
   changeRow(tree, 'tmp.bin') === undefined && groupTitleRow(tree, '未跟踪的文件') !== undefined)
 ok('另一组不受影响（变更列表还在）', changeRow(tree, 'app.js') !== undefined)
+
+/* 开关只出现在它管得着的那一页：历史页上它什么也切不了，就不该在那里。 */
+console.log('')
+console.log('== 视图开关只在变更页出现 ==')
+const tabBtn = function (t, label) {
+  return buttons(t).filter(function (b) {
+    return textOf(b).indexOf(label) >= 0 && String(b.props.className).indexOf('dsh-git-tab') >= 0
+  })[0]
+}
+press(tabBtn(tree, '历史'), 'onClick')
+await wait(10)
+tree = await settle()
+ok('历史页没有这个开关', viewBtn(tree, '扁平') === undefined && viewBtn(tree, '树') === undefined)
+press(tabBtn(tree, '变更'), 'onClick')
+await wait(10)
+tree = await settle()
+ok('回到变更页它又在了', viewBtn(tree, '扁平') !== undefined && viewBtn(tree, '树') !== undefined)

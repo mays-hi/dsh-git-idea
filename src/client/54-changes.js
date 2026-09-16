@@ -20,7 +20,11 @@
        list of paths. Same rows, same boxes, same gestures — only the label and
        the indent differ. The flat list is sorted by path, because git's own
        order (index first, then worktree, then untracked) is the order git
-       happened to answer in, not an order anyone chose. */
+       happened to answer in, not an order anyone chose.
+
+       The switch itself is not here: it lives in the panel header (80-panel.js).
+       On a row of its own above the list it cost the list a full line of height
+       to say two words. */
 
     function isUnversioned(entry) {
       return entry.untracked === true && entry.staged !== true
@@ -73,9 +77,19 @@
         }, state === 'all' ? '☑' : (state === 'some' ? '▣' : '☐'))
       }
 
-      /* The flat label is the whole path, so the folder has to be told apart
-         from the file without a column of its own: it is dimmed, and the name
-         that matters stays at full contrast. */
+      /* ── the name first, the folder after it ──
+
+         The flat row used to be `folder/ + name`, so the one thing the eye is
+         looking for sat at the far right of a path that can be 120 characters
+         long — and the row's clip took it away first. On a screenshot of this
+         panel `.../risk/eval/service/impl/` filled the whole row and the file it
+         belonged to read `SignalClusterEvalReportServiceIm…`: the name had been
+         pushed off the edge by the path that was only there to say where it
+         lives. IDEA reads `name  folder/`, and so does this now.
+
+         The two are still one cell, not two columns: the folder is dimmed and
+         smaller, the name keeps full contrast and stays where a clip cannot
+         reach it. */
       const splitPath = function (path) {
         const dir = path.slice(-1) === '/' ? path.slice(0, -1) : path
         const cut = dir.lastIndexOf('/')
@@ -88,8 +102,8 @@
         const parts = splitPath(label)
         if (flat !== true || parts.dir.length === 0) return h('span', { className: 'dsh-git-tname' }, parts.base)
         return h('span', { className: 'dsh-git-tname' },
-          h('span', { key: 'd', className: 'dsh-git-tdim' }, parts.dir),
-          h('span', { key: 'b' }, parts.base))
+          h('span', { key: 'b' }, parts.base),
+          h('span', { key: 'd', className: 'dsh-git-tpath' }, parts.dir))
       }
       const rowClass = function (key, extra) {
         return 'dsh-git-trow' + (extra === undefined ? '' : ' ' + extra)
@@ -267,16 +281,6 @@
         ? ('提交 ' + String(stagedCount) + ' 个文件')
         : ('全部暂存并提交（' + String(totalChanges) + '）')
 
-      const viewButton = function (id, name, hint) {
-        return h('button', {
-          key: id,
-          type: 'button',
-          className: 'dsh-git-cview' + (view === id ? ' dsh-git-cview-on' : ''),
-          title: hint,
-          onClick: function () { saveSettings(Object.assign({}, settings, { changesView: id })) },
-        }, name)
-      }
-
       const side = h('div', { className: 'dsh-git-commitpane' },
         h('div', { className: 'dsh-git-group-title' }, '提交信息'),
         clearable('msg', h('textarea', {
@@ -299,13 +303,11 @@
           onClick: props.onSetStagedAll,
         }, stagedCount > 0 ? '取消全部暂存' : '全部暂存') : null)
 
+      /* No toolbar of this pane's own any more: the view switch is in the panel
+         header, and "已暂存 N / M" is on the commit pane beside it, so the list
+         starts at the top of the pane and the rows get the whole height. */
       return h('div', { className: 'dsh-git-changes' },
         h('div', { className: 'dsh-git-changes-tree' },
-          h('div', { key: 'bar', className: 'dsh-git-cbar' },
-            h('span', { key: 'v', className: 'dsh-git-cviews' },
-              viewButton('tree', '树', '文件树视图：按目录折叠'),
-              viewButton('flat', '扁平', '扁平文件视图：每个文件一行，按路径排序')),
-            h('span', { key: 'c', className: 'dsh-git-tdim' }, '已暂存 ' + String(stagedCount) + ' / ' + String(totalChanges))),
           h('div', { key: 'list', className: 'dsh-git-clist' }, rows.length > 0 ? rows : h('div', { className: 'dsh-git-pane dsh-git-ok' }, '工作区干净'))),
         side)
     }

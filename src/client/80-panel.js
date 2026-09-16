@@ -1,5 +1,6 @@
     function GitPanel(props) {
       const plugin = usePluginConfig()
+      const prefs = useGitSettings()
       const sessionId = props.sessionId
       const switcher = useSwitchMode()
       const switching = useSwitchingTo()
@@ -927,6 +928,29 @@
       const shownRef = allRefs ? '' : (activeRef.length > 0 ? activeRef : (graph != null && graph.ok === true ? text(graph.ref) : ''))
       const effectiveSelection = selectedKey !== null ? selectedKey : shownRef
 
+      /* ── the view switch lives in the header ──
+
+         IDEA keeps this switch in the tool window's own toolbar, and that is
+         where it belongs: it changes how the pane below is read. On a row of its
+         own above the list it was a full line of the panel's height spent on two
+         words, so it rides here instead — and only while the changes tab is the
+         one on screen, because on the history it would toggle nothing. */
+      const changesView = prefs.changesView === 'flat' ? 'flat' : 'tree'
+      const viewButton = function (id, name, hint) {
+        return h('button', {
+          key: id,
+          type: 'button',
+          className: 'dsh-git-cview' + (changesView === id ? ' dsh-git-cview-on' : ''),
+          title: hint,
+          onClick: function () { saveSettings(Object.assign({}, prefs, { changesView: id })) },
+        }, name)
+      }
+      const viewSwitch = needsSetup || tab !== 'changes' ? null : h('span', {
+        key: 'views', className: 'dsh-git-cviews',
+      },
+        viewButton('tree', '树', '文件树视图：按目录折叠'),
+        viewButton('flat', '扁平', '扁平文件视图：每个文件一行，名字在前、目录压暗，按路径排序'))
+
       const header = h('div', { className: 'dsh-git-top' },
         h('span', { className: 'dsh-git-title' }, 'Git'),
         needsSetup
@@ -947,6 +971,7 @@
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
+        viewSwitch,
         switchCard)
 
       /* What the diff on screen was read from. The file's own state as the last

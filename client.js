@@ -993,6 +993,9 @@ return {
 .dsh-git-trow-scope .dsh-git-tname{color:var(--dsw-alias-brand-primary)}
 .dsh-git-tw{flex:none;width:10px;color:var(--dsw-alias-label-secondary);font-size:9px;cursor:pointer}
 .dsh-git-tname{overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* 扁平视图里跟在文件名后面的目录：压暗、小一号。名字必须排在前面，否则一条 120 字
+   的路径先把自己铺满，被裁掉的正好是文件名（见 54-changes.js 的注释）。 */
+.dsh-git-tpath{color:var(--dsw-alias-label-secondary);font-size:11px;margin-left:8px}
 /* The count belongs to the name it counts, not to the right-hand edge of the
    row: "本地 5" reads as one thing, "本地 … 5" makes the eye travel. */
 .dsh-git-tdim{flex:none;padding-right:6px;color:var(--dsw-alias-label-secondary);font-size:11px}
@@ -1008,13 +1011,15 @@ return {
 .dsh-git-cbox-part{color:var(--dsw-alias-state-warn-primary)}
 .dsh-git-changes{flex:1;display:flex;min-height:0}
 .dsh-git-changes-tree{flex:1;min-width:0;display:flex;flex-direction:column}
-/* 变更页自己的工具条：左边是 IDEA 的那个「树 / 扁平」开关，右边是索引里有多少个。
-   它贴着树，因为这两个数字和这一列框是同一件事，而它不随列表滚动。 */
-.dsh-git-cbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:3px 8px;border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
-.dsh-git-cviews{display:inline-flex;gap:2px;flex:none}
-.dsh-git-cview{border:none;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:11px;padding:2px 8px;border-radius:5px;cursor:pointer;line-height:16px}
-.dsh-git-cview:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.dsh-git-cview-on{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-weight:600}
+/* ── 树 / 扁平：视图开关 ──
+   只在变更页出现，住在面板头部，和 IDEA 把这一组放在工具窗自己的工具条上一样。
+   它以前在列表上方单独占一行：两个词花掉列表一整行的高度。现在那点高度还给行。
+   两个按钮做成一段凹槽里的选择，和头部那两个页签区分开 —— 页签换的是「看哪一页」，
+   这个换的是「这一页怎么读」。 */
+.dsh-git-cviews{display:inline-flex;flex:none;gap:2px;margin-left:auto;padding:2px;border-radius:7px;background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-cview{border:none;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:11px;line-height:16px;padding:1px 8px;border-radius:5px;cursor:pointer}
+.dsh-git-cview:hover{color:var(--dsw-alias-label-primary)}
+.dsh-git-cview-on{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-weight:600}
 .dsh-git-clist{flex:1;overflow:auto;padding:4px 0}
 /* 分组标题（默认变更列表 / 未跟踪的文件）读起来得像标题，但它仍然是树里的一行：
    同样的手势、同样的悬停与选中。 */
@@ -1815,7 +1820,11 @@ textarea.dsh-git-input{resize:vertical}
        list of paths. Same rows, same boxes, same gestures — only the label and
        the indent differ. The flat list is sorted by path, because git's own
        order (index first, then worktree, then untracked) is the order git
-       happened to answer in, not an order anyone chose. */
+       happened to answer in, not an order anyone chose.
+
+       The switch itself is not here: it lives in the panel header (80-panel.js).
+       On a row of its own above the list it cost the list a full line of height
+       to say two words. */
 
     function isUnversioned(entry) {
       return entry.untracked === true && entry.staged !== true
@@ -1868,9 +1877,19 @@ textarea.dsh-git-input{resize:vertical}
         }, state === 'all' ? '☑' : (state === 'some' ? '▣' : '☐'))
       }
 
-      /* The flat label is the whole path, so the folder has to be told apart
-         from the file without a column of its own: it is dimmed, and the name
-         that matters stays at full contrast. */
+      /* ── the name first, the folder after it ──
+
+         The flat row used to be `folder/ + name`, so the one thing the eye is
+         looking for sat at the far right of a path that can be 120 characters
+         long — and the row's clip took it away first. On a screenshot of this
+         panel `.../risk/eval/service/impl/` filled the whole row and the file it
+         belonged to read `SignalClusterEvalReportServiceIm…`: the name had been
+         pushed off the edge by the path that was only there to say where it
+         lives. IDEA reads `name  folder/`, and so does this now.
+
+         The two are still one cell, not two columns: the folder is dimmed and
+         smaller, the name keeps full contrast and stays where a clip cannot
+         reach it. */
       const splitPath = function (path) {
         const dir = path.slice(-1) === '/' ? path.slice(0, -1) : path
         const cut = dir.lastIndexOf('/')
@@ -1883,8 +1902,8 @@ textarea.dsh-git-input{resize:vertical}
         const parts = splitPath(label)
         if (flat !== true || parts.dir.length === 0) return h('span', { className: 'dsh-git-tname' }, parts.base)
         return h('span', { className: 'dsh-git-tname' },
-          h('span', { key: 'd', className: 'dsh-git-tdim' }, parts.dir),
-          h('span', { key: 'b' }, parts.base))
+          h('span', { key: 'b' }, parts.base),
+          h('span', { key: 'd', className: 'dsh-git-tpath' }, parts.dir))
       }
       const rowClass = function (key, extra) {
         return 'dsh-git-trow' + (extra === undefined ? '' : ' ' + extra)
@@ -2062,16 +2081,6 @@ textarea.dsh-git-input{resize:vertical}
         ? ('提交 ' + String(stagedCount) + ' 个文件')
         : ('全部暂存并提交（' + String(totalChanges) + '）')
 
-      const viewButton = function (id, name, hint) {
-        return h('button', {
-          key: id,
-          type: 'button',
-          className: 'dsh-git-cview' + (view === id ? ' dsh-git-cview-on' : ''),
-          title: hint,
-          onClick: function () { saveSettings(Object.assign({}, settings, { changesView: id })) },
-        }, name)
-      }
-
       const side = h('div', { className: 'dsh-git-commitpane' },
         h('div', { className: 'dsh-git-group-title' }, '提交信息'),
         clearable('msg', h('textarea', {
@@ -2094,13 +2103,11 @@ textarea.dsh-git-input{resize:vertical}
           onClick: props.onSetStagedAll,
         }, stagedCount > 0 ? '取消全部暂存' : '全部暂存') : null)
 
+      /* No toolbar of this pane's own any more: the view switch is in the panel
+         header, and "已暂存 N / M" is on the commit pane beside it, so the list
+         starts at the top of the pane and the rows get the whole height. */
       return h('div', { className: 'dsh-git-changes' },
         h('div', { className: 'dsh-git-changes-tree' },
-          h('div', { key: 'bar', className: 'dsh-git-cbar' },
-            h('span', { key: 'v', className: 'dsh-git-cviews' },
-              viewButton('tree', '树', '文件树视图：按目录折叠'),
-              viewButton('flat', '扁平', '扁平文件视图：每个文件一行，按路径排序')),
-            h('span', { key: 'c', className: 'dsh-git-tdim' }, '已暂存 ' + String(stagedCount) + ' / ' + String(totalChanges))),
           h('div', { key: 'list', className: 'dsh-git-clist' }, rows.length > 0 ? rows : h('div', { className: 'dsh-git-pane dsh-git-ok' }, '工作区干净'))),
         side)
     }
@@ -3378,6 +3385,7 @@ textarea.dsh-git-input{resize:vertical}
 
     function GitPanel(props) {
       const plugin = usePluginConfig()
+      const prefs = useGitSettings()
       const sessionId = props.sessionId
       const switcher = useSwitchMode()
       const switching = useSwitchingTo()
@@ -4305,6 +4313,29 @@ textarea.dsh-git-input{resize:vertical}
       const shownRef = allRefs ? '' : (activeRef.length > 0 ? activeRef : (graph != null && graph.ok === true ? text(graph.ref) : ''))
       const effectiveSelection = selectedKey !== null ? selectedKey : shownRef
 
+      /* ── the view switch lives in the header ──
+
+         IDEA keeps this switch in the tool window's own toolbar, and that is
+         where it belongs: it changes how the pane below is read. On a row of its
+         own above the list it was a full line of the panel's height spent on two
+         words, so it rides here instead — and only while the changes tab is the
+         one on screen, because on the history it would toggle nothing. */
+      const changesView = prefs.changesView === 'flat' ? 'flat' : 'tree'
+      const viewButton = function (id, name, hint) {
+        return h('button', {
+          key: id,
+          type: 'button',
+          className: 'dsh-git-cview' + (changesView === id ? ' dsh-git-cview-on' : ''),
+          title: hint,
+          onClick: function () { saveSettings(Object.assign({}, prefs, { changesView: id })) },
+        }, name)
+      }
+      const viewSwitch = needsSetup || tab !== 'changes' ? null : h('span', {
+        key: 'views', className: 'dsh-git-cviews',
+      },
+        viewButton('tree', '树', '文件树视图：按目录折叠'),
+        viewButton('flat', '扁平', '扁平文件视图：每个文件一行，名字在前、目录压暗，按路径排序'))
+
       const header = h('div', { className: 'dsh-git-top' },
         h('span', { className: 'dsh-git-title' }, 'Git'),
         needsSetup
@@ -4325,6 +4356,7 @@ textarea.dsh-git-input{resize:vertical}
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
+        viewSwitch,
         switchCard)
 
       /* What the diff on screen was read from. The file's own state as the last

@@ -72,6 +72,9 @@
 .dsh-git-trow-scope .dsh-git-tname{color:var(--dsw-alias-brand-primary)}
 .dsh-git-tw{flex:none;width:10px;color:var(--dsw-alias-label-secondary);font-size:9px;cursor:pointer}
 .dsh-git-tname{overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* 扁平视图里跟在文件名后面的目录：压暗、小一号。名字必须排在前面，否则一条 120 字
+   的路径先把自己铺满，被裁掉的正好是文件名（见 54-changes.js 的注释）。 */
+.dsh-git-tpath{color:var(--dsw-alias-label-secondary);font-size:11px;margin-left:8px}
 /* The count belongs to the name it counts, not to the right-hand edge of the
    row: "本地 5" reads as one thing, "本地 … 5" makes the eye travel. */
 .dsh-git-tdim{flex:none;padding-right:6px;color:var(--dsw-alias-label-secondary);font-size:11px}
@@ -87,13 +90,15 @@
 .dsh-git-cbox-part{color:var(--dsw-alias-state-warn-primary)}
 .dsh-git-changes{flex:1;display:flex;min-height:0}
 .dsh-git-changes-tree{flex:1;min-width:0;display:flex;flex-direction:column}
-/* 变更页自己的工具条：左边是 IDEA 的那个「树 / 扁平」开关，右边是索引里有多少个。
-   它贴着树，因为这两个数字和这一列框是同一件事，而它不随列表滚动。 */
-.dsh-git-cbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:3px 8px;border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}
-.dsh-git-cviews{display:inline-flex;gap:2px;flex:none}
-.dsh-git-cview{border:none;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:11px;padding:2px 8px;border-radius:5px;cursor:pointer;line-height:16px}
-.dsh-git-cview:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.dsh-git-cview-on{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-weight:600}
+/* ── 树 / 扁平：视图开关 ──
+   只在变更页出现，住在面板头部，和 IDEA 把这一组放在工具窗自己的工具条上一样。
+   它以前在列表上方单独占一行：两个词花掉列表一整行的高度。现在那点高度还给行。
+   两个按钮做成一段凹槽里的选择，和头部那两个页签区分开 —— 页签换的是「看哪一页」，
+   这个换的是「这一页怎么读」。 */
+.dsh-git-cviews{display:inline-flex;flex:none;gap:2px;margin-left:auto;padding:2px;border-radius:7px;background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-cview{border:none;background:0 0;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:11px;line-height:16px;padding:1px 8px;border-radius:5px;cursor:pointer}
+.dsh-git-cview:hover{color:var(--dsw-alias-label-primary)}
+.dsh-git-cview-on{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-weight:600}
 .dsh-git-clist{flex:1;overflow:auto;padding:4px 0}
 /* 分组标题（默认变更列表 / 未跟踪的文件）读起来得像标题，但它仍然是树里的一行：
    同样的手势、同样的悬停与选中。 */
