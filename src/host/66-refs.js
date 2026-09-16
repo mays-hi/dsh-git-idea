@@ -54,14 +54,14 @@ async function readRefs(input, repo) {
   for (let i = 0; i < rows.length; i += 1) {
     if (rows[i].length === 0) continue
     const fields = rows[i].split('\u001f')
-    const full = fields[0] === undefined ? '' : fields[0]
-    const short = fields[1] === undefined ? '' : fields[1]
+    const full = field(fields, 0)
+    const short = field(fields, 1)
     const isCurrent = fields[2] === '*'
     if (full.indexOf('refs/heads/') === 0) {
-      const counts = trackCounts(fields[5] === undefined ? '' : fields[5])
+      const counts = trackCounts(field(fields, 5))
       local.push({
         segments: short.split('/'), data: short,
-        upstream: fields[4] === undefined ? '' : fields[4],
+        upstream: field(fields, 4),
         ahead: counts.ahead, behind: counts.behind,
         at: parseInt(fields[6], 10) || 0,
       })
@@ -128,27 +128,27 @@ async function readBranches(input, repo) {
   for (let i = 0; i < rows.length; i += 1) {
     if (rows[i].length === 0) continue
     const fields = rows[i].split('\u001f')
-    const full = fields[0] === undefined ? '' : fields[0]
-    const short = fields[1] === undefined ? '' : fields[1]
+    const full = field(fields, 0)
+    const short = field(fields, 1)
     if (short.length === 0) continue
     const isCurrent = fields[2] === '*'
     /* parseInt and a truthiness test rather than Number/isFinite: the restricted
        Host realm is not the full JavaScript global scope, and parseInt is the one
        converter the rest of this file already relies on. */
-    const stamp = parseInt(fields[3] === undefined ? '' : fields[3], 10)
+    const stamp = parseInt(field(fields, 3), 10)
     /* trackshort is symbols only (=, >, <, <>) and is never translated; the
        numbers beside it come from :track, whose words are pinned to C by gitC. */
-    const counts = trackCounts(fields[6] === undefined ? '' : fields[6])
+    const counts = trackCounts(field(fields, 6))
     const entry = {
       name: short,
       current: isCurrent,
       committedAt: stamp > 0 ? stamp : 0,
-      upstream: fields[4] === undefined ? '' : fields[4],
-      track: fields[5] === undefined ? '' : fields[5],
+      upstream: field(fields, 4),
+      track: field(fields, 5),
       ahead: counts.ahead,
       behind: counts.behind,
-      head: fields[7] === undefined ? '' : fields[7],
-      subject: fields[8] === undefined ? '' : fields[8],
+      head: field(fields, 7),
+      subject: field(fields, 8),
     }
     if (full.indexOf('refs/heads/') === 0) {
       if (isCurrent) current = short

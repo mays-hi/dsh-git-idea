@@ -8,6 +8,16 @@ function isStr(value) {
   return typeof value === 'string'
 }
 
+/* One field of a record git printed as a separated line. A field git had nothing
+   to put in is simply absent from the split, and every reader wants the same
+   thing there: the empty string, never `undefined` leaking into a reply the
+   Client will render. Longhand this is `fields[3] === undefined ? '' : fields[3]`
+   — a forty-two times repeated question, asked once here. */
+function field(split, index) {
+  const value = split[index]
+  return value === undefined ? '' : value
+}
+
 function sessionCwd(exec) {
   if (exec == null || exec.agent == null) return undefined
   const session = exec.agent.session

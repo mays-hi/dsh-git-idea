@@ -19,12 +19,12 @@ async function readCommitDetail(input) {
       if (status === undefined || status.length === 0) { index += 1; continue }
       const head = status.charAt(0)
       if (head === 'R' || head === 'C') {
-        const from = parts[index + 1] === undefined ? '' : parts[index + 1]
-        const to = parts[index + 2] === undefined ? '' : parts[index + 2]
+        const from = field(parts, index + 1)
+        const to = field(parts, index + 2)
         files.push({ status: status, path: to, from: from })
         index += 3
       } else {
-        const path = parts[index + 1] === undefined ? '' : parts[index + 1]
+        const path = field(parts, index + 1)
         files.push({ status: status, path: path, from: null })
         index += 2
       }
@@ -41,12 +41,12 @@ async function readCommitDetail(input) {
   return {
     ok: true,
     hash: fields[0] === undefined ? hash : fields[0],
-    short: fields[1] === undefined ? '' : fields[1],
-    author: fields[2] === undefined ? '' : fields[2],
-    email: fields[3] === undefined ? '' : fields[3],
-    date: fields[4] === undefined ? '' : fields[4],
-    subject: fields[5] === undefined ? '' : fields[5],
-    body: fields[6] === undefined ? '' : fields[6].replace(/\s+$/, ''),
+    short: field(fields, 1),
+    author: field(fields, 2),
+    email: field(fields, 3),
+    date: field(fields, 4),
+    subject: field(fields, 5),
+    body: field(fields, 6).replace(/\s+$/, ''),
     files: files,
     branches: branches,
   }

@@ -18,6 +18,16 @@ function isStr(value) {
   return typeof value === 'string'
 }
 
+/* One field of a record git printed as a separated line. A field git had nothing
+   to put in is simply absent from the split, and every reader wants the same
+   thing there: the empty string, never `undefined` leaking into a reply the
+   Client will render. Longhand this is `fields[3] === undefined ? '' : fields[3]`
+   — a forty-two times repeated question, asked once here. */
+function field(split, index) {
+  const value = split[index]
+  return value === undefined ? '' : value
+}
+
 function sessionCwd(exec) {
   if (exec == null || exec.agent == null) return undefined
   const session = exec.agent.session
@@ -629,14 +639,14 @@ define('git_log', {
       const record = records[i].replace(/^\n+/, '')
       if (record.length === 0) continue
       const fields = record.split('\u001f')
-      const rawDate = fields[3] === undefined ? '' : fields[3]
+      const rawDate = field(fields, 3)
       commits.push({
-        hash: fields[0] === undefined ? '' : fields[0],
-        short: fields[1] === undefined ? '' : fields[1],
-        author: fields[2] === undefined ? '' : fields[2],
+        hash: field(fields, 0),
+        short: field(fields, 1),
+        author: field(fields, 2),
         date: rawDate.length >= 16 ? rawDate.slice(0, 16).replace('T', ' ') : rawDate,
-        subject: fields[4] === undefined ? '' : fields[4],
-        refs: fields[5] === undefined ? '' : fields[5],
+        subject: field(fields, 4),
+        refs: field(fields, 5),
       })
     }
     return { ok: true, cwd: result.cwd, exitCode: result.exitCode, count: commits.length, commits: commits, stderr: result.stderr }
@@ -855,11 +865,11 @@ define('git_branch', {
         const isCurrent = fields[1] === '*'
         if (isCurrent) current = fields[0] === undefined ? null : fields[0]
         branches.push({
-          name: fields[0] === undefined ? '' : fields[0],
+          name: field(fields, 0),
           current: isCurrent,
-          upstream: fields[2] === undefined ? '' : fields[2],
-          head: fields[3] === undefined ? '' : fields[3],
-          subject: fields[4] === undefined ? '' : fields[4],
+          upstream: field(fields, 2),
+          head: field(fields, 3),
+          subject: field(fields, 4),
         })
       }
       return { ok: true, action: 'list', cwd: listed.cwd, exitCode: listed.exitCode, current: current, branches: branches, stdout: listed.stdout, stderr: listed.stderr }
@@ -928,10 +938,11 @@ define('git_stash', {
       for (let i = 0; i < rows.length; i += 1) {
         if (rows[i].length === 0) continue
         const fields = rows[i].split('\u001f')
+        const stamp = field(fields, 2)
         stashes.push({
-          ref: fields[0] === undefined ? '' : fields[0],
-          subject: fields[1] === undefined ? '' : fields[1],
-          date: fields[2] === undefined ? '' : (fields[2].length >= 16 ? fields[2].slice(0, 16).replace('T', ' ') : fields[2]),
+          ref: field(fields, 0),
+          subject: field(fields, 1),
+          date: stamp.length >= 16 ? stamp.slice(0, 16).replace('T', ' ') : stamp,
         })
       }
       return { ok: true, action: 'list', cwd: listed.cwd, exitCode: listed.exitCode, stashes: stashes, stdout: listed.stdout, stderr: listed.stderr }
@@ -1182,13 +1193,13 @@ function parseCommitRecords(stdout) {
     const fields = record.split('\u001f')
     const parents = fields[7] === undefined || fields[7].length === 0 ? [] : fields[7].split(' ')
     commits.push({
-      hash: fields[0] === undefined ? '' : fields[0],
-      short: fields[1] === undefined ? '' : fields[1],
-      author: fields[2] === undefined ? '' : fields[2],
-      email: fields[3] === undefined ? '' : fields[3],
-      date: fields[4] === undefined ? '' : fields[4],
-      subject: fields[5] === undefined ? '' : fields[5],
-      refs: fields[6] === undefined ? '' : fields[6],
+      hash: field(fields, 0),
+      short: field(fields, 1),
+      author: field(fields, 2),
+      email: field(fields, 3),
+      date: field(fields, 4),
+      subject: field(fields, 5),
+      refs: field(fields, 6),
       parents: parents,
     })
   }
@@ -1580,8 +1591,8 @@ async function readPanelIdentity(input, target) {
        \u001f the rest of the Host uses: one for-each-ref answers both. */
     if (line.indexOf('U:') === 0) {
       const fields = line.slice(2).split('\u001f')
-      upstream = fields[0] === undefined ? '' : fields[0]
-      track = fields[1] === undefined ? '' : fields[1]
+      upstream = field(fields, 0)
+      track = field(fields, 1)
     }
   }
   if (exitCode !== 0) {
@@ -1831,14 +1842,14 @@ async function readRefs(input, repo) {
   for (let i = 0; i < rows.length; i += 1) {
     if (rows[i].length === 0) continue
     const fields = rows[i].split('\u001f')
-    const full = fields[0] === undefined ? '' : fields[0]
-    const short = fields[1] === undefined ? '' : fields[1]
+    const full = field(fields, 0)
+    const short = field(fields, 1)
     const isCurrent = fields[2] === '*'
     if (full.indexOf('refs/heads/') === 0) {
-      const counts = trackCounts(fields[5] === undefined ? '' : fields[5])
+      const counts = trackCounts(field(fields, 5))
       local.push({
         segments: short.split('/'), data: short,
-        upstream: fields[4] === undefined ? '' : fields[4],
+        upstream: field(fields, 4),
         ahead: counts.ahead, behind: counts.behind,
         at: parseInt(fields[6], 10) || 0,
       })
@@ -1905,27 +1916,27 @@ async function readBranches(input, repo) {
   for (let i = 0; i < rows.length; i += 1) {
     if (rows[i].length === 0) continue
     const fields = rows[i].split('\u001f')
-    const full = fields[0] === undefined ? '' : fields[0]
-    const short = fields[1] === undefined ? '' : fields[1]
+    const full = field(fields, 0)
+    const short = field(fields, 1)
     if (short.length === 0) continue
     const isCurrent = fields[2] === '*'
     /* parseInt and a truthiness test rather than Number/isFinite: the restricted
        Host realm is not the full JavaScript global scope, and parseInt is the one
        converter the rest of this file already relies on. */
-    const stamp = parseInt(fields[3] === undefined ? '' : fields[3], 10)
+    const stamp = parseInt(field(fields, 3), 10)
     /* trackshort is symbols only (=, >, <, <>) and is never translated; the
        numbers beside it come from :track, whose words are pinned to C by gitC. */
-    const counts = trackCounts(fields[6] === undefined ? '' : fields[6])
+    const counts = trackCounts(field(fields, 6))
     const entry = {
       name: short,
       current: isCurrent,
       committedAt: stamp > 0 ? stamp : 0,
-      upstream: fields[4] === undefined ? '' : fields[4],
-      track: fields[5] === undefined ? '' : fields[5],
+      upstream: field(fields, 4),
+      track: field(fields, 5),
       ahead: counts.ahead,
       behind: counts.behind,
-      head: fields[7] === undefined ? '' : fields[7],
-      subject: fields[8] === undefined ? '' : fields[8],
+      head: field(fields, 7),
+      subject: field(fields, 8),
     }
     if (full.indexOf('refs/heads/') === 0) {
       if (isCurrent) current = short
@@ -2072,12 +2083,12 @@ async function readCommitDetail(input) {
       if (status === undefined || status.length === 0) { index += 1; continue }
       const head = status.charAt(0)
       if (head === 'R' || head === 'C') {
-        const from = parts[index + 1] === undefined ? '' : parts[index + 1]
-        const to = parts[index + 2] === undefined ? '' : parts[index + 2]
+        const from = field(parts, index + 1)
+        const to = field(parts, index + 2)
         files.push({ status: status, path: to, from: from })
         index += 3
       } else {
-        const path = parts[index + 1] === undefined ? '' : parts[index + 1]
+        const path = field(parts, index + 1)
         files.push({ status: status, path: path, from: null })
         index += 2
       }
@@ -2094,12 +2105,12 @@ async function readCommitDetail(input) {
   return {
     ok: true,
     hash: fields[0] === undefined ? hash : fields[0],
-    short: fields[1] === undefined ? '' : fields[1],
-    author: fields[2] === undefined ? '' : fields[2],
-    email: fields[3] === undefined ? '' : fields[3],
-    date: fields[4] === undefined ? '' : fields[4],
-    subject: fields[5] === undefined ? '' : fields[5],
-    body: fields[6] === undefined ? '' : fields[6].replace(/\s+$/, ''),
+    short: field(fields, 1),
+    author: field(fields, 2),
+    email: field(fields, 3),
+    date: field(fields, 4),
+    subject: field(fields, 5),
+    body: field(fields, 6).replace(/\s+$/, ''),
     files: files,
     branches: branches,
   }

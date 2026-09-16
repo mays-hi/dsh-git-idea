@@ -114,14 +114,14 @@ define('git_log', {
       const record = records[i].replace(/^\n+/, '')
       if (record.length === 0) continue
       const fields = record.split('\u001f')
-      const rawDate = fields[3] === undefined ? '' : fields[3]
+      const rawDate = field(fields, 3)
       commits.push({
-        hash: fields[0] === undefined ? '' : fields[0],
-        short: fields[1] === undefined ? '' : fields[1],
-        author: fields[2] === undefined ? '' : fields[2],
+        hash: field(fields, 0),
+        short: field(fields, 1),
+        author: field(fields, 2),
         date: rawDate.length >= 16 ? rawDate.slice(0, 16).replace('T', ' ') : rawDate,
-        subject: fields[4] === undefined ? '' : fields[4],
-        refs: fields[5] === undefined ? '' : fields[5],
+        subject: field(fields, 4),
+        refs: field(fields, 5),
       })
     }
     return { ok: true, cwd: result.cwd, exitCode: result.exitCode, count: commits.length, commits: commits, stderr: result.stderr }
@@ -340,11 +340,11 @@ define('git_branch', {
         const isCurrent = fields[1] === '*'
         if (isCurrent) current = fields[0] === undefined ? null : fields[0]
         branches.push({
-          name: fields[0] === undefined ? '' : fields[0],
+          name: field(fields, 0),
           current: isCurrent,
-          upstream: fields[2] === undefined ? '' : fields[2],
-          head: fields[3] === undefined ? '' : fields[3],
-          subject: fields[4] === undefined ? '' : fields[4],
+          upstream: field(fields, 2),
+          head: field(fields, 3),
+          subject: field(fields, 4),
         })
       }
       return { ok: true, action: 'list', cwd: listed.cwd, exitCode: listed.exitCode, current: current, branches: branches, stdout: listed.stdout, stderr: listed.stderr }
@@ -413,10 +413,11 @@ define('git_stash', {
       for (let i = 0; i < rows.length; i += 1) {
         if (rows[i].length === 0) continue
         const fields = rows[i].split('\u001f')
+        const stamp = field(fields, 2)
         stashes.push({
-          ref: fields[0] === undefined ? '' : fields[0],
-          subject: fields[1] === undefined ? '' : fields[1],
-          date: fields[2] === undefined ? '' : (fields[2].length >= 16 ? fields[2].slice(0, 16).replace('T', ' ') : fields[2]),
+          ref: field(fields, 0),
+          subject: field(fields, 1),
+          date: stamp.length >= 16 ? stamp.slice(0, 16).replace('T', ' ') : stamp,
         })
       }
       return { ok: true, action: 'list', cwd: listed.cwd, exitCode: listed.exitCode, stashes: stashes, stdout: listed.stdout, stderr: listed.stderr }

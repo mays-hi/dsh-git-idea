@@ -136,13 +136,13 @@ function parseCommitRecords(stdout) {
     const fields = record.split('\u001f')
     const parents = fields[7] === undefined || fields[7].length === 0 ? [] : fields[7].split(' ')
     commits.push({
-      hash: fields[0] === undefined ? '' : fields[0],
-      short: fields[1] === undefined ? '' : fields[1],
-      author: fields[2] === undefined ? '' : fields[2],
-      email: fields[3] === undefined ? '' : fields[3],
-      date: fields[4] === undefined ? '' : fields[4],
-      subject: fields[5] === undefined ? '' : fields[5],
-      refs: fields[6] === undefined ? '' : fields[6],
+      hash: field(fields, 0),
+      short: field(fields, 1),
+      author: field(fields, 2),
+      email: field(fields, 3),
+      date: field(fields, 4),
+      subject: field(fields, 5),
+      refs: field(fields, 6),
       parents: parents,
     })
   }

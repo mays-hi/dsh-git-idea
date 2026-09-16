@@ -28,8 +28,8 @@ async function readPanelIdentity(input, target) {
        \u001f the rest of the Host uses: one for-each-ref answers both. */
     if (line.indexOf('U:') === 0) {
       const fields = line.slice(2).split('\u001f')
-      upstream = fields[0] === undefined ? '' : fields[0]
-      track = fields[1] === undefined ? '' : fields[1]
+      upstream = field(fields, 0)
+      track = field(fields, 1)
     }
   }
   if (exitCode !== 0) {
