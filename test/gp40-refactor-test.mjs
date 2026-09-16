@@ -789,17 +789,44 @@ for (let i = 0; i < 4; i += 1) {
   await wait(10)
 }
 const setupTitle = textOf(byClass(setupTree, 'dsh-git-setup-h')[0])
-const setupHints = byClass(setupTree, 'dsh-git-hint').map((n) => textOf(n)).join(' | ')
+/* 面板头部的提示也用 .dsh-git-hint，这里只看说明页自己那一块 */
+const setupBox = byClass(setupTree, 'dsh-git-setup')[0]
+const setupHints = byClass(setupBox, 'dsh-git-hint').map((n) => textOf(n)).join(' | ')
 const setupButtons = buttons(setupTree).filter((b) => String(b.props.className).indexOf('dsh-git-btn') >= 0).map((b) => textOf(b))
 console.log('  标题:', setupTitle)
-console.log('  说明:', setupHints)
+console.log('  说明:', setupHints.length > 0 ? setupHints : '（没有）')
 console.log('  按钮:', setupButtons.join(' / '))
 console.log('  展示的路径:', textOf(byClass(setupTree, 'dsh-git-setup-path')[0]))
 ok('标题只说这个目录不是仓库', setupTitle === '这个目录不是 Git 仓库')
 ok('不再声称「所有上级目录都没有 .git」',
   setupHints.indexOf('所有上级目录') < 0 && setupHints.indexOf('都没有') < 0)
 ok('也不再声称看过目录里有什么', setupHints.indexOf('空目录') < 0 && setupHints.indexOf('没有任何文件') < 0)
-ok('说的是「只看这个目录本身」', setupHints.indexOf('只看这个目录本身') >= 0)
+/* 要看的路径已经显示在上面了：没有要解释的规则，也没有要填的东西。 */
+ok('整页一句说明都没有', setupHints.length === 0)
+ok('不再让人把同一个路径再抄一遍（没有输入框）', inputs(setupBox).length === 0)
+ok('要看的目录本身仍然写着', textOf(byClass(setupTree, 'dsh-git-setup-path')[0]) === '/home/u/work/plain')
 ok('指路与初始化仍然在（不替用户做决定，也不挡着）',
   setupButtons.indexOf('打开这个目录') >= 0 && setupButtons.indexOf('在此初始化仓库') >= 0)
 host.call = beforeSetup
+
+/* 只有「这里没有仓库」才不需要人填路径；路径没定或有问题时输入框得留着。 */
+const beforeNoPath = host.call
+host.call = function (method, args) {
+  if (method === 'git/panel') {
+    return Promise.resolve({
+      ok: false, repo: '/home/u/work/other', error: 'no-session-repo', reason: 'no-path',
+      stderr: '', exitCode: 1, staged: [], unstaged: [], untracked: [], unmerged: [],
+    })
+  }
+  return beforeNoPath(method, args)
+}
+let noPathTree = null
+for (let i = 0; i < 4; i += 1) {
+  noPathTree = await renderUntilStable(makeElement(popover, { sessionId: 's-setup-nopath' }), 'gp40-nopath')
+  await wait(10)
+}
+const noPathBox = byClass(noPathTree, 'dsh-git-setup')[0]
+const noPathHints = byClass(noPathBox, 'dsh-git-hint').map((n) => textOf(n)).join(' | ')
+ok('路径没定时说明还在', noPathHints.indexOf('手动填写') >= 0)
+ok('路径没定时输入框也还在', inputs(noPathBox).length === 1)
+host.call = beforeNoPath
