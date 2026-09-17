@@ -60,6 +60,23 @@ if (stale(path.join('test', 'build-suites.mjs'), 'run `node test/build-suites.mj
    running only build.mjs leaves lib/index.js — the file that actually ships —
    asserting an older plugin. */
 if (stale('build-package.mjs', 'run `node build-package.mjs` first: lib/index.js is what the published package exports')) process.exit(1)
+/* Two things the preludes must supply for the fragments to run at all, and
+   both were missing once: the host half declares `shell` (or it applies
+   before the executor exists and registers no RPC), and the client half
+   defines the `styles` symbol its CSS fragment calls. Assert them on the
+   files that ship, not on the sources they are assembled from. */
+function publishedGap() {
+  const host = fs.readFileSync(path.join(ROOT, 'lib', 'index.js'), 'utf8')
+  const client = fs.readFileSync(path.join(ROOT, 'client', 'client.js'), 'utf8')
+  if (host.indexOf("export const inject = ['shell']") < 0) return 'lib/index.js does not declare the shell inject'
+  if (client.indexOf('const styles = {') < 0) return 'client/client.js does not define styles'
+  return null
+}
+const gap = publishedGap()
+if (gap !== null) {
+  console.error('published package: ' + gap)
+  process.exit(1)
+}
 
 let passed = 0
 let failed = 0

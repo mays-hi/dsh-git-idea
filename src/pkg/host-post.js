@@ -1,7 +1,7 @@
 })()
 
 /* The body's own apply, plus the one thing the bridge used to own: the
-   transport to the browser half. \`webServer\` is optional at the type level but
+   transport to the browser half. `webServer` is optional at the type level but
    present in every web profile; without it the panel goes quiet and nothing
    else changes. */
 export function apply(ctx, config) {
@@ -13,6 +13,13 @@ export function apply(ctx, config) {
   return plugin.apply(ctx, config)
 }
 
-/* No hard dependency to declare. Every service the fragments use — \`shell\`,
-   \`fs\`, \`timer\`, \`sandboxPolicy\`, \`sessions\` — is read with \`ctx.get\` and
-   guarded, and the RPC route waits for \`webServer\` through \`ctx.inject\` above. */
+/* `shell` is the one service the host half cannot do without: every git command
+   goes through it. Declared, not only read, because the executor that provides
+   it (`bash-sandbox` / `pwsh-sandbox`) is itself parked until `subprocess`,
+   `sandbox` and `sandboxPolicy` are ready — so at this plugin's apply time
+   `ctx.get('shell')` can still be undefined, and the body's guard would then
+   register no RPC at all. Cordis parks this plugin until the service exists;
+   `dsh-tool-bash`, the product's own bash tool, declares the same one. The rest
+   — `fs`, `timer`, `sandboxPolicy`, `sessions` — stay `ctx.get` reads with
+   guards, because a panel without them is still a panel. */
+export const inject = ['shell']
