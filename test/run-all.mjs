@@ -54,6 +54,10 @@ function stale(script, hint) {
 }
 if (stale('build.mjs', 'run `node build.mjs` first: the suites would otherwise test a stale artifact')) process.exit(1)
 if (stale(path.join('test', 'build-suites.mjs'), 'run `node test/build-suites.mjs` first: the suite on disk would otherwise assert what its body said last time')) process.exit(1)
+/* The published package is built from the same fragments. Editing src/ and
+   running only build.mjs leaves lib/index.js — the file that actually ships —
+   asserting an older plugin. */
+if (stale('build-package.mjs', 'run `node build-package.mjs` first: lib/index.js is what the published package exports')) process.exit(1)
 
 let passed = 0
 let failed = 0

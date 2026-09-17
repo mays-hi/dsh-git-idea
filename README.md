@@ -1,8 +1,8 @@
 # dsh-git-idea
 
-把 Git 的日常操作搬进 DSH 会话：输入框左侧的仓库 chip，挂在它上面的浮层面板（分支树 / 提交历史 + 图 / 变更与提交 / 提交详情），一个 Settings 页，以及 8 个模型可调用的 git 工具。
+把 Git 的日常操作搬进 DSH 会话：输入框左侧的仓库 chip，挂在它上面的浮层面板（分支树 / 提交历史 + 图 / 变更与提交 / 提交详情），以及一个 Settings 页。**它不向 DSH 注册任何模型工具**（理由见「不注册工具」）。
 
-> A git panel for DeepSeek Harness: a repository chip in the composer, a branch tree / commit graph / working tree / commit detail panel, a settings page, and 8 git tools for the model.
+> A git panel for DeepSeek Harness: a repository chip in the composer, a branch tree / commit graph / working tree / commit detail panel, and a settings page. It registers no model tools.
 
 仓库：<https://github.com/mays-hi/dsh-git-idea>
 
@@ -25,7 +25,7 @@
 
 ## 安装
 
-要求 DSH `0.1.5-rc.1` 及兼容版本（peer：`@deepseek-ai/dsh-tools ^0.1.5-rc.1`、`@deepseek-ai/cordis ^4.0.2`）。
+要求 DSH `0.1.5-rc.1` 及兼容版本（peer：`@deepseek-ai/cordis ^4.0.2`）。
 
 ```sh
 # 从 npm
@@ -40,7 +40,7 @@ dsh plugin --profile web add /path/to/dsh-git-idea
 
 装完**重启 `dsh web`**（bundle 在启动时读取）。若报 `ERR_PNPM_ADDING_TO_ROOT`，在包名前加 `-w`。
 
-> 如果 DSH 里已经跑着旧版动态插件（`<DSH_HOME>/dsh-git-idea` 那个桥），先停掉它再装，否则模型工具会重名。
+> 如果 DSH 里已经跑着旧版动态插件（`<DSH_HOME>/dsh-git-idea` 那个桥），先停掉它再装 —— 两个都装着就是两份 chip、两个面板在同一个 slot 上。
 
 ---
 
@@ -89,22 +89,33 @@ Settings → **dsh-git-idea配置**。分两层。
 
 ---
 
-## 模型工具
+## 不注册工具
 
-注册 8 个工具，都是结构化返回；破坏性操作需要显式 `confirm: true`。
+这个插件给 DSH 的只有 **UI 和它自己的 RPC 通道**：24 条 `host.call('git/…')`（面板、chip、
+设置页走的就是它们）。模型要跑 git 本来就有 `bash`，所以这里不注册任何工具。
 
-| 工具 | 作用 |
+以前注册过 8 个（`git`、`git_status`、`git_log`、`git_diff`、`git_commit`、`git_branch`、
+`git_stash`、`git_sync`），撤掉时量过代价：
+
+| 量到的 | 数 |
 |---|---|
-| `git` | 任意 git 命令的逃生舱，参数是 token 数组，没有白名单；破坏性命令需 `confirm: true` |
-| `git_status` | 分支、detached、upstream、ahead/behind，以及 staged / unstaged / untracked / unmerged 文件列表 |
-| `git_log` | 提交历史：hash、短 hash、作者、ISO 时间、标题、引用；支持范围、路径、条数上限 |
-| `git_diff` | 两个状态之间的差异；mode 为 `worktree` / `staged` / `commit` / `range`，超过 `maxFiles` 回退为原始 unified patch |
-| `git_commit` | 暂存并提交；默认提交已暂存内容，可用 `paths` 指定路径或 `all: true` 全量暂存 |
-| `git_branch` | 列出 / 新建 / 切换 / 删除 / 重命名分支；强删需 `confirm: true` |
-| `git_stash` | stash 的 list / push / pop / apply / show / drop / clear；drop、clear 需 `confirm: true` |
-| `git_sync` | fetch / pull / push 和远端的增删改；保护分支（main / master）不可强推，任何强推需 `confirm: true` |
+| 这 8 个工具的 schema | **7210 字节／每次请求**（约 1800 token，跟这一轮要不要碰 git 无关） |
+| 只为它们存在的 Host 代码 | **约 908 / 2577 行（35%）**：`40-tools` 533 行、`20-safety` 里 160 行（`classify`、受保护分支、`scanArgv`……）、`30-render` 里 215 行（那几个渲染器和 diff 卡） |
+| 客户端调用工具的次数 | **0** —— 面板从头到尾只走 `host.call('git/…')`，所以撤工具对 UI 零影响 |
 
-结构化工具拒绝以 `-` 开头的值（修订号、远端、分支名等），避免被 git 读成选项。
+那道"危险命令要 `confirm: true`、保护分支不可强推"的闸只拦模型这条通路（`classify` 只被
+工具调用），而 `bash git push --force` 永远在 —— 它是**建议，不是边界**。面板那条路更是从来
+就没有 force：`git/push` 发出去的是 `git push` 或 `git push -u <remote> <branch>`。
+
+撤掉之后留下的两件事，各有各的归处：
+
+- `repoRelativePath`（路径判据）搬到 `60-reads`，因为 RPC 那条路一直在用它：未跟踪的差异是
+  `git diff --no-index -- /dev/null <path>`，那条命令读的是路径指到的任何东西（本机实测：
+  绝对路径会读回 `/etc/hostname` 的内容）。它现在有三条断言盯着，包括「拒绝发生在拼命令
+  之前、一个子进程都没起」。
+- `parseStatusV2` 搬到 `64-history`，它是面板那次读的输入解析。
+
+唯一的代价：`git_diff` 以前会把差异渲染成 GUI 里的原生 diff 卡，现在记录里只有文本。
 
 ---
 
@@ -115,22 +126,24 @@ Settings → **dsh-git-idea配置**。分两层。
 ```sh
 node build-package.mjs          # 生成正式包：lib/index.js + client/client.js
 node build.mjs                  # 生成动态桥：host.js + client.js
-node test/run-all.mjs           # 全部断言（676 条）
+node test/run-all.mjs           # 全部断言（669 条）
 node build.mjs --check && node build-package.mjs --check   # 检查产物是否最新
 node test/bench.mjs             # 基准：200 条提交的历史列表
 node test/bench-branch.mjs      # 基准：300 个分支的切换器
 ```
 
-`test/run-all.mjs` 在跑任何断言之前会先检查两份产物和测试文件是否落后于源码。
+`test/run-all.mjs` 在跑任何断言之前会先检查三样东西是否落后于源码：动态桥的两个
+产物（`build.mjs --check`）、正式包的两个产物（`build-package.mjs --check`）、以及每个
+套件文件（`test/build-suites.mjs --check`）。
 
 ### 目录结构
 
 ```
 package.json          npm / DSH manifest（dsh.bundle patch + dsh.client web）
 cordis.patch.yml      bundle 层插入的插件行
-lib/index.js          构建产物：Host 半侧（ESM，8 个工具 + 同源 RPC 路由）
+lib/index.js          构建产物：Host 半侧（ESM，插件对象 + 同源 RPC 路由）
 client/client.js      构建产物：Client 半侧（__ModuleLoader__ bundle）
-src/host/*.js         Host 源码片段（13 个）
+src/host/*.js         Host 源码片段（10 个）
 src/client/*.js       Client 源码片段（23 个）
 src/pkg/*.js          正式包的 prelude / postlude（harness shim、host.call）
 build-package.mjs     正式包构建
