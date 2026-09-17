@@ -16,7 +16,7 @@
 - **提交详情**：选中提交后显示作者、时间、引用、提交信息和文件列表。
 - **变更与暂存**：分「变更」和「新增的文件」两组，可切树 / 平铺两种视图；勾选框暂存或取消暂存，分组标题的框对整组生效；未跟踪目录折叠成一行，展开才读取，勾选整目录等于 `git add <dir>`。
 - **文件差异**：在变更树或提交详情里单击文件，patch 直接占满正文，可返回、重读、暂存 / 取消暂存。四种状态：`staged`、`worktree`、`untracked`、`commit`；二进制只显示提示，不打印乱码。
-- **引导页**：工作区还不是仓库时，显示「打开这个目录」和「在此初始化仓库」。
+- **引导页**：工作区还不是仓库时，显示「打开这个目录」和「在此初始化仓库」；机器上没有 git 时同一页改说这一件事，并把路径框和初始化按钮都收起来 —— 这两件事都不是出路，唯一能做的是装好之后点一次「打开这个目录」。
 - **跟随会话沙箱**：所有 git 命令按当前会话解析出的 sandbox policy 发出——会话只读，插件就只读；会话可写，插件就能写它被指到的仓库。
 
 面板是挂在输入框上方的浮层，不是可停靠的工具窗。
@@ -126,7 +126,7 @@ Settings → **dsh-git-idea配置**。分两层。
 ```sh
 node build-package.mjs          # 生成正式包：lib/index.js + client/client.js
 node build.mjs                  # 生成动态桥：host.js + client.js
-node test/run-all.mjs           # 全部断言（669 条）
+node test/run-all.mjs           # 全部断言（693 条）
 node build.mjs --check && node build-package.mjs --check   # 检查产物是否最新
 node test/bench.mjs             # 基准：200 条提交的历史列表
 node test/bench-branch.mjs      # 基准：300 个分支的切换器

@@ -97,6 +97,17 @@ function pathShell(target, middle) {
   return [
     'if [ -d ' + quoted + ' ]; then',
     "  printf 'K:dir\\n'",
+    /* Asked here, once, before anything that needs git runs. Whether this path
+       is a repository is answered by the filesystem above and stays true on a
+       machine with no git; what is not true is everything the middle would then
+       report, because an empty answer from a git that never ran is not "there is
+       nothing here". This is the multiplexed half of `GIT_GUARD` — see there for
+       why the answer comes out as a marker instead of an exit code — and it
+       stops the script rather than letting the middle fail in a way that would
+       be read as git refusing the repository. `pathKind` is deliberately on the
+       other side of it: whether the path exists does not need git, so it still
+       answers here. */
+    '  if ! command -v git >/dev/null 2>&1; then printf ' + shq(PANEL_NO_GIT + '\\n') + '; exit 0; fi',
     /* Guarded by `repoHere` and not left to git: without the guard,
        `git rev-parse` in a directory that is not a repository walks up and
        answers for a parent one. */

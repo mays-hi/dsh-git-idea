@@ -55,9 +55,11 @@
       const work = props.work
       if (work == null) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '正在读取工作区…')
       if (work.ok !== true) {
-        const reason = work.error === 'not-a-repository'
-          ? ('不是 git 仓库：' + text(work.repo))
-          : '无法读取工作区状态'
+        const reason = work.noGit === true
+          ? ('找不到 git：' + text(work.repo))
+          : work.error === 'not-a-repository'
+            ? ('不是 git 仓库：' + text(work.repo))
+            : '无法读取工作区状态'
         return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
 

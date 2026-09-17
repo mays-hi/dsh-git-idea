@@ -339,6 +339,125 @@ console.log('  被拒的答复:', JSON.stringify({ ok: denied.ok, sandboxDenied:
 check('被沙箱拒绝时答复里明说是沙箱拒绝的', denied.ok !== true && denied.sandboxDenied === true)
 check('git 的原话也还在', denied.stderr.indexOf('index.lock') >= 0)
 
+/* ── 机器上没有 git ──
+
+   `repoHere` 是 `[ -e "$dir/.git" ]`：目录是不是仓库由文件系统回答，不需要 git。
+   于是 git 不在 PATH 上时，一个真仓库照样被认成仓库，而
+   `gd=$(git … rev-parse --absolute-git-dir 2>/dev/null)` 拿到空串 —— 脚本就按
+   「这里没有 .git」走了，面板首页报「这个目录不是 Git 仓库」，并且把路径输入框
+   关掉：一条读者无法执行的诊断，而完整读那一屏说的是另一回事（git 执行失败）。
+
+   这里把 PATH 指到一个空目录，其余一切照旧：命令文本、解析、答复都是插件自己的。
+   空目录连 stat/cat 也没有，但那正是「机器上什么都没有」的样子。 */
+const NOGIT_PATH = '/tmp/gp34-nogit-path'
+const NG = '/tmp/gp34-nogit-repo'
+const NGE = '/tmp/gp34-nogit-empty'
+fs.mkdirSync(NOGIT_PATH, { recursive: true })
+await sh(`rm -rf ${NG} ${NGE} && mkdir -p ${NG} ${NGE} && cd ${NG} && git init -q -b main && git config user.email t@t && git config user.name T && echo a > a.txt && git add -A && git commit -qm first && echo b > b.txt`, '/tmp')
+
+let nogitRuns = 0
+const handlers4 = new Map()
+const ctx4 = {
+  get: (n) => (n === 'shell' ? {
+    resolve: (r) => r,
+    run: (spec) => {
+      nogitRuns += 1
+      return new Promise((res) => {
+        const c = spawn('/bin/sh', ['-c', spec.command], {
+          cwd: spec.workdir,
+          env: Object.assign({}, process.env, { PATH: NOGIT_PATH }),
+        })
+        let o = '', e = ''
+        c.stdout.on('data', b => o += b); c.stderr.on('data', b => e += b)
+        c.on('error', er => res({ exitCode: null, stdout: { text: o }, stderr: { text: String(er.message) } }))
+        c.on('close', x => res({ exitCode: x, stdout: { text: o }, stderr: { text: e } }))
+      })
+    },
+  } : undefined),
+  effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
+}
+const harness4 = { defineTool: d => d, registerTool: () => () => {}, handle(n, f) { handlers4.set(n, f); return () => {} } }
+new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
+  ctx4, harness4, console, s => Buffer.from(s, 'binary').toString('base64'),
+  s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx4)
+const H4 = n => handlers4.get(n)
+
+const ngHead = (await sh('git rev-parse --short HEAD', NG)).out.trim()
+console.log('')
+console.log('=== 机器上没有 git ===')
+console.log('  （对照用的）真仓库:', NG, ngHead)
+check('先确认 fixture 本身是个有提交的仓库（不然下面那些绿都是空的）', ngHead.length > 0)
+const ngIdent = await H4('git/panel')({ repo: NG, quick: true })
+const ngFull = await H4('git/panel')({ repo: NG })
+console.log('  身份读:', JSON.stringify({ ok: ngIdent.ok, reason: ngIdent.reason, stderr: ngIdent.stderr }))
+console.log('  完整读:', JSON.stringify({ ok: ngFull.ok, reason: ngFull.reason, stderr: ngFull.stderr }))
+check('身份读说的是「找不到 git」，不是「这个目录不是仓库」', ngIdent.ok !== true && ngIdent.reason === 'no-git')
+check('首帧和完整读一个口径（一屏说一个说法是最坏的）', ngFull.ok !== true && ngFull.reason === 'no-git')
+check('答复里没有假的 stderr（原因已经在 reason 里说清了）', ngIdent.stderr === '' && ngFull.stderr === '')
+
+/* 负对照：同一个仓库，PATH 正常时一个 no-git 都不许冒出来 —— 判据本身写错的话，
+   这一条会先红，而不是等用户在一台装了 git 的机器上看到「找不到 git」。 */
+await H('git/flush')({ repo: NG })
+const okIdent = await H('git/panel')({ repo: NG, quick: true })
+const okFull = await H('git/panel')({ repo: NG })
+check('（对照）git 在的时候，两种读都正常，且没有 no-git 这个理由',
+  okIdent.ok === true && okIdent.branch === 'main' && okIdent.reason === undefined
+  && okFull.ok === true && okFull.reason === undefined && okFull.untracked.length === 1)
+check('（对照）正常答复里也没有 noGit 标志', okFull.noGit === undefined
+  && (await H('git/stage')({ repo: NG, paths: ['b.txt'] })).noGit === false)
+
+/* 面板之外的那些读：它们不经过 reason 这条路，各自带一个 noGit 标志 */
+const ngGraph = await H4('git/graph')({ repo: NG, maxCount: 5 })
+const ngBranches = await H4('git/branches')({ repo: NG })
+const ngRefs = await H4('git/refs')({ repo: NG })
+const ngAuthors = await H4('git/authors')({ repo: NG })
+const ngDiff = await H4('git/diff')({ repo: NG, mode: 'worktree', path: 'a.txt' })
+const ngUntracked = await H4('git/untracked')({ repo: NG, dir: 'sub' })
+const ngDetail = await H4('git/commit-detail')({ repo: NG, hash: 'deadbeef' })
+const ngStage = await H4('git/stage')({ repo: NG, paths: ['a.txt'] })
+const ngCommit = await H4('git/commit')({ repo: NG, message: 'x' })
+const ngInit = await H4('git/init')({ repo: NGE })
+const readFlags = { graph: ngGraph.noGit, branches: ngBranches.noGit, refs: ngRefs.noGit, authors: ngAuthors.noGit, diff: ngDiff.noGit, untracked: ngUntracked.noGit, detail: ngDetail.noGit }
+console.log('  各条读的 noGit 标志:', JSON.stringify(readFlags))
+console.log('  各条写的 noGit 标志:', JSON.stringify({ stage: ngStage.noGit, commit: ngCommit.noGit, init: ngInit.noGit }))
+check('每一条读失败都自报「机器上没有 git」',
+  ngGraph.ok !== true && ngBranches.ok !== true && ngRefs.ok !== true && ngAuthors.ok !== true
+  && ngDiff.ok !== true && ngUntracked.ok !== true && ngDetail.ok !== true
+  && Object.keys(readFlags).every((k) => readFlags[k] === true))
+check('每一条写失败也一样（暂存、提交、初始化都在内）',
+  ngStage.ok !== true && ngCommit.ok !== true && ngInit.ok !== true
+  && ngStage.noGit === true && ngCommit.noGit === true && ngInit.noGit === true)
+const okGraph = await H('git/graph')({ repo: NG, maxCount: 5 })
+check('（对照）同一批调用在 git 在的时候，没有一条说自己 noGit',
+  ngGraph.noGit === true && okGraph.noGit === undefined)
+
+/* 这个判据是 shell 内建，不是又一次 spawn：一笔身份读仍然只起一个进程。 */
+await H4('git/flush')({ repo: NG })
+nogitRuns = 0
+await H4('git/panel')({ repo: NG, quick: true })
+const oneRead = nogitRuns
+await H('git/flush')({ repo: NG })
+const normalRuns = []
+const realRunNogit = shellService.run
+shellService.run = (spec) => { normalRuns.push(spec.command); return realRunNogit(spec) }
+const normalReply = await H('git/panel')({ repo: NG, quick: true })
+shellService.run = realRunNogit
+console.log('  一笔身份读起的进程数：没有 git', oneRead, '／有 git', normalRuns.length)
+check('判据不多起进程（那边 1 个，这边也 1 个）', oneRead === 1 && normalRuns.length === 1)
+check('判据确实进了命令文本（两边都带这一行）',
+  body.indexOf('command -v git >/dev/null 2>&1') >= 0
+  && (body.match(/command -v git >\/dev\/null 2>&1/g) || []).length === 2)
+check('（对照）判据在有 git 时通过，这一读照常拿到分支',
+  normalRuns[0].indexOf('command -v git') >= 0
+  && normalReply.ok === true && normalReply.branch === 'main')
+
+/* 轮询读的是签名，不是仓库状态：没有 git 时它照样安静地回答，而且两次一样 ——
+   签名一直在变的话，chip 会每隔几秒重载一次面板。 */
+const ngWatch1 = await H4('git/watch')({ repo: NG, deep: true })
+const ngWatch2 = await H4('git/watch')({ repo: NG, deep: true })
+check('没有 git 时轮询签名稳定（不会把面板拖进重载循环）',
+  ngWatch1.ok === true && ngWatch1.sig === ngWatch2.sig)
+
 /* ── 读操作不许抢 index.lock ──
 
    一个 `git status` 会顺手刷新 index 的 stat 缓存 —— 也就是说它会拿

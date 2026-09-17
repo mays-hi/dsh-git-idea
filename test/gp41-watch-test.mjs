@@ -502,6 +502,23 @@ const forSetup = await chipTree()
 if (forSetup.props.className.indexOf('dsh-git-chip-open') < 0) { forSetup.props.onClick(); await wait(20) }
 const notRepo = await settle('setup-again')
 const openHere = byClass(notRepo, 'dsh-git-btn').find((b) => textOf(b) === '打开这个目录')
+/* chip 是面板之外唯一会说这句话的地方。同一个「读不动」的状态有两种原因，而它们
+   在屏幕上必须分开：目录里没有仓库，和这台机器上没有 git（见 92-chip 的那一串
+   理由）。中文只在这里验一遍 —— 面板那一页在 gp40。 */
+ok('（对照）reason 还是 not-a-repo 时，chip 说的是「这个目录不是 Git 仓库」',
+  String(forSetup.props.title).indexOf('不是 Git 仓库') >= 0)
+SETUP_REPLY.reason = 'no-git'
+forSetup.props.onClick()
+await wait(30)
+const chipNoGitClosed = await chipTree()
+chipNoGitClosed.props.onClick()
+await wait(30)
+const chipNoGit = await chipTree()
+console.log('  没有 git 时 chip 的 tooltip:', JSON.stringify(String(chipNoGit.props.title).slice(0, 90)))
+ok('机器上没有 git 时，chip 说的是找不到 git',
+  String(chipNoGit.props.title).indexOf('这台机器上找不到 git') >= 0)
+ok('chip 不再跟着首帧说「这个目录不是 Git 仓库」',
+  String(chipNoGit.props.title).indexOf('不是 Git 仓库') < 0)
 console.log('  引导页上有「打开这个目录」:', openHere !== undefined)
 openHere.props.onClick()
 await wait(30)

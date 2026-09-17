@@ -98,12 +98,37 @@ async function invoke(command, args, exec, options) {
   }
 }
 
+/* ── the one failure that is not about the repository ──
+
+   On a machine with no `git` on PATH every command below dies at the shell, and
+   its "command not found" arrives looking exactly like a repository git refused
+   to read: `git status` and `git rev-parse` both answer nothing, `$gd` comes out
+   empty, and a perfectly good repository is reported as "not a git repository" —
+   the one diagnosis the reader cannot act on, with the path field hidden besides.
+
+   So each git command opens with a question about the machine instead. `command
+   -v` is a shell builtin, so the check costs no process, and it asks about the
+   PATH *this* command will be resolved with — after `LC_ALL=C` and
+   `GIT_TERMINAL_PROMPT=0` have been put in front of it, neither of which changes
+   which git is found. The marker word and exit code 127 are what the Host reads;
+   bash's own sentence is never matched, because it is printed in whatever
+   language the machine happens to speak.
+
+   The panel scripts below are the one place this is not enough: they multiplex
+   several answers over stdout in a single process (`pathShell`), so they carry
+   the same check's answer as an output marker instead of an exit code —
+   `PANEL_NO_GIT`. Same question, same builtin, two transports. */
+const GIT_MISSING_MARK = 'dsh-git-idea: no git on PATH'
+const GIT_GUARD = 'command -v git >/dev/null 2>&1 || { printf ' + shq(GIT_MISSING_MARK + '\n') + ' >&2; exit 127; }\n'
+const PANEL_NO_GIT = 'N:nogit'
+
 /* The three wrappers differ only in what they put in front of the command: the
    package prefix is the whole of the difference, so it is the only argument. */
 async function shellGit(prefix, args, argv, exec, options) {
-  const result = await invoke(prefix + 'git ' + argv.map(shq).join(' '), args, exec, options)
+  const result = await invoke(GIT_GUARD + prefix + 'git ' + argv.map(shq).join(' '), args, exec, options)
   result.command = 'git ' + argv.join(' ')
   result.ok = result.exitCode === 0
+  result.noGit = result.exitCode === 127 && result.stderr.indexOf(GIT_MISSING_MARK) >= 0
   return result
 }
 
@@ -122,5 +147,13 @@ async function gitNet(args, argv, exec, options) {
    rather than whatever locale the machine happens to use. */
 async function gitC(args, argv, exec, options) {
   return await shellGit('LC_ALL=C ', args, argv, exec, options)
+}
+
+/* Every reply that carries a command's failure carries this with it, so that no
+   surface has to recognise a missing git by the words in stderr — see
+   `GIT_GUARD`. One flag, read in one place per surface: the mutating commands
+   through `commandDetail`, the panel reads through their `reason`. */
+function gitMissing(result) {
+  return result != null && result.noGit === true
 }
 

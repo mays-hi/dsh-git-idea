@@ -4,6 +4,13 @@
        something in it rather than picking one and showing nothing. */
     function commandDetail(result) {
       if (result == null) return ''
+      /* 和下面沙箱那条同一类：失败的原因不在仓库里，而在机器上。这次 git 一个字
+         都没说 —— 它根本没被启动 —— 所以这里给整句话，不留 bash 的原话：原话是
+         `bash: git: command not found`，而读者已经从上面那行知道这件事了。 */
+      if (result.noGit === true) {
+        return '这台机器上找不到 git：面板读它、改它都要调用 git。'
+          + '装上 git，或让它出现在 dsh 进程的 PATH 里，再试一次。'
+      }
       const err = text(result.stderr).replace(/\s+$/, '')
       const detail = err.length > 0 ? err.slice(0, 400) : text(result.stdout).replace(/\s+$/, '').slice(0, 400)
       /* git says "Unable to create ... .git/index.lock: Permission denied", which

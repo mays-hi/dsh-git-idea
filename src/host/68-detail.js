@@ -6,7 +6,7 @@ async function readCommitDetail(input) {
   const args = argsFor(input)
   const meta = await git(args, ['-c', 'core.quotePath=false', 'show', '-s',
     '--format=%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b', hash], null, {})
-  if (meta.exitCode !== 0) return { ok: false, error: 'commit-not-found', stderr: meta.stderr }
+  if (meta.exitCode !== 0) return { ok: false, error: 'commit-not-found', stderr: meta.stderr, noGit: gitMissing(meta) }
   const fields = meta.stdout.split('\u001f')
 
   const files = []
@@ -169,7 +169,7 @@ async function readFileDiff(input) {
      good patch on stdout; every other mode says it with exit code 0. */
   const produced = result.exitCode === 0 || (mode === 'untracked' && result.exitCode === 1 && result.stdout.length > 0)
   if (!produced) {
-    return { ok: false, error: 'diff-failed', exitCode: result.exitCode, stderr: result.stderr, mode: mode, path: path }
+    return { ok: false, error: 'diff-failed', exitCode: result.exitCode, stderr: result.stderr, noGit: gitMissing(result), mode: mode, path: path }
   }
 
   const binary = patchLooksBinary(result.stdout)
@@ -216,7 +216,7 @@ async function readUntrackedTree(input) {
   const result = await git(argsFor(input), ['--no-optional-locks', '-c', 'core.quotePath=false',
     'ls-files', '--others', '--exclude-standard', '-z', '--', dir], null, { maxBytes: 800000 })
   if (result.exitCode !== 0) {
-    return { ok: false, error: 'ls-files-failed', exitCode: result.exitCode, stderr: result.stderr, dir: dir }
+    return { ok: false, error: 'ls-files-failed', exitCode: result.exitCode, stderr: result.stderr, noGit: gitMissing(result), dir: dir }
   }
   const files = []
   const parts = result.stdout.split('\u0000')
@@ -245,6 +245,9 @@ async function panelMutate(input, argv, options) {
     /* Says outright that the file sandbox refused the write, so the reader is not
        left reading git's "Permission denied" as a problem with their repository. */
     sandboxDenied: result.sandboxDenied === true,
+    /* And the other failure that is not about the repository: no git on this
+       machine at all. Every mutating command and `git init` come through here. */
+    noGit: gitMissing(result),
   }
 }
 

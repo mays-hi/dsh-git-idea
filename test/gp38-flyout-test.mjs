@@ -610,3 +610,43 @@ ok('沙箱拒绝时，卡片说的是沙箱不允许写，而不是仓库有问�
   denied !== null && textOf(denied).indexOf('文件沙箱不允许写这个仓库') >= 0)
 ok('git 的原话也还在（读者能自查）', denied !== null && textOf(denied).indexOf('index.lock') >= 0)
 host.call = plainCheckout
+
+/* 第三种失败：这台机器上根本没有 git。git 一个字都没说 —— bash 说的是
+   "command not found"，而那是 shell 的话，不是仓库的话。读者要看到的是原因。 */
+let nogit = null
+host.call = function (method, args) {
+  if (method === 'git/checkout') {
+    calls.push({ method, args })
+    return Promise.resolve({
+      ok: false, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, noGit: true,
+      stdout: '', stderr: 'bash: line 1: git: command not found', exitCode: 127,
+    })
+  }
+  return plainCheckout.call(host, method, args)
+}
+let nogitTree = await chipTree()
+if (nogitTree.props.className.indexOf('dsh-git-chip-open') >= 0) { nogitTree.props.onClick(); await wait(10) }
+nogitTree = await chipTree()
+nogitTree.props.onPointerEnter()
+fireTimers()
+await wait(15)
+nogitTree = await settle('pop')
+const nogitRows = byClass(nogitTree, 'dsh-git-bs-row').filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
+const nogitTarget = nogitRows.find((r) => textOf(r).indexOf('zeta') >= 0) || nogitRows[nogitRows.length - 1]
+nogitTarget.props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
+fireTimers()
+await wait(15)
+nogitTree = await settle('pop')
+const nogitRow = flyPanel(nogitTree)
+if (nogitRow !== undefined) {
+  buttons(nogitRow).find((b) => textOf(b) === '检出').props.onClick({ stopPropagation() {} })
+  await wait(20)
+  nogit = await settle('pop')
+}
+const nogitText = textOf(nogit === null ? nogitTree : nogit)
+const nogitAt = nogitText.indexOf('这台机器上找不到 git')
+console.log('  没有 git 时卡片里那句话:', JSON.stringify(nogitAt < 0 ? '（没有）' : nogitText.slice(nogitAt, nogitAt + 60)))
+ok('没有 git 时说的是机器上找不到 git，不是仓库有问题',
+  nogit !== null && nogitText.indexOf('这台机器上找不到 git') >= 0)
+ok('不再把 bash 的 command not found 丢给读者看', nogitText.indexOf('command not found') < 0)
+host.call = plainCheckout

@@ -4,7 +4,7 @@ async function readAuthors(input, repo) {
   const args = argsFor(input)
   const listed = await git(args, ['--no-pager', 'shortlog', '-sne', '--all'], null, { maxBytes: 200000 })
   if (listed.exitCode !== 0) {
-    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, authors: [] }
+    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, noGit: gitMissing(listed), authors: [] }
   }
   const authors = []
   const rows = listed.stdout.split('\n')
@@ -45,7 +45,7 @@ async function readRefs(input, repo) {
     '--format=%(refname)%1f%(refname:short)%1f%(HEAD)%1f%(objectname:short)%1f%(upstream:short)%1f%(upstream:track)%1f%(committerdate:unix)',
     'refs/heads', 'refs/remotes'], null, {})
   if (listed.exitCode !== 0) {
-    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, current: [], local: [], remote: [] }
+    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, noGit: gitMissing(listed), current: [], local: [], remote: [] }
   }
   const local = []
   const current = []
@@ -118,7 +118,7 @@ async function readBranches(input, repo) {
     '--format=%(refname)%1f%(refname:short)%1f%(HEAD)%1f%(committerdate:unix)%1f%(upstream:short)%1f%(upstream:trackshort)%1f%(upstream:track)%1f%(objectname:short)%1f%(contents:subject)',
     '--sort=-committerdate', 'refs/heads', 'refs/remotes'], null, {})
   if (listed.exitCode !== 0) {
-    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, current: '', previous: '', branches: [], remotes: [] }
+    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, noGit: gitMissing(listed), current: '', previous: '', branches: [], remotes: [] }
   }
   const branches = []
   const remoteRows = []

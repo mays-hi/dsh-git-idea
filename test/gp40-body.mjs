@@ -592,3 +592,34 @@ const noPathHints = byClass(noPathBox, 'dsh-git-hint').map((n) => textOf(n)).joi
 ok('路径没定时说明还在', noPathHints.indexOf('手动填写') >= 0)
 ok('路径没定时输入框也还在', inputs(noPathBox).length === 1)
 host.call = beforeNoPath
+
+/* 目录是对的，机器上少了 git。这时改路径没有用，`git init` 也只会再失败一次 ——
+   两件都别留，只留「打开这个目录」当作装好之后的重试（面板不知道用户什么时候装）。 */
+const beforeNoGit = host.call
+host.call = function (method, args) {
+  if (method === 'git/panel') {
+    return Promise.resolve({
+      ok: false, repo: '/home/u/work/repo', error: 'not-a-repository', reason: 'no-git',
+      stderr: '', exitCode: null, staged: [], unstaged: [], untracked: [], unmerged: [],
+    })
+  }
+  return beforeNoGit(method, args)
+}
+let noGitTree = null
+for (let i = 0; i < 4; i += 1) {
+  noGitTree = await renderUntilStable(makeElement(popover, { sessionId: 's-setup-nogit' }), 'gp40-nogit')
+  await wait(10)
+}
+const noGitBox = byClass(noGitTree, 'dsh-git-setup')[0]
+const noGitTitle = textOf(byClass(noGitTree, 'dsh-git-setup-h')[0])
+const noGitHints = byClass(noGitBox, 'dsh-git-hint').map((n) => textOf(n)).join(' | ')
+const noGitButtons = buttons(noGitTree).filter((b) => String(b.props.className).indexOf('dsh-git-btn') >= 0).map((b) => textOf(b))
+console.log('  没有 git 时:', JSON.stringify({ 标题: noGitTitle, 说明: noGitHints, 按钮: noGitButtons }))
+ok('说的是「找不到 git」，不是「这不是一个仓库」', noGitTitle === '这台机器上找不到 git')
+ok('说明里指出了出路（装 git，或让它在 dsh 进程的 PATH 里）',
+  noGitHints.indexOf('git') >= 0 && noGitHints.indexOf('PATH') >= 0)
+ok('（对照）这句话没有和 not-a-repo 共用一套文案', noGitTitle !== '这个目录不是 Git 仓库')
+ok('不留输入框：路径不是问题，再抄一遍也没用', inputs(noGitBox).length === 0)
+ok('不留初始化按钮：git init 在这里只会再失败一次', noGitButtons.indexOf('在此初始化仓库') < 0)
+ok('留一个重试，装好之后点它', noGitButtons.indexOf('打开这个目录') >= 0)
+host.call = beforeNoGit

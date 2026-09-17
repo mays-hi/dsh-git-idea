@@ -126,6 +126,7 @@
       else if (info.reason === 'missing') title = '目录不存在：' + where + ' —— 点击修改路径'
       else if (info.reason === 'file') title = '这不是一个目录：' + where + ' —— 点击修改路径'
       else if (info.reason === 'git-error') title = where + ' 读取失败 —— 点击查看原因'
+      else if (info.reason === 'no-git') title = where + '：这台机器上找不到 git —— 点击查看'
       else if (info.reason === '') title = 'Git —— 点击打开面板'
       else title = where + ' 这个目录不是 Git 仓库 —— 点击选择路径或在这里初始化'
 

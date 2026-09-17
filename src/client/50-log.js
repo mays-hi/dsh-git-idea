@@ -100,9 +100,11 @@
       const win = useVirtualWindow('log', count, ROW_H)
 
       if (commits === null) {
-        const reason = graph != null && graph.error === 'not-a-repository'
-          ? ('不是 git 仓库：' + text(graph.repo))
-          : '无法读取提交历史'
+        const reason = graph != null && graph.noGit === true
+          ? ('找不到 git：' + text(graph.repo))
+          : graph != null && graph.error === 'not-a-repository'
+            ? ('不是 git 仓库：' + text(graph.repo))
+            : '无法读取提交历史'
         return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
       if (count === 0) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '没有匹配的提交')

@@ -1430,9 +1430,11 @@ textarea.dsh-git-input{resize:vertical}
       const win = useVirtualWindow('log', count, ROW_H)
 
       if (commits === null) {
-        const reason = graph != null && graph.error === 'not-a-repository'
-          ? ('不是 git 仓库：' + text(graph.repo))
-          : '无法读取提交历史'
+        const reason = graph != null && graph.noGit === true
+          ? ('找不到 git：' + text(graph.repo))
+          : graph != null && graph.error === 'not-a-repository'
+            ? ('不是 git 仓库：' + text(graph.repo))
+            : '无法读取提交历史'
         return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
       if (count === 0) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '没有匹配的提交')
@@ -1957,9 +1959,11 @@ textarea.dsh-git-input{resize:vertical}
       const work = props.work
       if (work == null) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '正在读取工作区…')
       if (work.ok !== true) {
-        const reason = work.error === 'not-a-repository'
-          ? ('不是 git 仓库：' + text(work.repo))
-          : '无法读取工作区状态'
+        const reason = work.noGit === true
+          ? ('找不到 git：' + text(work.repo))
+          : work.error === 'not-a-repository'
+            ? ('不是 git 仓库：' + text(work.repo))
+            : '无法读取工作区状态'
         return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
 
@@ -2569,6 +2573,16 @@ textarea.dsh-git-input{resize:vertical}
       /* 路径已经确定，只是这里没有仓库：没有要解释的规则，也没有要填的东西。
          不劝人换目录，也不让人把已经显示在上面的路径再抄一遍。 */
       'not-a-repo': { title: '这个目录不是 Git 仓库', hint: '', editable: false },
+      /* 目录是对的，机器上少了东西：这个页面不能改路径，也不能初始化 —— 两件事
+         都救不了这个状态，而 `git init` 只会再失败一次。留一个「打开这个目录」
+         当作装好 git 之后的重试。 */
+      'no-git': {
+        title: '这台机器上找不到 git',
+        hint: '上面这个目录本身是仓库，但面板读它、改它都要调用 git。'
+          + '装上 git，或让它出现在 dsh 进程的 PATH 里，再点一次「打开这个目录」。',
+        editable: false,
+        init: false,
+      },
       'git-error': { title: 'git 命令执行失败', hint: '目录存在，但 git 没能读取它。下方是 git 的原话。' },
     }
 
@@ -2588,6 +2602,9 @@ textarea.dsh-git-input{resize:vertical}
       /* 只有「路径还没定」或「这个路径有问题」时才需要人改路径。
          路径本身没错、只是这里没有仓库时，上面那行已经说清是哪个目录了。 */
       const editable = info.editable !== false
+      /* 初始化是「这里还没有仓库」的出路。没有 git 的时候它不是出路，是同一个
+         失败再演一次。 */
+      const canInit = info.init !== false
       const target = draft.trim()
 
       const open = function () {
@@ -2638,11 +2655,11 @@ textarea.dsh-git-input{resize:vertical}
                 disabled: busy || target.length === 0,
                 onClick: doInit,
               }, busy ? '正在初始化…' : '确认初始化（会写入 .git）')
-            : h('button', {
+            : (canInit ? h('button', {
                 type: 'button', className: 'dsh-git-btn',
                 disabled: busy || target.length === 0,
                 onClick: function () { setArmed(true); setProblem(null) },
-              }, '在此初始化仓库'),
+              }, '在此初始化仓库') : null),
           armed ? h('button', {
             type: 'button', className: 'dsh-git-btn',
             disabled: busy,
@@ -2659,6 +2676,13 @@ textarea.dsh-git-input{resize:vertical}
        something in it rather than picking one and showing nothing. */
     function commandDetail(result) {
       if (result == null) return ''
+      /* 和下面沙箱那条同一类：失败的原因不在仓库里，而在机器上。这次 git 一个字
+         都没说 —— 它根本没被启动 —— 所以这里给整句话，不留 bash 的原话：原话是
+         `bash: git: command not found`，而读者已经从上面那行知道这件事了。 */
+      if (result.noGit === true) {
+        return '这台机器上找不到 git：面板读它、改它都要调用 git。'
+          + '装上 git，或让它出现在 dsh 进程的 PATH 里，再试一次。'
+      }
       const err = text(result.stderr).replace(/\s+$/, '')
       const detail = err.length > 0 ? err.slice(0, 400) : text(result.stdout).replace(/\s+$/, '').slice(0, 400)
       /* git says "Unable to create ... .git/index.lock: Permission denied", which
@@ -4982,6 +5006,7 @@ textarea.dsh-git-input{resize:vertical}
       else if (info.reason === 'missing') title = '目录不存在：' + where + ' —— 点击修改路径'
       else if (info.reason === 'file') title = '这不是一个目录：' + where + ' —— 点击修改路径'
       else if (info.reason === 'git-error') title = where + ' 读取失败 —— 点击查看原因'
+      else if (info.reason === 'no-git') title = where + '：这台机器上找不到 git —— 点击查看'
       else if (info.reason === '') title = 'Git —— 点击打开面板'
       else title = where + ' 这个目录不是 Git 仓库 —— 点击选择路径或在这里初始化'
 

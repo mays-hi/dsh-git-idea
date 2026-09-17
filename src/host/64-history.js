@@ -82,8 +82,10 @@ async function readPanelIdentity(input, target) {
   let branch = null
   let upstream = null
   let track = ''
+  let noGit = false
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i]
+    if (line === PANEL_NO_GIT) { noGit = true; continue }
     if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
     if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
     if (line.indexOf('B:') === 0) { branch = line.slice(2); continue }
@@ -95,6 +97,9 @@ async function readPanelIdentity(input, target) {
       track = field(fields, 1)
     }
   }
+  /* Before the exit code, which the script never reached: "this machine has no
+     git" is not a repository that failed to read, and the reader can act on it. */
+  if (noGit) return missingPanel(target, 'no-git')
   if (exitCode !== 0) {
     const failed = missingPanel(target, 'not-a-repo')
     failed.exitCode = exitCode
@@ -124,15 +129,18 @@ async function readPanel(input, target, paths) {
 
   let exitCode = null
   let sequencer = null
+  let noGit = false
   const body = []
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i]
+    if (line === PANEL_NO_GIT) { noGit = true; continue }
     if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
     if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
     body.push(line)
   }
   const output = body.join('\n')
 
+  if (noGit) return missingPanel(target, 'no-git')
   if (exitCode !== 0) {
     const outsideRepo = output.indexOf('not a git repository') >= 0
     const failed = missingPanel(target, outsideRepo ? 'not-a-repo' : 'git-error')
@@ -220,7 +228,7 @@ async function readGraph(input, repo) {
 
   const logged = await git(args, argv, null, {})
   if (logged.exitCode !== 0) {
-    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: logged.stderr, currentBranch: currentBranch, ref: ref, commits: [], rows: [], lanes: 1 }
+    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: logged.stderr, noGit: gitMissing(logged), currentBranch: currentBranch, ref: ref, commits: [], rows: [], lanes: 1 }
   }
   const parsed = parseCommitRecords(logged.stdout)
   const hasMore = parsed.length > maxCount
