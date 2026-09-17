@@ -1,7 +1,7 @@
 {
   "name": "dsh-git-idea",
   "version": "0.1.0",
-  "description": "A git panel inside the DSH session: a repository chip in the composer, a panel with the branch tree, commit graph, working tree and commit detail, a Settings page, and 8 git model tools.",
+  "description": "A git panel inside the DSH session: a repository chip in the composer, a panel with the branch tree, commit graph, working tree and commit detail, and a Settings page.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -26,8 +26,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-tools": "^0.1.5-rc.1"
+    "@deepseek-ai/cordis": "^4.0.2"
   },
   "scripts": {
     "build": "node build.mjs && node build-package.mjs",

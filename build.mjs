@@ -22,9 +22,6 @@ export const TARGETS = [
     parts: [
       'src/host/00-plugin.js',
       'src/host/10-shell.js',
-      'src/host/20-safety.js',
-      'src/host/30-render.js',
-      'src/host/40-tools.js',
       'src/host/50-graph.js',
       'src/host/60-reads.js',
       'src/host/62-panel.js',

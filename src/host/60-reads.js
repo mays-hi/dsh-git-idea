@@ -48,6 +48,31 @@ function argsFor(input) {
   return argsAt(input, repoFrom(input))
 }
 
+/* ── a path that stays inside the repository ──
+
+   Every path the panel sends is one git itself listed, so it is relative to the
+   work-tree root. Three of the four diff reads pass it as a pathspec, which git
+   keeps inside the repository on its own. The untracked read cannot: it is
+   `git diff --no-index -- /dev/null <path>`, and that command reads whatever the
+   path names. Measured here, an absolute path came back with the contents of
+   /etc/hostname — a file no reader of a git panel asked for. So anything
+   absolute, or stepping up with "..", is refused rather than resolved.
+
+   A NUL byte is refused for a different reason: it survives as far as the shell
+   layer, where Node's own `spawn` rejects the argument outright (`ERR_INVALID_ARG_VALUE`,
+   measured), so the read would throw instead of answering. */
+function repoRelativePath(path) {
+  if (!isStr(path) || path.length === 0) return 'path is required'
+  if (path.charAt(0) === '/' || path.charAt(0) === '\\') return 'path must be relative to the repository root'
+  if (path.length > 1 && path.charAt(1) === ':') return 'path must be relative to the repository root'
+  if (path.indexOf('\u0000') >= 0) return 'path may not contain a NUL byte'
+  const parts = path.split(/[\\/]/)
+  for (let i = 0; i < parts.length; i += 1) {
+    if (parts[i] === '..') return 'path may not step outside the repository'
+  }
+  return ''
+}
+
 /* ─────────────── per-repository read cache ───────────────
 
    Opening the panel used to cost nine child processes and nothing was reused,

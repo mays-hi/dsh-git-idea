@@ -1,13 +1,13 @@
 /* ── the real-package Host half ──
 
    The fragments under src/host/ were written for the dynamic Cordis bridge:
-   that realm handed the plugin a \`harness\` (\`defineTool\` / \`registerTool\` /
-   \`handle\`) and a façade \`ctx\`. A real package gets neither, so this prelude
-   supplies the same three ways to speak over the services a real \`ctx\` has.
-   The body after it is the same text the dynamic bridge loads — one body, two
-   builds — and host-post.js exports the plugin object. */
-
-import { defineTool } from '@deepseek-ai/dsh-tools'
+   that realm handed the plugin a \`harness\` and a façade \`ctx\`. A real package
+   gets neither, so this prelude supplies the one thing the body still asks of a
+   harness — \`handle\`, which the RPC route below serves. (It used to supply
+   \`defineTool\` / \`registerTool\` too, for the model tools; the plugin ships
+   none, see the README's 「不注册工具」.) The body after it is the same text the
+   dynamic bridge loads — one body, two builds — and host-post.js exports the
+   plugin object. */
 
 /* The one route the browser half calls: same origin as the page, so no CORS.
    The same-origin check below is what keeps another page on loopback from
@@ -91,9 +91,9 @@ async function rpcRoute(request, response) {
   }
 }
 
+/* The body registers RPC handlers here and nothing else: with no model tools
+   there is no tool registry to reach, and \`inject\` no longer names one. */
 const harness = {
-  defineTool: function (options) { return defineTool(options) },
-  registerTool: function (ctx, tool) { return ctx.tools.register(tool) },
   handle: function (method, handler) {
     rpcHandlers.set(method, handler)
     return function () { rpcHandlers.delete(method) }

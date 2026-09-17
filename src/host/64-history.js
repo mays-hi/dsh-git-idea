@@ -1,5 +1,68 @@
 /* ─────────────── the panel's own read, and the graph ─────────────── */
 
+/* ── `git status --porcelain=v2`, and the words for its two letters ──
+
+   The panel's full read is the only caller: the cheap identity read that the
+   chip uses asks three questions and never looks at the working tree.
+   `STATUS_LABELS` has one reader — `parseStatusV2` puts those words into each
+   entry's `label` — so it travels with the parser rather than on its own.
+ */
+const STATUS_LABELS = {
+  M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied',
+  T: 'typechange', U: 'unmerged', '.': 'unchanged',
+}
+
+function statusLabel(code) {
+  return STATUS_LABELS[code] === undefined ? code : STATUS_LABELS[code]
+}
+
+function parseStatusV2(stdout) {
+  const parsed = {
+    branch: null, detached: false, upstream: null, ahead: 0, behind: 0,
+    staged: [], unstaged: [], untracked: [], unmerged: [],
+  }
+  const lines = stdout.split('\n')
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.length === 0) continue
+    if (line.charAt(0) === '#') {
+      const head = line.slice(2)
+      const space = head.indexOf(' ')
+      const key = space < 0 ? head : head.slice(0, space)
+      const rest = space < 0 ? '' : head.slice(space + 1)
+      if (key === 'branch.head') {
+        if (rest === '(detached)') parsed.detached = true
+        else parsed.branch = rest
+      } else if (key === 'branch.upstream') {
+        parsed.upstream = rest
+      } else if (key === 'branch.ab') {
+        const parts = rest.split(' ')
+        if (parts.length === 2) {
+          parsed.ahead = parseInt(parts[0].slice(1), 10) || 0
+          parsed.behind = parseInt(parts[1].slice(1), 10) || 0
+        }
+      }
+      continue
+    }
+    const marker = line.charAt(0)
+    if (marker === '?') { parsed.untracked.push(line.slice(2)); continue }
+    if (marker === '!') continue
+    if (marker === '1' || marker === '2' || marker === 'u') {
+      const fields = line.split(' ')
+      const xy = fields[1] === undefined ? '..' : fields[1]
+      let path = ''
+      if (marker === '1') path = fields.slice(8).join(' ')
+      else if (marker === '2') path = fields.slice(9).join(' ').split('\t')[0]
+      else path = fields.slice(10).join(' ')
+      const entry = { path: path, code: xy, label: statusLabel(xy.charAt(0)) + '/' + statusLabel(xy.charAt(1)) }
+      if (marker === 'u') { parsed.unmerged.push(entry); continue }
+      if (xy.charAt(0) !== '.') parsed.staged.push(entry)
+      if (xy.charAt(1) !== '.') parsed.unstaged.push(entry)
+    }
+  }
+  return parsed
+}
+
 function missingPanel(target, reason) {
   return {
     ok: false, repo: target, error: 'not-a-repository', reason: reason,

@@ -371,12 +371,8 @@ const afterPanel = await indexStamp()
 console.log('  面板完整读取:', panelRead.ok === true ? 'ok' : String(panelRead.error), ' index 有没被动:', beforePanel !== afterPanel)
 check('面板的完整读取没有写 index', panelRead.ok === true && beforePanel === afterPanel)
 
-await sh('touch f', LOCK)
-const beforeTool = await indexStamp()
-const toolRead = await TOOLS.get('git_status').execute({ repo: LOCK }, { agent: { session: { header: { cwd: LOCK } } } })
-const afterTool = await indexStamp()
-console.log('  git_status 工具:', toolRead.ok === true ? 'ok' : String(toolRead.error), ' index 有没被动:', beforeTool !== afterTool)
-check('模型工具 git_status 也没有写 index', toolRead.ok === true && beforeTool === afterTool)
+/* 这条读以前有两个面：面板的 RPC，和模型的 `git_status` 工具。工具撤了，只剩面板
+   这一面 —— 上面那条断言钉的就是它，这里不再有第二条通路要照顾。 */
 
 /* 差异读（`git/diff`）照同一套规矩，而且这里只钉能钉住的那一件事。
 
@@ -406,7 +402,7 @@ check('四种模式的命令里都带着 --no-optional-locks，而且在子命�
 
 /* 规矩写死在源码里：以后再加一条读状态的地方，忘了标志就红。
    只认真正的调用行（`git -C …` 的 shell 串，或 `git(args, […])` 的参数表），
-   免得把工具描述里那句 "Reads git status --porcelain=v2" 也算进来。 */
+   免得某段注释里提了一句 `git status` 也算进来。 */
 const statusLines = body.split('\n').map((l, i) => ({ n: i + 1, l: l }))
   .filter((x) => x.l.indexOf('--porcelain') >= 0 && x.l.indexOf('status') >= 0
     && (x.l.indexOf('git -C') >= 0 || x.l.indexOf('git(args,') >= 0))
@@ -490,80 +486,6 @@ check('列在里面的文件被改动 → 按路径的签名就变（深读还�
 check('别的文件被改动 → 按路径的签名不变（省下的就是这一次走树），整棵树的签名照变',
   sigF2 === sigF3 && wholeF2 !== wholeF3)
 
-
-/* ── 值是值，不是选项 ──
-
-   结构化工具把调用方给的字符串直接放进 git 的 argv：一个修订号、一个路径、一个
-   远端名、一个分支名。以 "-" 开头的字符串已经不是那个值了 —— git 会把它当选项
-   读。实测：`git_sync` 的 branch="--force" 跑出 `git push origin --force`（一次
-   没有确认的强推），`git_log` 的 ref="--output=/tmp/x" 把空日志写进那个文件并
-   返回空结果，`git_branch` 的 name="--force" 跑出 `git branch --force`。 */
-console.log('')
-console.log('=== 值是值，不是选项 ===')
-const cmds = []
-const tools5 = new Map()
-const ctx5 = {
-  get: (n) => (n === 'shell'
-    ? {
-      resolve: (r) => r,
-      run: async (spec) => {
-        cmds.push(spec.command)
-        const text = spec.command.indexOf('symbolic-ref') >= 0 ? 'main\n' : ''
-        return { exitCode: 0, stdout: { text: text }, stderr: { text: '' } }
-      },
-    }
-    : undefined),
-  effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
-}
-const harness5 = { defineTool: (d) => { tools5.set(d.name, d); return d }, registerTool: () => () => {}, handle: (n, f) => { tools5.set('rpc:' + n, f); return () => {} } }
-new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
-  ctx5, harness5, console, s => Buffer.from(s, 'binary').toString('base64'),
-  s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx5)
-const exec5 = { agent: { session: { header: { cwd: '/tmp' } } } }
-
-const refuses = async (label, name, args) => {
-  cmds.length = 0
-  const out = await tools5.get(name).execute(args, exec5)
-  console.log('  ' + label.padEnd(34) + ' -> error=' + String(out.error) + ' blocked=' + String(out.blocked) + ' 发出的命令=' + String(cmds.length))
-  return out
-}
-const logOpt = await refuses('git_log ref=--output=/tmp/gp41-zzz', 'git_log', { repo: '/tmp', ref: '--output=/tmp/gp41-zzz' })
-check('以 - 开头的 revision 被拒，且一个进程都没起', logOpt.ok !== true && logOpt.error === 'option-like-value' && cmds.length === 0)
-const syncOpt = await refuses('git_sync push branch=--force', 'git_sync', { action: 'push', remote: 'origin', branch: '--force' })
-check('以 - 开头的分支名被拒（否则就是一次没确认的强推）', syncOpt.ok !== true && syncOpt.error === 'option-like-value' && cmds.length === 0)
-const branchOpt = await refuses('git_branch create name=--force', 'git_branch', { action: 'create', name: '--force' })
-check('以 - 开头的分支名在 git_branch 里也被拒', branchOpt.ok !== true && branchOpt.error === 'option-like-value' && cmds.length === 0)
-/* `--` 之后是路径：一个叫 `-notes.txt` 的文件是正当名字，不能被顺手一起拒掉。 */
-cmds.length = 0
-const dottedPath = await tools5.get('git').execute({ args: ['log', '--', '-notes.txt'] }, exec5)
-check('`--` 后面的路径不受这条规矩影响', cmds.length === 1 && String(cmds[0]).indexOf("'--' '-notes.txt'") > 0)
-
-/* 保护分支的三种写法是同一个引用：只有最长的那一种被认出来时，规则看着还在，
-   而它点名的那个分支已经过去了。 */
-console.log('')
-const protectedRefs = [
-  ['git push -f origin refs/heads/main', ['push', '-f', 'origin', 'refs/heads/main'], 'forbidden'],
-  ['git push -f origin heads/main', ['push', '-f', 'origin', 'heads/main'], 'forbidden'],
-  ['git push -f origin main', ['push', '-f', 'origin', 'main'], 'forbidden'],
-  ['git push -f origin refs/heads/topic', ['push', '-f', 'origin', 'refs/heads/topic'], 'confirmation-required'],
-]
-for (const [label, argv, want] of protectedRefs) {
-  const out = await tools5.get('git').execute({ args: argv }, exec5)
-  console.log('  ' + label.padEnd(38) + ' -> blocked=' + String(out.blocked))
-  check(label + ' → ' + want, out.blocked === want)
-}
-/* 不带分支的强推推的是「当前分支」，而当前分支同样可能是 main。 */
-const forceNoBranch = await tools5.get('git_sync').execute({ action: 'push', force: 'force', confirm: true }, exec5)
-console.log('  git_sync force + confirm，不给分支（当前分支 main） -> blocked=' + String(forceNoBranch.blocked))
-check('不给分支的强推也要看当前分支是不是保护分支', forceNoBranch.blocked === 'forbidden')
-
-/* 空参数那条路是唯一没有 stdout 的答复，渲染器不能因此炸掉。 */
-console.log('')
-const emptyArgs = await tools5.get('git').execute({ args: [] }, exec5)
-let rendered = ''
-try { rendered = JSON.stringify(tools5.get('git').output.render({}, emptyArgs)) } catch (error) { rendered = 'threw: ' + String(error) }
-console.log('  空参数渲染 ->', JSON.stringify(rendered))
-check('空参数被拒之后，渲染器照常给出理由', rendered.indexOf('INVALID ARGUMENTS') >= 0 && rendered.indexOf('threw') < 0)
 
 /* 身份读（chip 用的那个廉价读）自己也要报数，而且未出生的分支也要认名字。 */
 console.log('')
@@ -736,10 +658,27 @@ check('未跟踪：--no-index 的退出码是 1，但补丁本身是好的',
 
 console.log('')
 console.log('  — 守卫 —')
-const absPath = await H('git/diff')({ repo: D, mode: 'untracked', path: '/etc/hostname' })
-console.log('  绝对路径 ->', JSON.stringify(absPath))
-check('绝对路径被拒（--no-index 会真的去读仓库外的文件）',
-  absPath.ok === false && absPath.error === 'invalid-path')
+/* 拒绝要发生在拼命令**之前**：这条读是 `git diff --no-index -- /dev/null <path>`，
+   一个子进程起出去就已经读到了仓库外的东西，答不答复都晚了。所以这里连进程数一起量。 */
+const escapeCommands = []
+const beforeEscapeRun = shellService.run
+shellService.run = function (spec) { escapeCommands.push(spec.command); return beforeEscapeRun(spec) }
+/* 一个 NUL 字节要是漏到这一层，Node 的 spawn 会**抛**而不是返回 —— 守卫被拿掉时
+   这一行会直接把整个套件带走，回归信号就只剩一个栈。所以这两次读自己吞掉异常，
+   把一个 throw 变成一行 ✗。 */
+const probeDiff = async function (args) {
+  try { return await H('git/diff')(args) } catch (error) {
+    return { ok: false, error: 'threw: ' + String(error != null ? error.message : error) }
+  }
+}
+const absPath = await probeDiff({ repo: D, mode: 'untracked', path: '/etc/hostname' })
+const nulPath = await probeDiff({ repo: D, mode: 'untracked', path: 'a\u0000b' })
+shellService.run = beforeEscapeRun
+console.log('  绝对路径 ->', JSON.stringify(absPath.error), ' 起了几个进程:', escapeCommands.length)
+check('绝对路径被拒，而且一个进程都没起（拒绝在拼命令之前）',
+  absPath.ok === false && absPath.error === 'invalid-path' && escapeCommands.length === 0)
+check('路径里的 NUL 字节同样被拒',
+  nulPath.ok === false && nulPath.error === 'invalid-path' && escapeCommands.length === 0)
 /* 对照：同一个命令绕过守卫，读的就是仓库外的文件 —— 守卫是承重的，不是装饰 */
 const rawEscape = await sh('cd ' + D + ' && git --no-optional-locks diff --no-color --no-index -- /dev/null /etc/hostname | head -1', '/tmp')
 check('（对照）同一条 git 命令绕过守卫确实会读出 /etc/hostname',
@@ -832,6 +771,25 @@ check('目录同样不许跑出仓库', dirEscape.ok === false && dirEscape.erro
 
 const insideDiff = await H('git/diff')({ repo: D, mode: 'untracked', path: 'newdir/a.txt' })
 check('目录里的文件照样读得出差异', insideDiff.ok === true && insideDiff.added === 1)
+
+/* ── 不向 DSH 注册任何工具 ──
+
+   这个插件给 DSH 的只有 UI 和它自己的 RPC 通道：客户端从头到尾只走
+   `host.call('git/…')`，一次工具调用都没有。模型要跑 git 本来就有 bash，那 8 个
+   工具是同一件事的第二条通路，代价是每一轮请求都带着 7.2KB 的 schema。所以
+   harness 一个 defineTool 都不该收到 —— 谁再把它加回来，这里先红。 */
+console.log('')
+console.log('=== 不注册工具 ===')
+console.log('  harness 收到的工具定义:', TOOLS.size, '处')
+check('不向 DSH 注册任何工具', TOOLS.size === 0)
+check('源码里也没有 registerTool / defineTool 的调用',
+  body.indexOf('registerTool(') < 0 && body.indexOf('defineTool(') < 0)
+/* 同一条源码还有第二份产物：正式包的 lib/index.js，前面挂着 pkg/host-pre.js 那个
+   harness 垫片。垫片里曾经有 defineTool / registerTool 两项，撤工具时一起撤了 ——
+   谁把它加回去，这里也要红，不然「不注册工具」只对桥那一半成立。 */
+const pkgBody = fs.readFileSync(new URL('../lib/index.js', import.meta.url).pathname, 'utf8')
+check('正式包那一半（lib/index.js）也没有注册工具',
+  pkgBody.indexOf('registerTool(') < 0 && pkgBody.indexOf('defineTool(') < 0)
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {

@@ -2,8 +2,8 @@
 
 /* The body's own apply, plus the one thing the bridge used to own: the
    transport to the browser half. \`webServer\` is optional at the type level but
-   present in every web profile; without it the model tools still register and
-   only the panel goes quiet. */
+   present in every web profile; without it the panel goes quiet and nothing
+   else changes. */
 export function apply(ctx, config) {
   ctx.inject(['webServer'], function (scope) {
     scope.effect(function () {
@@ -13,6 +13,6 @@ export function apply(ctx, config) {
   return plugin.apply(ctx, config)
 }
 
-/* \`tools\` is the only hard dependency: every fragment reaches it through
-   \`harness.registerTool\`. Every other service is read with \`ctx.get\` and guarded. */
-export const inject = ['tools']
+/* No hard dependency to declare. Every service the fragments use — \`shell\`,
+   \`fs\`, \`timer\`, \`sandboxPolicy\`, \`sessions\` — is read with \`ctx.get\` and
+   guarded, and the RPC route waits for \`webServer\` through \`ctx.inject\` above. */

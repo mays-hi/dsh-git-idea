@@ -15,7 +15,7 @@ const harness = { handle(n, f) { handlers.set(n, f); return () => {} }, defineTo
 new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', bridge)(ctx, harness, { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push('ERR ' + a.join(' ')) }, s => s, s => s, TextEncoder, TextDecoder).apply(ctx)
 await new Promise(r => setTimeout(r, 1200))
 console.log('日志:', JSON.stringify(logs))
-console.log('工具:', tools.length, ' RPC:', handlers.size)
+console.log('工具:', tools.length, '（应为 0：这个插件不注册工具） RPC:', handlers.size)
 const src = await handlers.get('dsh-git-idea/source')({ half: 'client' })
 console.log('client 源码长度:', src.source.length, ' 与磁盘一致:', src.source === fs.readFileSync('/home/mayou/.dsh/dsh-git-idea/client.js', 'utf8'))
 const b = await handlers.get('git/branches')({ repo: '/tmp/gp34-repo' })
