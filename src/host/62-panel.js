@@ -199,8 +199,9 @@ function panelCommand(target, paths) {
    the reported status is identical either way.
 
    The rule is not "this one call": it is every read this plugin makes. The full
-   panel read and the `git_status` tool missed it for a while and were caught by
-   a case of exactly this — a fetch that triggered auto-gc was blamed first, but
+   panel read missed it for a while (so did the `git_status` tool, while the
+   plugin still had one) and was caught by a case of exactly this — a fetch that
+   triggered auto-gc was blamed first, but
    background gc never touches index.lock (it runs pack-objects --indexed-objects,
    which only reads the index). Whoever writes .git/index is the suspect, and a
    `git status` writes it. `test/gp34a` now holds both the rule and the probe. */
