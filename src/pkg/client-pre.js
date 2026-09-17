@@ -47,4 +47,22 @@ window.__ModuleLoader__.load({
       },
     }
 
+    /* The dynamic bridge's browser realm also handed the fragments a `styles`
+       symbol, and 46-css.js is written against it: one `insert(text)` that
+       appends a <style> element and returns the remover that `ctx.effect`
+       disposes with. The real client realm has no such symbol —
+       `dsh-client-modules` instead claims whatever <style> a factory injected
+       and tags it for HMR — so the prelude supplies the same one over the same
+       DOM. */
+    const styles = {
+      insert: function (text) {
+        const element = document.createElement('style')
+        element.textContent = text
+        document.head.appendChild(element)
+        return function () {
+          if (element.parentNode !== null) element.parentNode.removeChild(element)
+        }
+      },
+    }
+
     const plugin = (function () {
