@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-idea",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A git panel inside the DSH session: a repository chip in the composer, a panel with the branch tree, commit graph, working tree and commit detail, and a Settings page.",
   "type": "module",
   "main": "lib/index.js",

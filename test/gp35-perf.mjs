@@ -11,7 +11,7 @@ function runShell(spec) {
 }
 const handlers = new Map()
 const ctx = { get: n => (n === 'shell' ? { resolve: r => r, run: runShell } : undefined), effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} } }
-const harness = { handle(n, f) { handlers.set(n, f); return () => {} }, defineTool: d => d, registerTool: () => () => {} }
+const harness = { handle(n, f) { handlers.set(n, f); return () => {} } }
 new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(ctx, harness, console, s => s, s => s, TextEncoder, TextDecoder).apply(ctx)
 const H = n => handlers.get(n)
 const R = '/tmp/gp34-repo'

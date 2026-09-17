@@ -172,6 +172,10 @@
         ok: true, repo: partial.repo, branch: partial.branch, detached: partial.detached,
         upstream: partial.upstream, ahead: partial.ahead, behind: partial.behind,
         sequencer: partial.sequencer,
+        /* 和 branch、upstream 一样来自这一次读：身份缺不缺是机器上的事实，不随路径
+           部分读而改变，但也不能因为一次合并就把它丢掉（丢掉的后果是提交区那个提示
+           闪一下又没了）。 */
+        needsIdentity: partial.needsIdentity === true,
         staged: keep(current.staged).concat(list(partial.staged)),
         unstaged: keep(current.unstaged).concat(list(partial.unstaged)),
         untracked: keep(current.untracked).concat(list(partial.untracked)),
@@ -187,8 +191,22 @@
        the whole tree again, which is the cost this is here to avoid. */
     const PATHS_MAX = 200
 
-    function pathsOfInterest(status) {
+    /* ── 父目录那一层有多贵 ──
+
+       「改动文件旁边新出现的文件」确实要问它所在的目录才看得见，可是**目录条目
+       （`.../`，git 把没跟踪的目录折叠成一条）本身就是自己的子树**：再带上它的上一层
+       就是把旁边整棵大树扫一遍。读者那个仓库上量到的是：
+
+         7 条原始路径（其中 3 条是折叠目录）        280ms
+         12 条（每条再带上父目录）                6138ms   ← `holox-modules` 一条吃掉了全部
+         9 条（目录条目不带父目录）                 295ms
+
+       所以目录条目不带上父目录；文件的父目录留着（文件旁边新出现的文件还是由它看见）。
+       另外量到一次路径读本身就很贵（`PATHS_READ_MAX_MS`，见 10-state.js）时，这个仓库
+       整个收窄成只问那几条路径本身 —— 那种仓库上新文件就交给整棵树的时钟。 */
+    function pathsOfInterest(status, repo) {
       if (status == null || status.ok !== true) return []
+      const wide = repo === undefined || repo === null || repo.length === 0 ? true : treeWide(repo) === true
       const seen = {}
       const out = []
       const add = function (path) {
@@ -202,8 +220,10 @@
         for (let k = 0; k < entries.length; k += 1) {
           const path = entryPath(entries[k])
           if (path.length === 0) continue
-          const bare = path.slice(-1) === '/' ? path.slice(0, -1) : path
+          const collapsed = path.slice(-1) === '/'
+          const bare = collapsed ? path.slice(0, -1) : path
           add(bare)
+          if (collapsed === true || wide !== true) continue
           const cut = bare.lastIndexOf('/')
           if (cut > 0) add(bare.slice(0, cut))
         }
@@ -225,14 +245,17 @@
         return byPath[path]
       }
       const list = function (value) { return Array.isArray(value) ? value : [] }
+      /* 四条列表都走 `entryPath`：git 那边这三种形状都可能出现（对象最常，裸字符串也
+         合法），读 `entry.path` 会把裸字符串那一条**整条丢掉** —— 列表里少一行，而
+         「有几个改动」那个数字（mergeChanges 的长度）也跟着少一个。 */
       const staged = list(work.staged)
-      for (let i = 0; i < staged.length; i += 1) put(text(staged[i].path), { staged: true, indexCode: text(staged[i].code) })
+      for (let i = 0; i < staged.length; i += 1) put(entryPath(staged[i]), { staged: true, indexCode: text(staged[i].code) })
       const unstaged = list(work.unstaged)
-      for (let i = 0; i < unstaged.length; i += 1) put(text(unstaged[i].path), { workCode: text(unstaged[i].code) })
+      for (let i = 0; i < unstaged.length; i += 1) put(entryPath(unstaged[i]), { workCode: text(unstaged[i].code) })
       const untracked = list(work.untracked)
       for (let i = 0; i < untracked.length; i += 1) put(entryPath(untracked[i]), { workCode: '??', untracked: true })
       const unmerged = list(work.unmerged)
-      for (let i = 0; i < unmerged.length; i += 1) put(text(unmerged[i].path), { workCode: text(unmerged[i].code), conflict: true })
+      for (let i = 0; i < unmerged.length; i += 1) put(entryPath(unmerged[i]), { workCode: text(unmerged[i].code), conflict: true })
       const out = []
       for (let i = 0; i < order.length; i += 1) {
         const entry = byPath[order[i]]

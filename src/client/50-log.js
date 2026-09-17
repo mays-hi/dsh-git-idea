@@ -107,7 +107,12 @@
             : '无法读取提交历史'
         return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
-      if (count === 0) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '没有匹配的提交')
+      if (count === 0) {
+        /* 空历史有两种：这个仓库还没有第一个提交（刚 init），和筛选没匹配到。
+           前者不是「没有匹配」，说成那样会让人去清筛选。 */
+        return h('div', { className: 'dsh-git-pane dsh-git-dim' },
+          graph != null && graph.unborn === true ? '这个仓库还没有提交' : '没有匹配的提交')
+      }
 
       const laneNum = Math.max(1, graph.lanes)
       const graphWidth = laneNum * LANE_W + 6

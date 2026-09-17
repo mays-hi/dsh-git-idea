@@ -1,8 +1,18 @@
 /* Every request the Client can make, in one table. Each handler is registered
    through `ctx.effect` so it belongs to this fiber: stopping or updating the
-   Package removes all of them, which is what makes the bridge's reload safe. */
+   Package removes all of them, which is what makes the bridge's reload safe.
+
+   Each one waits for the plugin config before the handler runs, because the
+   config decides which binary every command in this plugin starts with
+   (`gitExe` — see 72-gitbin.js) and command lines are built synchronously inside
+   the handlers. One cached read for the life of the process: the first request
+   pays for it, and a "which git" answer can never be half-applied. */
 function onRpc(name, handler) {
-  ctx.effect(function () { return harness.handle(name, handler) }, 'dsh-git-idea rpc ' + name)
+  ctx.effect(function () {
+    return harness.handle(name, function (input) {
+      return readConfigFile().then(function () { return handler(input) })
+    })
+  }, 'dsh-git-idea rpc ' + name)
 }
 
 onRpc('git/panel', function (input) { return panelSnapshot(input) })
@@ -25,8 +35,23 @@ onRpc('git/config', function () {
 })
 
 onRpc('git/config-save', function (input) {
-  return writeConfigFile(input != null ? input.config : null)
+  /* 带上会话：这份文件在任何工作区之外，写它的策略来自这个会合（`sandboxFor`）。
+     没有会话时拿到的是部署默认那份（workspace-write），写到 ~/.dsh 会被拒 —— 而现在
+     被拒会在答复里说出来，不再是一个安静的 no-op。 */
+  return writeConfigFile(input != null ? input.config : null, argsAt(input, null))
 })
+
+/* The two machine-level questions the settings page asks: which git, and who
+   commits. Both are reads of the world outside the repository and neither is
+   cached — the reader opening this page is asking "now", not "a moment ago". */
+onRpc('git/toolchain', function () { return toolchainSnapshot() })
+
+onRpc('git/identity', function (input) { return identitySnapshot(input) })
+
+/* The one mutation that is not about the repository at all: it writes the
+   reader's own name and address into git's configuration. Explicit button, named
+   scope, and nothing is written for a box left empty. */
+onRpc('git/identity-save', function (input) { return identitySave(input) })
 
 /* Never cached: its whole purpose is to observe change. `paths` narrows the
    working-tree half of the signature to what is on screen — see watchCommand for
@@ -72,16 +97,34 @@ onRpc('git/unstage', function (input) {
   return panelMutate(input, ['restore', '--staged', '--'].concat(paths))
 })
 
+/* A failed commit is the one mutation whose failure can be about this machine
+   instead of about the repository: git will not author a commit until it knows
+   who the author is, and no amount of retrying here changes that. Asked of git
+   itself, once, and only after the commit has already been refused — see
+   `identityMissing`. The flag rides the same reply as `noGit` and
+   `sandboxDenied`, so the client has one place to read all three.
+
+   Which mutations go through here is decided at the call site, because only the
+   call site knows whether the command writes a commit object. `git add`,
+   `git branch -d` and the aborts all run on a machine with no identity at all —
+   hanging "this machine has no identity" on one of those would send the reader
+   to fix something that is not broken. */
+async function commitMutation(input, argv, options) {
+  const result = await panelMutate(input, argv, options)
+  if (result.ok !== true) result.needsIdentity = await identityMissing(argsFor(input))
+  return result
+}
+
 onRpc('git/commit', function (input) {
   const message = input != null && isStr(input.message) ? input.message.trim() : ''
   if (message.length === 0) return { ok: false, error: 'a commit message is required' }
   if (input != null && input.stageAll === true) {
     return panelMutate(input, ['add', '-A']).then(function (staged) {
       if (staged.ok !== true) return staged
-      return panelMutate(input, ['commit', '-m', message])
+      return commitMutation(input, ['commit', '-m', message])
     })
   }
-  return panelMutate(input, ['commit', '-m', message])
+  return commitMutation(input, ['commit', '-m', message])
 })
 
 onRpc('git/checkout', async function (input) {
@@ -100,12 +143,25 @@ onRpc('git/checkout', async function (input) {
 
 const NET_SPAWN = { timeoutMs: 180000 }
 
-onRpc('git/fetch', function (input) {
-  return panelMutate(input, ['fetch', '--all', '--prune'], { net: true, spawn: NET_SPAWN })
+/* The three arguments this plugin chooses about the network, each read from the
+   plugin config at the moment it is used: `fetch --all` prunes only if asked,
+   `pull` merges unless the reader prefers rebase, and a push to a branch with no
+   upstream is left to the panel's own "set upstream and push" row unless the
+   reader asked for it to just happen. git's own `push.default` and `pull.rebase`
+   are not overridden — these are the flags this plugin adds on top. */
+async function netConfig() {
+  return await readConfigFile()
+}
+
+onRpc('git/fetch', async function (input) {
+  const config = await netConfig()
+  return panelMutate(input, config.fetchPrune === true ? ['fetch', '--all', '--prune'] : ['fetch', '--all'], { net: true, spawn: NET_SPAWN })
 })
 
-onRpc('git/pull', function (input) {
-  return panelMutate(input, ['pull'], { net: true, spawn: NET_SPAWN })
+onRpc('git/pull', async function (input) {
+  const config = await netConfig()
+  /* A pull that merges writes a commit, so the identity can be what failed. */
+  return commitMutation(input, config.pullRebase === true ? ['pull', '--rebase'] : ['pull'], { net: true, spawn: NET_SPAWN })
 })
 
 onRpc('git/push', function (input) {
@@ -133,20 +189,20 @@ onRpc('git/sequence', function (input) {
   if (op === 'merge') {
     if (action === 'start') {
       if (target.length === 0) return { ok: false, error: 'a branch or commit is required to merge' }
-      return panelMutate(input, ['merge', '--no-edit', target])
+      return commitMutation(input, ['merge', '--no-edit', target])
     }
-    if (action === 'continue') return panelMutate(input, ['commit', '--no-edit'])
+    if (action === 'continue') return commitMutation(input, ['commit', '--no-edit'])
     if (action === 'abort') return panelMutate(input, ['merge', '--abort'])
     return { ok: false, error: 'merge supports start, continue and abort' }
   }
 
   if (action === 'start') {
     if (target.length === 0) return { ok: false, error: 'a commit is required' }
-    if (op === 'revert') return panelMutate(input, ['revert', '--no-edit', target])
-    if (input != null && input.record === true) return panelMutate(input, ['cherry-pick', '-x', target])
-    return panelMutate(input, ['cherry-pick', target])
+    if (op === 'revert') return commitMutation(input, ['revert', '--no-edit', target])
+    if (input != null && input.record === true) return commitMutation(input, ['cherry-pick', '-x', target])
+    return commitMutation(input, ['cherry-pick', target])
   }
-  if (action === 'continue') return panelMutate(input, ['-c', 'core.editor=true', op, '--continue'])
+  if (action === 'continue') return commitMutation(input, ['-c', 'core.editor=true', op, '--continue'])
   if (action === 'abort') return panelMutate(input, [op, '--abort'])
   if (action === 'skip') return panelMutate(input, [op, '--skip'])
   return { ok: false, error: op + ' does not support ' + action }

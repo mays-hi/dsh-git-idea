@@ -119,14 +119,46 @@ async function invoke(command, args, exec, options) {
    the same check's answer as an output marker instead of an exit code —
    `PANEL_NO_GIT`. Same question, same builtin, two transports. */
 const GIT_MISSING_MARK = 'dsh-git-idea: no git on PATH'
-const GIT_GUARD = 'command -v git >/dev/null 2>&1 || { printf ' + shq(GIT_MISSING_MARK + '\n') + ' >&2; exit 127; }\n'
+/* `command -v <word>` answers for a bare name through PATH and for an absolute
+   path by checking it is executable, so one guard covers both "the git on PATH"
+   and "the git this reader configured". The command word is resolved once per
+   call (see `gitCmd` in 70-config.js) and cannot contain a newline. */
+function gitGuard() {
+  return 'command -v ' + gitCmd() + ' >/dev/null 2>&1 || { printf ' + shq(GIT_MISSING_MARK + '\n') + ' >&2; exit 127; }\n'
+}
 const PANEL_NO_GIT = 'N:nogit'
+
+/* ── the second failure that is not about the repository ──
+
+   `git commit` refuses to author a commit when it cannot work out who the
+   author is, and nothing about that is the repository's fault: the identity
+   lives in git's own configuration, and only the reader can choose a name and
+   an address. Read as plain stderr it arrives as eight lines of English
+   ending in `fatal: empty ident name`, which says what failed and not one word
+   about the two commands that fix it.
+
+   Recognised where it happens rather than matched out of that text: git
+   translates it, and it has several spellings (identity absent, an address but
+   no name, a guessed address that is not a full domain). The question asked
+   instead is `git var GIT_AUTHOR_IDENT` — the same lookup `git commit` makes
+   before it writes anything — and a non-zero exit answers "this commit is
+   going to be refused" in every locale. It is asked only *after* a commit has
+   already failed, so the path that works pays nothing for it. */
+async function identityMissing(args) {
+  const asked = await gitC(args, ['var', 'GIT_AUTHOR_IDENT'], null, {})
+  return asked.exitCode !== 0
+}
+
+/* The same answer as a marker inside a panel script, where a non-zero exit code
+   cannot be the transport: `$gd` is already known to be non-empty by the time
+   this runs, so it is one git process, in the whole-tree read only. */
+const PANEL_NO_IDENT = 'I:none'
 
 /* The three wrappers differ only in what they put in front of the command: the
    package prefix is the whole of the difference, so it is the only argument. */
 async function shellGit(prefix, args, argv, exec, options) {
-  const result = await invoke(GIT_GUARD + prefix + 'git ' + argv.map(shq).join(' '), args, exec, options)
-  result.command = 'git ' + argv.join(' ')
+  const result = await invoke(gitGuard() + prefix + gitCmd() + ' ' + argv.map(shq).join(' '), args, exec, options)
+  result.command = gitExe + ' ' + argv.join(' ')
   result.ok = result.exitCode === 0
   result.noGit = result.exitCode === 127 && result.stderr.indexOf(GIT_MISSING_MARK) >= 0
   return result
@@ -151,9 +183,28 @@ async function gitC(args, argv, exec, options) {
 
 /* Every reply that carries a command's failure carries this with it, so that no
    surface has to recognise a missing git by the words in stderr — see
-   `GIT_GUARD`. One flag, read in one place per surface: the mutating commands
+   `gitGuard`. One flag, read in one place per surface: the mutating commands
    through `commandDetail`, the panel reads through their `reason`. */
 function gitMissing(result) {
   return result != null && result.noGit === true
+}
+
+/* ── HEAD 指着一个还没有提交的分支 ──
+
+   刚 `git init` 出来的仓库就是这样（包括这个插件自己的引导页建出来的那个）：HEAD
+   里写着 `refs/heads/main`，而 `refs/heads` 是空的。它没有任何毛病，但所有读 *ref*
+   的东西都拿不到答案 —— `for-each-ref` 一个分支都不列，`git log <branch>` 报
+   "unknown revision"，而把「这次读失败了」当成「这不是一个仓库」的面板，就会对着
+   它自己刚建出来的仓库说那句话。
+
+   这里还剩一个问得出来的问题，而且 git 不用碰任何 ref 就能回答：HEAD 写的是哪个
+   分支。只在 ref 表里一个当前分支都没有时才问一次 —— 普通仓库（`%(HEAD)` 已经标出
+   来了）一次都不多花。真正的游离 HEAD 同样答不出来，而那正是调用方本来就会处理的
+   情况。 */
+async function headBranchWithoutCommit(args) {
+  const asked = await gitC(args, ['symbolic-ref', '--quiet', '--short', 'HEAD'], null, {})
+  if (asked.exitCode !== 0) return ''
+  const name = asked.stdout.trim()
+  return name.length > 0 ? name : ''
 }
 

@@ -35,10 +35,13 @@ const fireTimers = () => {
   timers.filter((t) => t.kind === 'timeout' && !t.dead).forEach((t) => { t.dead = true; t.cb() })
 }
 const branchesFor = (repo) => calls.filter((c) => c.method === 'git/branches' && c.args != null && c.args.repo === repo)
+/* 每条改动一个**不同的**路径：同一份快照里同一个 path 出现两次不是 git 会给出的东西，
+   而「有几个改动」现在是那份列表的行数（mergeChanges，面板标签上那个数字），同一个
+   路径只会是一行。 */
 const panelOf = (repo, branch, pending) => ({
   ok: true, repo: repo, branch: branch, detached: false, upstream: 'origin/' + branch,
   ahead: 0, behind: 0, sequencer: null,
-  staged: [], unstaged: new Array(pending || 0).fill('f'), untracked: [], unmerged: [],
+  staged: [], unstaged: new Array(pending || 0).fill(0).map((_x, i) => 'f' + i), untracked: [], unmerged: [],
 })
 
 console.log('== 先在那个工作区里待一会儿 ==')

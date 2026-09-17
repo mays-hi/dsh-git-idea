@@ -130,10 +130,12 @@ async function readPanel(input, target, paths) {
   let exitCode = null
   let sequencer = null
   let noGit = false
+  let needsIdentity = false
   const body = []
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i]
     if (line === PANEL_NO_GIT) { noGit = true; continue }
+    if (line === PANEL_NO_IDENT) { needsIdentity = true; continue }
     if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
     if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
     body.push(line)
@@ -157,6 +159,12 @@ async function readPanel(input, target, paths) {
     upstream: parsed.upstream, ahead: parsed.ahead, behind: parsed.behind,
     sequencer: sequencer,
     staged: parsed.staged, unstaged: parsed.unstaged, untracked: untracked, unmerged: parsed.unmerged,
+    /* Always a boolean, never left out and never `undefined`: the bridge validates
+       every field of a reply for "can this become lossless JSON", and a key whose
+       value is `undefined` rejects the *whole* reply — the client would get an
+       error instead of a snapshot. (Found live, not in a suite: the suites call
+       these handlers directly, with no validation in between.) */
+    needsIdentity: needsIdentity === true,
   }
   /* A pathspec answer is about those paths and nothing else. It says so, and it
      names them, so the client can fold it into the snapshot it already has
@@ -228,6 +236,24 @@ async function readGraph(input, repo) {
 
   const logged = await git(args, argv, null, {})
   if (logged.exitCode !== 0) {
+    /* ── 一个提交都还没有的仓库 ──
+       `git log <branch>` 在这里必然失败（那个 ref 还不存在），但那不是「读不动这个
+       仓库」：它是这个仓库的第一个状态，历史就是空的。判据是两句 git 自己的问话，
+       都不认措辞：`rev-parse --git-dir` 能答上来 = 这确实是个仓库（在仓库外它退出
+       128），而 `--verify HEAD` 答不上来 = HEAD 还没指向任何提交。
+
+       注意别拿 `repoHere` 来判：它返回的是一段 shell 文本（给脚本拼命令用的），在
+       JS 里永远为真 —— 第一版就是这么写的，负对照立刻把它抓出来了。 */
+    const verifyHead = await git(args, ['rev-parse', '-q', '--verify', 'HEAD'], null, {})
+    if (verifyHead.exitCode !== 0) {
+      const gitDir = await git(args, ['rev-parse', '--git-dir'], null, {})
+      if (gitDir.exitCode === 0) {
+        return {
+          ok: true, repo: logged.cwd, currentBranch: currentBranch, ref: ref, allRefs: allRefs,
+          unborn: true, hasMore: false, maxCount: maxCount, commits: [], rows: [], lanes: 1,
+        }
+      }
+    }
     return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: logged.stderr, noGit: gitMissing(logged), currentBranch: currentBranch, ref: ref, commits: [], rows: [], lanes: 1 }
   }
   const parsed = parseCommitRecords(logged.stdout)

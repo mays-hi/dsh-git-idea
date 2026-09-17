@@ -4,7 +4,9 @@ const body = fs.readFileSync(process.env.GP_SRC || new URL('../host.js', import.
 
 function runShell(spec) {
   return new Promise((res) => {
-    const c = spawn('sh', ['-c', spec.command], { cwd: spec.workdir, env: process.env })
+    /* DSH_HOME 指到 /tmp：插件配置就落在这里，而不是跑测试那个人的 ~/.dsh —— 他要是
+       在真机上改过配置（比如设了 git 路径），那台机器的配置会悄悄改变这些断言的答案。 */
+    const c = spawn('sh', ['-c', spec.command], { cwd: spec.workdir, env: Object.assign({}, process.env, { DSH_HOME: '/tmp/gp34a-home' }) })
     let o = '', e = ''
     c.stdout.on('data', b => o += b); c.stderr.on('data', b => e += b)
     c.on('error', er => res({ exitCode: null, stdout: { text: o }, stderr: { text: String(er.message) } }))
@@ -238,6 +240,68 @@ const empty = await panelAt(E)
 check('空目录也只是「不是仓库」，没有别的花样', empty.ok !== true && empty.reason === 'not-a-repo')
 check('连目录里有什么都不看（脚本里没有 ls）', body.indexOf('ls -A') < 0 && body.indexOf('ls -1') < 0)
 
+/* ── 刚 init、还没有第一个提交的仓库 ──
+
+   这是插件自己的引导页「在此初始化仓库」刚做完的样子，也是每个仓库的第一个状态：
+   HEAD 写着 `refs/heads/inner`，而 `refs/heads` 是空的。以前这里会红着说「不是 git
+   仓库」—— 历史页上一个字都不对，而仓库其实好好的，只是还没有提交。上面那个
+   `P/inner` 正好就是这个样子（第 228 行只 init 没提交）。 */
+const DET = '/tmp/gp41-detached'
+await sh('rm -rf ' + DET + ' && mkdir -p ' + DET, '/tmp')
+await sh('git init -q -b main . && git config user.email t@t && git config user.name t && echo d > d.txt && git add -A && git commit -qm one && git checkout -q --detach HEAD', DET)
+
+await H('git/flush')({ repo: P + '/inner' })
+const unbornGraph = await H('git/graph')({ repo: P + '/inner' })
+const unbornRefs = await H('git/refs')({ repo: P + '/inner' })
+const unbornBranches = await H('git/branches')({ repo: P + '/inner' })
+console.log('  还没提交的仓库:', JSON.stringify({
+  graph: unbornGraph.ok, unborn: unbornGraph.unborn, error: unbornGraph.error,
+  commits: unbornGraph.commits.length, refs: unbornRefs.current, current: unbornBranches.current,
+}))
+check('一个提交都没有：历史是空的，不是「不是仓库」',
+  unbornGraph.ok === true && unbornGraph.unborn === true && unbornGraph.commits.length === 0
+  && unbornGraph.error === undefined)
+check('分支树上的当前分支照样有名字（不是「游离 HEAD」）',
+  unbornRefs.ok === true && unbornRefs.current.length === 1 && unbornRefs.current[0] === 'inner')
+check('面板头上那行也一样（不是 HEAD）', unbornBranches.ok === true && unbornBranches.current === 'inner')
+check('但那个分支不进 ref 清单（它还不是一个 ref，列出来就成了点得动的不存在的东西）',
+  unbornRefs.local.length === 0 && unbornBranches.branches.length === 0)
+
+/* 负对照：这三种都不能被当成「还没提交」——
+   第一版把 `repoHere(...)` 当布尔用（它返回的是一段 shell 文本，永远为真），
+   于是不是仓库的目录也被说成「还没提交」；这一条就是那时候先红的。 */
+await H('git/flush')({ repo: E })
+const emptyGraph = await H('git/graph')({ repo: E })
+check('（对照）根本不是仓库的目录：仍然是「不是仓库」，不是空历史',
+  emptyGraph.ok !== true && emptyGraph.error === 'not-a-repository' && emptyGraph.unborn === undefined)
+await H('git/flush')({ repo: DET })
+const detGraph = await H('git/graph')({ repo: DET })
+const detRefs = await H('git/refs')({ repo: DET })
+check('（对照）真游离 HEAD：历史读得出来，当前分支仍然是空的',
+  detGraph.ok === true && detGraph.unborn === undefined && detGraph.commits.length === 1
+  && detRefs.ok === true && detRefs.current.length === 0)
+await H('git/flush')({ repo: P })
+const bornGraph = await H('git/graph')({ repo: P })
+check('（对照）有提交的分支上不会冒出 unborn',
+  bornGraph.ok === true && bornGraph.unborn === undefined && bornGraph.commits.length === 1)
+
+/* 这一问是「只在需要时才问」的：ref 表已经标出当前分支的仓库，一次都不多花。 */
+const refsRealRun = shellService.run
+const refCommands = []
+shellService.run = (spec) => { refCommands.push(spec.command); return refsRealRun(spec) }
+await H('git/flush')({ repo: P })
+await H('git/refs')({ repo: P })
+const bornRefCommands = refCommands.filter((c) => c.indexOf('for-each-ref') >= 0 || c.indexOf('symbolic-ref') >= 0)
+refCommands.length = 0
+await H('git/flush')({ repo: P + '/inner' })
+await H('git/refs')({ repo: P + '/inner' })
+const unbornRefCommands = refCommands.filter((c) => c.indexOf('for-each-ref') >= 0 || c.indexOf('symbolic-ref') >= 0)
+shellService.run = refsRealRun
+console.log('  git/refs 里的进程数：普通仓库', bornRefCommands.length, '／还没提交的', unbornRefCommands.length)
+check('（对照）已经标出当前分支的仓库一次都不多问；还没提交的才补问一次 HEAD',
+  bornRefCommands.length === 1 && bornRefCommands[0].indexOf('for-each-ref') >= 0
+  && unbornRefCommands.length === 2 && unbornRefCommands[1].indexOf('symbolic-ref') >= 0)
+
 console.log('')
 console.log('=== 分支树需要的领先/落后 ===')
 await H('git/flush')({ repo: R })
@@ -280,7 +344,7 @@ const ctx2 = {
   },
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
-const harness2 = { defineTool: d => d, registerTool: () => () => {}, handle(n, f) { handlers2.set(n, f); return () => {} } }
+const harness2 = { handle(n, f) { handlers2.set(n, f); return () => {} } }
 new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
   ctx2, harness2, console, s => Buffer.from(s, 'binary').toString('base64'),
   s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx2)
@@ -330,7 +394,7 @@ const ctx3 = {
   },
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
-const harness3 = { defineTool: d => d, registerTool: () => () => {}, handle(n, f) { handlers3.set(n, f); return () => {} } }
+const harness3 = { handle(n, f) { handlers3.set(n, f); return () => {} } }
 new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
   ctx3, harness3, console, s => Buffer.from(s, 'binary').toString('base64'),
   s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx3)
@@ -376,7 +440,7 @@ const ctx4 = {
   } : undefined),
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
-const harness4 = { defineTool: d => d, registerTool: () => () => {}, handle(n, f) { handlers4.set(n, f); return () => {} } }
+const harness4 = { handle(n, f) { handlers4.set(n, f); return () => {} } }
 new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
   ctx4, harness4, console, s => Buffer.from(s, 'binary').toString('base64'),
   s => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx4)
@@ -444,9 +508,10 @@ const normalReply = await H('git/panel')({ repo: NG, quick: true })
 shellService.run = realRunNogit
 console.log('  一笔身份读起的进程数：没有 git', oneRead, '／有 git', normalRuns.length)
 check('判据不多起进程（那边 1 个，这边也 1 个）', oneRead === 1 && normalRuns.length === 1)
-check('判据确实进了命令文本（两边都带这一行）',
-  body.indexOf('command -v git >/dev/null 2>&1') >= 0
-  && (body.match(/command -v git >\/dev\/null 2>&1/g) || []).length === 2)
+check('判据确实进了命令文本（两边都带这一行，而且命令词只有一个来源）',
+  body.indexOf("'command -v ' + gitCmd()") >= 0
+  && body.indexOf("if ! command -v ' + gitCmd()") >= 0
+  && (body.match(/function gitGuard\(\)/g) || []).length === 1)
 check('（对照）判据在有 git 时通过，这一读照常拿到分支',
   normalRuns[0].indexOf('command -v git') >= 0
   && normalReply.ok === true && normalReply.branch === 'main')
@@ -457,6 +522,103 @@ const ngWatch1 = await H4('git/watch')({ repo: NG, deep: true })
 const ngWatch2 = await H4('git/watch')({ repo: NG, deep: true })
 check('没有 git 时轮询签名稳定（不会把面板拖进重载循环）',
   ngWatch1.ok === true && ngWatch1.sig === ngWatch2.sig)
+
+/* ── 提交身份：机器上的第二件事 ──
+
+   `git commit` 在没有作者身份时整个失败，给的是八行英文，而这件事和仓库无关：身份
+   写在 git 自己的配置里，选什么名字只有读者能定。判据不许去认那八行 —— git 按机器
+   语言翻译它，而且它有好几种写法。这里问的是 `git var GIT_AUTHOR_IDENT`，也就是
+   `git commit` 自己拼身份时走的那条路，任何语言下都是同一个退出码。
+
+   fixture 把空字符串写进**仓库本地**配置：本地的空值压得住这台机器上的全局身份，
+   所以「git 认不出作者」是这个 fixture 的事实，而不是某台机器的偶然 —— 下面第一条
+   断言就是在守这件事，它要是红了，说明 fixture 已经不成立了。 */
+
+console.log('')
+console.log('=== 提交身份（提交被拒的原因不在仓库里）===')
+const NID = '/tmp/gp34-noid'
+await sh(`rm -rf ${NID} && mkdir -p ${NID} && cd ${NID} && git init -q -b main .`
+  + ` && git config user.name '' && git config user.email '' && echo a > a.txt && git add -A`, '/tmp')
+const nidProbe = await sh('git var GIT_AUTHOR_IDENT >/dev/null 2>&1; echo $?', NID)
+const nidCommit = await sh('git commit -m x 2>&1 | tail -1', NID)
+check('先确认 fixture 本身没有作者身份（不然下面那些绿都是空的）', nidProbe.out.trim() === '128')
+console.log('  fixture 里的提交被拒于:', nidCommit.out.trim())
+
+await H('git/flush')({ repo: NID })
+const nidPanel = await H('git/panel')({ repo: NID })
+console.log('  面板读:', JSON.stringify({ ok: nidPanel.ok, branch: nidPanel.branch, staged: nidPanel.staged.length, needsIdentity: nidPanel.needsIdentity }))
+check('面板整树读里带着「这台机器没有提交身份」',
+  nidPanel.ok === true && nidPanel.branch === 'main' && nidPanel.staged.length === 1
+  && nidPanel.needsIdentity === true)
+
+const identCommitCommands = []
+const realRunIdent = shellService.run
+shellService.run = (spec) => { identCommitCommands.push(spec.command); return realRunIdent(spec) }
+const nidCommitReply = await H('git/commit')({ repo: NID, message: 'first' })
+shellService.run = realRunIdent
+console.log('  被拒的提交起的进程:', identCommitCommands.map((c) => (c.indexOf('GIT_AUTHOR_IDENT') >= 0 ? 'git var' : 'git ' + c.split('\n')[1].slice(4, 30))))
+console.log('  被拒的提交:', JSON.stringify({ ok: nidCommitReply.ok, exitCode: nidCommitReply.exitCode, needsIdentity: nidCommitReply.needsIdentity, stderr: nidCommitReply.stderr.trim().split('\n').slice(-1)[0] }))
+check('提交失败时答复里明说是身份的问题（不让读者自己去猜那八行）',
+  nidCommitReply.ok !== true && nidCommitReply.exitCode !== 0 && nidCommitReply.needsIdentity === true)
+check('判据只在那一次失败之后才问（成功路径一次都不多花）',
+  identCommitCommands.length === 2
+  && identCommitCommands[0].indexOf('GIT_AUTHOR_IDENT') < 0
+  && identCommitCommands[1].indexOf('GIT_AUTHOR_IDENT') >= 0)
+
+/* 负对照三条：这一个是同一类误诊的三张脸 —— 判据写松成「提交失败了」、写松成
+   「这个仓库读过一次没有身份」，都会在这里先红。 */
+await H('git/flush')({ repo: R })
+const okPanel = await H('git/panel')({ repo: R })
+check('（对照）有身份的仓库：面板读里这个标志是 false（不是 undefined —— 见末尾那条规矩）', okPanel.ok === true && okPanel.needsIdentity === false)
+await sh('printf "id\\n" > id.txt', R)
+const okCommit = await H('git/commit')({ repo: R, message: 'identity is fine', stageAll: true })
+check('（对照）有身份的仓库：提交成功，成功路径上也没有这个标志',
+  okCommit.ok === true && okCommit.needsIdentity === undefined)
+const emptyCommit = await H('git/commit')({ repo: R, message: 'nothing left to commit' })
+check('（对照）同一个仓库里因为别的原因失败时，不会被说成身份问题',
+  emptyCommit.ok !== true && emptyCommit.needsIdentity === false)
+
+/* 会写提交对象的命令不止「提交」一个：拣选、还原、合并的继续都在造提交，身份缺失在
+   它们身上同样是那个失败。而 `git add`、`git branch -d`、中止这类命令在没有身份的
+   机器上照跑 —— 把「这台机器没有身份」挂在它们身上，等于让读者去修一个没坏的东西。 */
+const NID2 = '/tmp/gp34-noid2'
+await sh(`rm -rf ${NID2} && mkdir -p ${NID2} && cd ${NID2} && git init -q -b main .`
+  + ` && git -c user.name=T -c user.email=t@t commit -q --allow-empty -m base`
+  + ` && git config user.name '' && git config user.email ''`, '/tmp')
+await H('git/flush')({ repo: NID2 })
+const revertReply = await H('git/sequence')({ repo: NID2, op: 'revert', action: 'start', target: 'HEAD' })
+console.log('  没有身份时的还原:', JSON.stringify({ ok: revertReply.ok, exitCode: revertReply.exitCode, needsIdentity: revertReply.needsIdentity, stderr: revertReply.stderr.trim().split('\n').slice(-1)[0] }))
+check('还原也要造提交 → 没有身份时照样报身份', revertReply.ok !== true && revertReply.needsIdentity === true)
+const deleteReply = await H('git/branch-delete')({ repo: NID2, name: 'no-such-branch' })
+check('（对照）不造提交的操作失败时，不许挂上身份这件事',
+  deleteReply.ok !== true && deleteReply.needsIdentity === undefined)
+const stageReply = await H('git/stage')({ repo: NID2, paths: ['no-such-file'] })
+check('（对照）暂存失败也一样（git add 在没有身份的机器上本来就跑得动）',
+  stageReply.ok !== true && stageReply.needsIdentity === undefined)
+
+/* 面板读里的那一行只在整树读里，而且落在 `$gd` 的守卫后面：不在仓库里时那一问没有
+   意义，git 也会为它去问一个不存在的仓库。 */
+await H('git/flush')({ repo: R })
+const quickCommands = []
+const panelCommands = []
+shellService.run = (spec) => {
+  quickCommands.push(spec.command)
+  return realRunIdent(spec)
+}
+const quickReply = await H('git/panel')({ repo: R, quick: true })
+shellService.run = (spec) => { panelCommands.push(spec.command); return realRunIdent(spec) }
+const fullReply = await H('git/panel')({ repo: R })
+shellService.run = realRunIdent
+check('廉价读里没有这一行（身份只影响提交区，chip 不为它多起进程）',
+  quickCommands.length === 1 && quickCommands[0].indexOf('GIT_AUTHOR_IDENT') < 0
+  && quickReply.ok === true && fullReply.ok === true)
+check('整树读里那一条只在 $gd 的守卫里面（不在仓库里就不问）',
+  panelCommands.length === 1
+  && panelCommands[0].indexOf('GIT_AUTHOR_IDENT') >= 0
+  && panelCommands[0].indexOf('if [ -n "$gd" ]; then') < panelCommands[0].indexOf('GIT_AUTHOR_IDENT')
+  && /\n\s*LC_ALL=C git -C [^\n]*GIT_AUTHOR_IDENT[^\n]*\n\s*fi\n/.test(panelCommands[0]))
+check('那一条在源码里也只有一处（判据不许有第二份写法）',
+  (body.match(/GIT_AUTHOR_IDENT >\/dev\/null 2>&1 \|\| printf/g) || []).length === 1)
 
 /* ── 读操作不许抢 index.lock ──
 
@@ -524,7 +686,7 @@ check('四种模式的命令里都带着 --no-optional-locks，而且在子命�
    免得某段注释里提了一句 `git status` 也算进来。 */
 const statusLines = body.split('\n').map((l, i) => ({ n: i + 1, l: l }))
   .filter((x) => x.l.indexOf('--porcelain') >= 0 && x.l.indexOf('status') >= 0
-    && (x.l.indexOf('git -C') >= 0 || x.l.indexOf('git(args,') >= 0))
+    && (x.l.indexOf('gitCmd()') >= 0 || x.l.indexOf('git(args,') >= 0))
 const unguarded = statusLines.filter((x) => x.l.indexOf('no-optional-locks') < 0)
 console.log('  源码里读状态的调用:', statusLines.length, '条，没带标志的:', unguarded.length)
 for (const x of unguarded) console.log('    L' + x.n + ': ' + x.l.trim().slice(0, 80))
@@ -909,6 +1071,78 @@ check('源码里也没有 registerTool / defineTool 的调用',
 const pkgBody = fs.readFileSync(new URL('../lib/index.js', import.meta.url).pathname, 'utf8')
 check('正式包那一半（lib/index.js）也没有注册工具',
   pkgBody.indexOf('registerTool(') < 0 && pkgBody.indexOf('defineTool(') < 0)
+
+/* ── 答复里不许有 undefined ──
+
+   宿主运行时对每一条 RPC 答复逐个字段校验「能不能无损地变成 JSON」。规矩很硬：
+   只要有一个字段的值是 `undefined`，被拒的是**整条**答复 —— 客户端拿到的不是一份
+   少了字段的快照，而是一个错误，面板于是空着。
+
+   这条规矩在别处都看不见：这些套件是直接调用处理器的，中间没有那道校验；而客户端
+   那半边用的又是 mock 的 host。所以它栽在真实页面上过一次（`needsIdentity` 只在
+   缺身份时为 true，另一半写成了 undefined，于是有身份的仓库整条读被拒），这里
+   自己扫一遍：几个具代表性的答复，深度遍历，一个 undefined 都不许有。
+
+   注意分别：**键不在**（成功路径上没有 needsIdentity 这个键）是允许的；**键在而值
+   是 undefined** 才是被拒的那种。`Object.keys` 认的正是这个分别。 */
+function undefinedPaths(value, path, out) {
+  if (value === undefined) { out.push(path); return out }
+  if (value === null || typeof value !== 'object') return out
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) undefinedPaths(value[i], path + '[' + i + ']', out)
+    return out
+  }
+  const keys = Object.keys(value)
+  for (let i = 0; i < keys.length; i += 1) undefinedPaths(value[keys[i]], path + '.' + keys[i], out)
+  return out
+}
+
+console.log('')
+console.log('=== 答复里不许有 undefined（桥会拒掉整条）===')
+await H('git/flush')({ repo: R })
+await H('git/flush')({ repo: NID })
+const shapes = [
+  ['git/panel 整树（有身份）', await H('git/panel')({ repo: R })],
+  ['git/panel 整树（没身份）', await H('git/panel')({ repo: NID })],
+  ['git/panel 整树（未出生的分支）', await H('git/panel')({ repo: UNBORN })],
+  ['git/panel 整树（不是仓库）', await H('git/panel')({ repo: '/tmp' })],
+  ['git/panel 按路径', await H('git/panel')({ repo: R, paths: ['id.txt'] })],
+  ['git/panel 廉价读', await H('git/panel')({ repo: R, quick: true })],
+  ['git/graph', await H('git/graph')({ repo: R, maxCount: 5 })],
+  ['git/branches', await H('git/branches')({ repo: R })],
+  ['git/refs', await H('git/refs')({ repo: R })],
+  ['git/authors', await H('git/authors')({ repo: R })],
+  ['git/commit-detail', await H('git/commit-detail')({ repo: R, hash: 'deadbeef' })],
+  ['git/diff 未跟踪', await H('git/diff')({ repo: R, mode: 'untracked', path: 'id.txt' })],
+  ['git/diff 越界路径', await H('git/diff')({ repo: R, mode: 'worktree', path: '../x' })],
+  ['git/untracked', await H('git/untracked')({ repo: R, dir: 'sub' })],
+  ['git/watch', await H('git/watch')({ repo: R, deep: true })],
+  ['git/stage', await H('git/stage')({ repo: R, paths: ['id.txt'] })],
+  ['git/unstage', await H('git/unstage')({ repo: R, paths: ['id.txt'] })],
+  ['git/commit 成功', await H('git/commit')({ repo: R, message: 'shape' })],
+  ['git/commit 被拒（没身份）', await H('git/commit')({ repo: NID, message: 'shape' })],
+  ['git/sequence 还原被拒（没身份）', revertReply],
+  ['git/branch-delete 被拒', deleteReply],
+  ['git/commit 缺信息', await H('git/commit')({ repo: R })],
+  ['git/checkout 不存在的分支', await H('git/checkout')({ repo: R, name: 'no-such-branch' })],
+  ['git/branch-create 缺名字', await H('git/branch-create')({ repo: R })],
+  ['git/tag 缺名字', await H('git/tag')({ repo: R })],
+  ['git/branch-delete 缺名字', await H('git/branch-delete')({ repo: R })],
+  ['git/sequence 未知操作', await H('git/sequence')({ repo: R, op: 'nope', action: 'start' })],
+  ['git/config', await H('git/config')({})],
+  ['git/flush', await H('git/flush')({ repo: R })],
+  ['git/init', await H('git/init')({ repo: '/tmp/gp34-shape-init' })],
+]
+let dirty = ''
+for (let i = 0; i < shapes.length; i += 1) {
+  const bad = undefinedPaths(shapes[i][1], shapes[i][0], [])
+  if (bad.length > 0) dirty += (dirty.length > 0 ? '；' : '') + bad.join('、')
+}
+console.log('  扫过的答复:', shapes.length, '条；带 undefined 的字段:', dirty.length > 0 ? dirty : '（没有）')
+check('每一条答复深度扫过都没有 undefined 字段', dirty.length === 0)
+check('扫的确实是真答复（不是一堆 null）',
+  shapes.filter((s) => s[1] != null).length === shapes.length
+  && shapes.filter((s) => s[1].ok === false).length > 0)
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {

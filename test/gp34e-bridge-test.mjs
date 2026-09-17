@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process'
 const bridge = fs.readFileSync(new URL('./gp34-bridge-host.js', import.meta.url).pathname, 'utf8')
 function runShell(spec) {
   return new Promise((res) => {
+    /* DSH_HOME 不在这里改：桥就是靠它去找插件源码的。这个套件读的配置因此是真机上那份，
+       但它只断言 git/branches 这一条读，不受插件设置影响。 */
     const c = spawn('sh', ['-c', spec.command], { cwd: spec.workdir, env: process.env })
     let o = '', e = ''
     c.stdout.on('data', b => o += b); c.stderr.on('data', b => e += b)

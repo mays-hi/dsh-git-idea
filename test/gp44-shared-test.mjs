@@ -273,106 +273,280 @@ async function openSwitcher() {
 }
 
 const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + label + (value ? '' : '   ← 不符合预期'))
+/* ── 一次「仓库动过了」之后，插件还要花多久才把队列排空 ──
 
-/* ── 切换工作区：chip 不能还显示上一个工作区的分支 ── */
+   这条 RPC 通道一次只跑一个处理函数：一次全树 `git status` 在飞的时候，屏幕上每一次
+   点击、另一块屏幕的每一次读，全都排在它后面。真机上量到的是（读者那个 /mnt/d 工作区、
+   5093 个文件，全树 status 8.1s 冷）：
 
-/* 芯片现在分两段读：先便宜的「哪个仓库哪个分支」，再补工作区状态。
-   这个套件要观察的是**第一段还没回来**时的中间态，所以第一段挂住由测试
-   逐个放行，第二段（完整读）立刻用该会话已知的答案回掉 —— 它的时序不是
-   这里要考的东西。 */
+     面板开着，终端里提交一次 → 16 条请求，队列 21.3s 才排空，其中 13s 是**两次**全树读
+     面板关着，同样一次           →  4 条请求，排空 11.1s，其中 10.6s 是 chip 那一次全树读
+
+   屏幕上的样子就是「面板反应过来了，chip 还没」：面板那条 0.2s 的路径读排在 chip 那
+   条 8–10s 的全树读后面。这个套件盯住四件事：
+
+     1. 「工作区有几个改动」全局只有一份读数，面板量的和 chip 用的必须是同一份；
+     2. 一次 bump 之后只问屏上那些路径（0.2s），整棵树不在那条路上；
+     3. 整棵树有自己的时钟，间隔按上一次实测的代价来定（慢挂载上不再每 30 秒冻 8 秒）；
+     4. 还没核对出来的时候，chip 说的是「正在核对」，不谎称「工作区干净」。
+
+   时间在这里是可控的：`Date.now` 被换成一个由测试推的钟，所以「一次 8 秒的读」不用
+   真的等 8 秒，「读数过期了」也不用真的等一分钟。读也一样 —— 组件重画才会跑 effect，
+   所以每节都是「bump → 重画两块屏幕 → 再看它们发了什么」。 */
+
+let clock = Date.now()
+Date.now = function () { return clock }
+const advance = function (ms) { clock += ms }
+
 const realCall = host.call
-const panelArgs = []
-let panelResolvers = []
-const settled = {}
+let watchSig = 'SIG-1'
+/* 一次全树读要花多久（毫秒，记在虚拟钟上）：0 表示立刻答复。 */
+let slowFullMs = 0
+/* 一次「只问几条路径」的读要花多久。真机上这个数会从 0.3s 跳到 6s —— 父目录那一层把
+   旁边整棵大树扫进去的时候。 */
+let slowPathsMs = 0
+/* 把「不带头部快读」的答复按住，才看得见中间那一刻：面板和 chip 可能各按住一次。 */
+let holdAll = false
+const held = []
+const releaseAll = function () {
+  holdAll = false
+  const list = held.splice(0)
+  list.forEach((resolve) => resolve())
+}
+const head = { ok: true, repo: '/tmp/ws', branch: 'main', detached: false, upstream: 'origin/main', ahead: 0, behind: 0, sequencer: null }
+let work = { staged: [], unstaged: [], untracked: [], unmerged: [] }
+const workWith = function (n) {
+  const out = []
+  for (let i = 0; i < n; i += 1) out.push({ path: 'f' + i + '.txt', code: ' M' })
+  return { staged: [], unstaged: out, untracked: [], unmerged: [] }
+}
+const cleanWork = function () { return { staged: [], unstaged: [], untracked: [], unmerged: [] } }
+
 host.call = function (method, args) {
   if (method === 'git/panel') {
-    panelArgs.push(args)
-    const sid = args == null ? undefined : args.sessionId
+    calls.push({ method: method, args: args })
     if (args != null && args.quick === true) {
-      return new Promise(function (resolve) { panelResolvers.push({ sid: sid, resolve: resolve }) })
+      return Promise.resolve(Object.assign({ partial: true, staged: [], unstaged: [], untracked: [], unmerged: [] }, head))
     }
-    return Promise.resolve(settled[sid] !== undefined ? settled[sid] : { ok: false, repo: null, reason: '' })
+    const reply = Object.assign({}, head, work)
+    if (holdAll === true) return new Promise(function (resolve) { held.push(function () { resolve(reply) }) })
+    if (args != null && args.paths !== undefined && slowPathsMs > 0) {
+      const cost = slowPathsMs
+      return new Promise(function (resolve) { setTimeout(function () { clock += cost; resolve(reply) }, 5) })
+    }
+    if (slowFullMs > 0) {
+      const cost = slowFullMs
+      return new Promise(function (resolve) { setTimeout(function () { clock += cost; resolve(reply) }, 5) })
+    }
+    return Promise.resolve(reply)
+  }
+  if (method === 'git/watch') {
+    calls.push({ method: method, args: args })
+    return Promise.resolve({ ok: true, repo: '/tmp/ws', sig: watchSig })
   }
   return realCall(method, args)
 }
-const panelPending = () => panelResolvers.length
-const answerPanel = async (reply) => {
-  const next = panelResolvers.shift()
-  if (next === undefined) throw new Error('没有待决的 git/panel 请求')
-  settled[next.sid] = reply
-  next.resolve(reply)
-  await new Promise((r) => setTimeout(r, 5))
+
+const lanes = () => timers.filter((t) => t.kind === 'interval' && t.dead !== true)
+const laneDelays = () => lanes().map((t) => t.delay).sort((a, b) => a - b)
+const pendingTimeouts = () => timers.filter((t) => t.kind === 'timeout' && t.dead !== true)
+const fireTimeouts = () => pendingTimeouts().forEach((t) => { t.dead = true; t.cb() })
+/* 只推轮询那两条 lane（3 秒 / 5 秒）：面板那个「多久整棵树重来一遍」的时钟是另一件
+   事 —— 它自己到点就会发一次全树读，测试要分开看这两件事。 */
+const watcherLanes = () => lanes().filter((t) => t.delay <= 5000)
+const tick = () => watcherLanes().forEach((t) => t.cb())
+/* 第一个 tick 只记下签名（打开面板不白读一遍），第二个才看得见变化。 */
+const bump = async function (sig) {
+  tick()
+  await wait(30)
+  watchSig = sig
+  tick()
+  await wait(30)
 }
-/* 同一个 fiber 换 props —— 这才是真实的「切换工作区」；label 必须稳定，
-   否则每次都是一个全新挂载的组件，测的就成了挂载而不是切换。 */
-const chipFor = (sessionId) => renderUntilStable(makeElement(chip, { sessionId: sessionId }), 'chip')
-const fireTimers = () => {
-  timers.filter((t) => t.kind === 'timeout' && !t.dead).forEach((t) => { t.dead = true; t.cb() })
+const shape = (c) => (c.args != null && c.args.quick === true ? '身份'
+  : (c.args != null && c.args.paths !== undefined ? '路径' + c.args.paths.length : '整树'))
+const shapesSince = (mark) => calls.slice(mark).filter((c) => c.method === 'git/panel').map(shape)
+const isPaths = (s) => s.indexOf('路径') === 0
+const badgeOf = (tree) => byClass(tree, 'dsh-git-badge')
+const badgeText = (tree) => (badgeOf(tree)[0] === undefined ? '' : textOf(badgeOf(tree)[0]))
+const badgeClass = (tree) => (badgeOf(tree)[0] === undefined ? '' : String(badgeOf(tree)[0].props.className))
+const titleOf = (tree) => String(tree.props.title)
+const tabLabel = (tree) => {
+  const tab = buttons(tree).find((b) => textOf(b).indexOf('变更') >= 0)
+  return tab === undefined ? '' : textOf(tab)
 }
-const branchesFor = (repo) => calls.filter((c) => c.method === 'git/branches' && c.args != null && c.args.repo === repo)
-/* 每条改动一个**不同的**路径：同一份快照里同一个 path 出现两次不是 git 会给出的东西，
-   而「有几个改动」现在是那份列表的行数（mergeChanges，面板标签上那个数字），同一个
-   路径只会是一行。 */
-const panelOf = (repo, branch, pending) => ({
-  ok: true, repo: repo, branch: branch, detached: false, upstream: 'origin/' + branch,
-  ahead: 0, behind: 0, sequencer: null,
-  staged: [], unstaged: new Array(pending || 0).fill(0).map((_x, i) => 'f' + i), untracked: [], unmerged: [],
-})
-
-console.log('== 先在那个工作区里待一会儿 ==')
-calls.length = 0
-let chipTree1 = await chipFor('s-1')
-ok('chip 先要求读这个工作区', panelArgs.length === 1 && panelArgs[0].sessionId === 's-1')
-await answerPanel(panelOf('/tmp/ws', 'main', 2))
-chipTree1 = await chipFor('s-1')
-console.log('  s-1 的按钮:', JSON.stringify(textOf(chipTree1)))
-ok('读到分支后按钮写 main', textOf(chipTree1).indexOf('main') >= 0)
-ok('带来改动数徽标', textOf(chipTree1).indexOf('2') >= 0)
-ok('顺手预热了这个仓库的分支列表（不用等打开弹层）', branchesFor('/tmp/ws').length === 1)
+/* 两块屏幕都重画一遍：在真页面上这件事是 bump 的通知自己做的，在测试里要人来推。 */
+const repaint = async function () {
+  const chipTreeNow = await renderUntilStable(makeElement(chip, { sessionId: 's-1' }), 'chip')
+  const panelTree = await settle()
+  await wait(60)
+  return { chip: chipTreeNow, panel: panelTree }
+}
+const pathsRequests = (mark) => calls.slice(mark)
+  .filter((c) => c.method === 'git/panel' && c.args != null && c.args.paths !== undefined)
+  .map((c) => c.args.paths)
+const clickIn = async function (tree, text) {
+  const hit = buttons(tree).find((b) => textOf(b).indexOf(text) >= 0)
+  if (hit === undefined) throw new Error('点不到「' + text + '」')
+  hit.props.onClick()
+  await wait(20)
+}
 
 console.log('')
-console.log('== 切到另一个工作区：不能还挂着上一个的分支 ==')
-panelArgs.length = 0
-let chipTree2 = await chipFor('s-2')
-await new Promise((r) => setTimeout(r, 5))
-chipTree2 = await chipFor('s-2')
-console.log('  s-2 还没读回来时的按钮:', JSON.stringify(textOf(chipTree2)))
-ok('切过去后马上就不再显示上个工作区的 main', textOf(chipTree2).indexOf('main') < 0)
-ok('也不再挂着上个工作区的改动数', textOf(chipTree2).indexOf('2') < 0)
-ok('为 s-2 发了新的一次读', panelArgs.length >= 1 && panelArgs[panelArgs.length - 1].sessionId === 's-2')
-await answerPanel(panelOf('/tmp/ws2', 'dev', 1))
-chipTree2 = await chipFor('s-2')
-console.log('  s-2 读回来后的按钮:', JSON.stringify(textOf(chipTree2)))
-ok('读到后按钮写 dev', textOf(chipTree2).indexOf('dev') >= 0)
-ok('预热了 s-2 自己的仓库', branchesFor('/tmp/ws2').length === 1)
+console.log('=== 一个浏览器第一次看这个仓库 ===')
+work = workWith(3)
+let mark = calls.length
+let tree = await repaint()
+console.log('  chip 发的读:', JSON.stringify(shapesSince(mark)))
+ok('没用过这个仓库 → chip 自己整棵树量一次', shapesSince(mark).indexOf('整树') >= 0)
+ok('量出来的数字就在徽标上', badgeText(tree.chip) === '3')
+ok('刚量完，不标「正在核对」', badgeClass(tree.chip).indexOf('stale') < 0)
 
 console.log('')
-console.log('== 切回去：记忆里的分支立刻出现，不等往返 ==')
-ok('切到 s-2 之前没有遗留的未决读', panelPending() === 0)
-let chipTree3 = await chipFor('s-1')
-await new Promise((r) => setTimeout(r, 5))
-chipTree3 = await chipFor('s-1')
-console.log('  s-1 重新读回来之前的按钮:', JSON.stringify(textOf(chipTree3)), ' 未决读:', panelPending())
-ok('切回 s-1 立刻又显示 main（用的是记住的标签）', textOf(chipTree3).indexOf('main') >= 0)
-ok('这次读还没回来就已经显示了', panelPending() > 0)
-await answerPanel(panelOf('/tmp/ws', 'main', 0))
-chipTree3 = await chipFor('s-1')
-ok('读回来之后仍然是 main', textOf(chipTree3).indexOf('main') >= 0)
+console.log('=== 面板打开：它量出来的就是 chip 用的那一份 ===')
+mark = calls.length
+tree = await openPanel()
+let seen = await repaint()
+console.log('  打开的读:', JSON.stringify(shapesSince(mark)))
+ok('面板打开只发一次整棵树（chip 不跟着再量一遍）',
+  shapesSince(mark).filter((s) => s === '整树').length === 1)
+ok('面板页签上那个数字也是 3', tabLabel(seen.panel) === '变更3')
+ok('同一个数字也在 chip 上', badgeText(seen.chip) === '3')
 
 console.log('')
-console.log('== 预热过的仓库：hover 卡片第一次渲染就有分支 ==')
-host.call = realCall
-calls.length = 0
-const chipTree4 = await chipFor('s-1')
-chipTree4.props.onPointerEnter()
-fireTimers()
-await wait(15)
-/* renderRoot 只渲染一遍、不等待 promise，所以「第一帧」是可观察的：
-   预热过的仓库这一帧就有分支行，没预热就只有「正在读取分支…」。 */
-const firstFrame = renderRoot(makeElement(popover, { sessionId: 's-2' }), 'pop')
-const firstCard = byClass(firstFrame, 'dsh-git-switch-hover')[0]
-ok('s-2 的 hover 卡片已经在了', firstCard !== undefined)
-const firstRows = firstCard === undefined ? [] : byClass(firstCard, 'dsh-git-bs-row')
-console.log('  第一帧里的行:', JSON.stringify(firstRows.map(textOf).slice(0, 5)))
-ok('预热过：第一帧就列出了分支（不是「正在读取分支…」）', firstRows.length > 0)
-ok('读的是 s-2 自己的仓库 /tmp/ws2', calls.filter((c) => c.method === 'git/branches').every((c) => c.args.repo === '/tmp/ws2'))
+console.log('=== 仓库在屏幕底下动过：只问屏上那些路径 ===')
+work = workWith(2)
+mark = calls.length
+await bump('SIG-2')
+seen = await repaint()
+console.log('  bump 之后的读:', JSON.stringify(shapesSince(mark)))
+ok('一次 bump 里没有整棵树读', shapesSince(mark).indexOf('整树') < 0)
+/* 也不能只是「压后排队」：读数还新的时候，整棵树根本不该被安排。 */
+ok('也没有把整棵树压在后面等着发', pendingTimeouts().some((t) => t.delay === 2000) !== true)
+ok('问的是屏上那些路径', shapesSince(mark).filter(isPaths).length > 0)
+ok('数字跟着变了', badgeText(seen.chip) === '2')
+
+console.log('')
+console.log('=== 在面板里提交：确认读也只有那些路径 ===')
+await clickIn(seen.panel, '变更')
+seen = await repaint()
+console.log('  活跃轮询间隔:', JSON.stringify(laneDelays()))
+ok('「变更」页开着，面板那个时钟才起，读得快时停在下限 30 秒', laneDelays().indexOf(30000) >= 0)
+const box = collect(seen.panel).find((n) => n.type === 'textarea')
+ok('变更页上有提交信息框', box !== undefined)
+box.props.onChange({ target: { value: '提交这两个文件' } })
+await wait(20)
+seen = await repaint()
+const commitBtn = byClass(seen.panel, 'dsh-git-primary')[0]
+ok('变更页上有提交按钮', commitBtn !== undefined)
+mark = calls.length
+work = cleanWork()
+commitBtn.props.onClick()
+await wait(20)
+seen = await repaint()
+console.log('  提交之后的读:', JSON.stringify(shapesSince(mark)))
+ok('提交的确认读是那些路径，不是整棵树',
+  shapesSince(mark).indexOf('整树') < 0 && shapesSince(mark).filter(isPaths).length > 0)
+ok('提交之后 chip 上的数字跟着清零（它自己一次都没量）',
+  badgeText(seen.chip) === '' && titleOf(seen.chip).indexOf('工作区干净') >= 0)
+
+console.log('')
+console.log('=== 两次全树读之间的间隔按实测代价走 ===')
+/* 让下一次全树读「花 8 秒」：真机上就是这个量级，而 30 秒一次的时钟等于每 30 秒
+   冻住整条通道 8 秒。 */
+slowFullMs = 8000
+mark = calls.length
+await clickIn(seen.panel, '⟳')
+seen = await repaint()
+console.log('  刷新按钮的读:', JSON.stringify(shapesSince(mark)))
+ok('⟳ 是明确要求：整棵树重读一次', shapesSince(mark).indexOf('整树') >= 0)
+console.log('  活跃轮询间隔:', JSON.stringify(laneDelays()))
+/* 一次读量的代价越高，下一次来得越晚（8×8 起，上限 5 分钟）。这里同时有两条全树读
+   在跑，所以量到的代价比 8 秒还大 —— 断言的是「不再是 30 秒那个下限」。 */
+ok('这一次实测 8 秒，面板的时钟按倍数放大（不再是 30 秒）',
+  laneDelays().indexOf(30000) < 0 && laneDelays().some((d) => d >= 64000))
+/* 慢读只在这一节里用：留着的话后面每一次读都会「顺手」被算成慢读（虚拟钟是跳着走的）。 */
+slowFullMs = 0
+
+console.log('')
+console.log('=== 上一次量出来是干净的，仓库又动过了 ===')
+work = workWith(1)
+advance(70000)
+mark = calls.length
+holdAll = true
+await bump('SIG-3')
+const mid = await repaint()
+console.log('  中间态:', JSON.stringify(titleOf(mid.chip)))
+ok('干净的那份读数不能继续当「现在也干净」用：立刻整棵树重读',
+  shapesSince(mark).indexOf('整树') >= 0)
+ok('还没量回来时说的是「正在核对」，不谎称干净', titleOf(mid.chip).indexOf('正在核对') >= 0)
+releaseAll()
+seen = await repaint()
+ok('量回来之后数字出现', badgeText(seen.chip) === '1')
+
+console.log('')
+console.log('=== 有脏路径可以问时：整棵树压后 2 秒 ===')
+advance(70000)
+work = workWith(2)
+mark = calls.length
+await bump('SIG-4')
+seen = await repaint()
+console.log('  bump 之后的读:', JSON.stringify(shapesSince(mark)), ' 待决 timeout:',
+  JSON.stringify(pendingTimeouts().map((t) => t.delay)))
+ok('先发身份和路径读，整棵树不占这条路', shapesSince(mark).indexOf('整树') < 0)
+ok('整棵树被压后 2 秒（让这次点击的反馈先走）', pendingTimeouts().some((t) => t.delay === 2000))
+fireTimeouts()
+await wait(40)
+seen = await repaint()
+ok('压后的那一次确实是整棵树', shapesSince(mark).indexOf('整树') >= 0)
+
+console.log('')
+console.log('=== 折叠目录那条不带父目录（否则旁边整棵树都要扫） ===')
+/* git 把没跟踪的目录折叠成一条，而那条**本身就是自己的子树**：真机上量到的是
+   7 条原始路径 280ms、把它们各自的父目录也带上（12 条）6138ms，多出来的全是
+   `holox-modules` 那一条把所有兄弟目录都扫了一遍。 */
+work = {
+  staged: [],
+  unstaged: [{ path: 'docs/pharma/方案.docx', code: ' M' }],
+  untracked: [{ path: 'holox-modules/holox-as2/', code: '??' }],
+  unmerged: [],
+}
+mark = calls.length
+await clickIn(seen.panel, '⟳')
+seen = await repaint()
+await bump('SIG-6')
+seen = await repaint()
+const askedNow = pathsRequests(mark)
+const lastAsked = askedNow[askedNow.length - 1]
+console.log('  这一轮问过的路径:', JSON.stringify(lastAsked))
+ok('折叠目录那一条问的是它自己', lastAsked.indexOf('holox-modules/holox-as2') >= 0)
+ok('不再把它的父目录也带上（那是旁边整棵树）', lastAsked.indexOf('holox-modules') < 0)
+ok('文件的父目录仍然带着（旁边新出现的文件要看得见）', lastAsked.indexOf('docs/pharma') >= 0)
+
+console.log('')
+console.log('=== 路径读本身很贵时：这个仓库收窄成只问那几条路径 ===')
+slowPathsMs = 2000
+advance(70000)
+await bump('SIG-7')
+await repaint()
+slowPathsMs = 0
+advance(70000)
+mark = calls.length
+await bump('SIG-8')
+await repaint()
+const narrowed = pathsRequests(mark)
+const lastNarrow = narrowed[narrowed.length - 1]
+console.log('  收窄之后问的路径:', JSON.stringify(lastNarrow))
+ok('一次超时的路径读之后，请求里只剩那几条路径本身',
+  lastNarrow !== undefined && lastNarrow.indexOf('docs/pharma') < 0
+  && lastNarrow.indexOf('docs/pharma/方案.docx') >= 0
+  && lastNarrow.indexOf('holox-modules/holox-as2') >= 0)
+
+console.log('')
+console.log('=== 同一个数字：面板页签和 chip ===')
+work = workWith(2)
+await bump('SIG-5')
+seen = await repaint()
+console.log('  变更页签:', JSON.stringify(tabLabel(seen.panel)), ' chip:', JSON.stringify(badgeText(seen.chip)))
+ok('面板页签上的数字和 chip 上的徽标是同一个',
+  tabLabel(seen.panel) === '变更2' && badgeText(seen.chip) === '2')

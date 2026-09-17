@@ -1689,3 +1689,93 @@ ok('从提交的文件列表点开的是那次提交的差异',
   && diffCalls[diffCalls.length - 1].ref === 'aaa111'
   && diffCalls[diffCalls.length - 1].path === 'deep/inner/app.js')
 host.call = detailSaved
+
+/* ═══ 15. 提交身份：提交被拒的原因不在仓库里 ═══
+   `git commit` 在没有作者身份时整个失败，而 git 为它印八行英文（"Author identity
+   unknown"、"Run git config --global …"、最后一行才是拒绝本身）。判据在 Host 那
+   边（`git var GIT_AUTHOR_IDENT` 的回答），这里管的是它到界面上有没有变成能照抄
+   的命令 —— 以及在没这回事的仓库里，这几句话一个字都不许多出来。 */
+
+const identSaved = host.call
+let panelIdent = false
+let commitReply = { ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 }
+host.call = function (method, args) {
+  if (method === 'git/commit') return Promise.resolve(commitReply)
+  const answered = identSaved(method, args)
+  if (method !== 'git/panel' || args == null || args.quick === true) return answered
+  return answered.then(function (reply) {
+    return panelIdent === true ? Object.assign({}, reply, { needsIdentity: true }) : reply
+  })
+}
+/* 面板的整树读挂在 30 秒的时钟上（没有刷新键）：直接推一下那个时钟，和读者等它
+   自己到点是同一条路。 */
+const tickAll = function () {
+  timers.filter(function (t) { return t.kind === 'interval' && t.dead !== true })
+    .forEach(function (t) { t.cb() })
+}
+const identityHint = function (t) {
+  return byClass(t, 'dsh-git-warn').filter(function (n) { return textOf(n).indexOf('提交身份') >= 0 })[0]
+}
+const errorStrip = function (t) {
+  return collect(t).filter(function (n) { return n.props.className === 'dsh-git-error' })[0]
+}
+const sendCommit = async function (message) {
+  const area = collect(tree).filter(function (n) { return n.type === 'textarea' })[0]
+  if (area !== undefined) area.props.onChange({ target: { value: message } })
+  await wait(5)
+  tree = await settle()
+  press(byClass(tree, 'dsh-git-primary')[0], 'onClick')
+  await wait(10)
+  return await settle()
+}
+
+press(buttons(tree).find(function (b) { return textOf(b).indexOf('变更') >= 0 }), 'onClick')
+await wait(10)
+tree = await settle()
+
+panelIdent = true
+tickAll()
+await wait(10)
+tree = await settle()
+console.log('')
+console.log('== 提交区先说清楚 ==')
+ok('没有身份时，写提交信息之前提交区就说出来了（不是等被 git 拒一次）', identityHint(tree) !== undefined)
+ok('那句话里是能照抄的两条命令，不是「请配置 git 身份」这种没有下一步的话',
+  textOf(identityHint(tree) || {}).indexOf('git config --global user.name') > 0
+  && textOf(identityHint(tree) || {}).indexOf('git config --global user.email') > 0)
+
+commitReply = {
+  /* `needsIdentity` 是 Host 的答复里带的那个判据（`git var GIT_AUTHOR_IDENT`
+     的回答），界面这一侧只负责把它翻成能照抄的话。 */
+  ok: false, exitCode: 128, needsIdentity: true, stdout: '',
+  stderr: 'Author identity unknown\n\n*** Please tell me who you are.\n\nRun\n\n'
+    + '  git config --global user.email "you@example.com"\n'
+    + '  git config --global user.name "Your Name"\n\n'
+    + 'to set your account\'s default identity.\n'
+    + 'Omit --global to set the identity only in this repository.\n\n'
+    + 'fatal: empty ident name (for <mayou@MAYS.localdomain>) not allowed\n',
+}
+tree = await sendCommit('试一次提交')
+const strip = errorStrip(tree)
+console.log('  错误条:', JSON.stringify(textOf(strip)))
+ok('提交被拒时，错误条里就是那两条命令', strip !== undefined
+  && textOf(strip).indexOf('git config --global user.name "你的名字"') > 0)
+ok('git 自己的最后一行还在下面（身份缺失不一定是一次提交失败的唯一原因）',
+  textOf(strip).indexOf('fatal: empty ident name (for <mayou@MAYS.localdomain>) not allowed') > 0)
+ok('错误条按行显示（两条命令不能挤成一句话）',
+  strip !== undefined && strip.props.style.whiteSpace === 'pre-wrap')
+
+/* 负对照：别的失败不许被说成身份问题 —— 判据写松了（比如只看「提交失败了」和
+   「git var 说没有身份」两件事）就会在这里红，而不是等读者被指去改一个没坏的东西。 */
+commitReply = { ok: false, exitCode: 1, stdout: '', stderr: 'fatal: 别的什么地方坏了\n' }
+tree = await sendCommit('再试一次')
+ok('（对照）不是身份的失败，错误条里只有 git 自己那句话',
+  textOf(errorStrip(tree)) === 'fatal: 别的什么地方坏了')
+
+panelIdent = false
+tickAll()
+await wait(10)
+tree = await settle()
+ok('（对照）有身份的仓库里，提交区一个字都不多出来', identityHint(tree) === undefined)
+
+host.call = identSaved

@@ -13,7 +13,9 @@
       watchEnabled: true,
       watchChip: true,
       watchFastSec: 3,
-      watchSlowSec: 15,
+      /* 面板关着时 chip 那条慢 lane。它现在只发一次便宜签名（真机上 0.12s），所以可以
+         问得比过去勤：15s 的话，终端里提交完要过十几秒 chip 才改口。 */
+      watchSlowSec: 5,
       hoverSwitch: true,
       /* Which of the two changes views the panel opens in: the directory tree
          (IDEA's default) or the flat list of paths. A preference of this browser
@@ -72,7 +74,13 @@
        half, so they travel across browsers and machines. As an ordinary plugin
        this is exactly what its config section would hold. */
 
-    const PLUGIN_CONFIG_DEFAULTS = { initBranch: 'main', cherryPickRecord: false }
+    const PLUGIN_CONFIG_DEFAULTS = {
+      initBranch: 'main', cherryPickRecord: false,
+      /* 空 = 用部署 PATH 里的 git。 */
+      gitPath: '',
+      /* 这三条是插件自己给 git 的实参，不是 git 设置的副本。 */
+      fetchPrune: true, pullRebase: false, pushSetUpstream: false,
+    }
     let pluginConfig = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
     let pluginConfigPath = ''
     let pluginConfigLoaded = false
@@ -80,11 +88,23 @@
     const pluginConfigSignal = createSignal(function () { return pluginConfig })
     const usePluginConfig = pluginConfigSignal.use
 
+    /* 每次**Host 确认过**的配置计数。屏幕上那份草稿是即时的（`savePluginConfig` 当场
+       改内存，400ms 后才落盘），所以「问 Host 一件事」不能挂在草稿上：挂上去的话每敲
+       一个键都是一次询问，而且问到的是 Host 手里那份还没更新的配置 —— 真机上量到的
+       是界面永远慢一步。这个计数只在答复带着配置回来时才动（初次读取、保存成功）。 */
+    let pluginConfigCommitted = 0
+    const pluginConfigCommittedSignal = createSignal(function () { return pluginConfigCommitted })
+    const usePluginConfigCommitted = pluginConfigCommittedSignal.use
+
     function normalizePluginConfig(raw) {
       const out = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
       if (raw == null || typeof raw !== 'object') return out
       if (typeof raw.initBranch === 'string') out.initBranch = raw.initBranch.trim().slice(0, 120)
       out.cherryPickRecord = raw.cherryPickRecord === true
+      if (typeof raw.gitPath === 'string') out.gitPath = raw.gitPath.trim().slice(0, 400)
+      out.fetchPrune = raw.fetchPrune !== false
+      out.pullRebase = raw.pullRebase === true
+      out.pushSetUpstream = raw.pushSetUpstream === true
       return out
     }
 
@@ -94,7 +114,9 @@
         if (data.config !== undefined) pluginConfig = normalizePluginConfig(data.config)
         pluginConfigError = ''
       }
+      pluginConfigCommitted += 1
       pluginConfigSignal.notify()
+      pluginConfigCommittedSignal.notify()
     }
 
     function loadPluginConfig() {
@@ -114,9 +136,15 @@
     let configSaveTimer = null
 
     function writePluginConfig() {
-      callHost('git/config-save', { config: pluginConfig }).then(function (result) {
+      const request = { config: pluginConfig }
+      /* 写在部署的配置目录里，也就是任何工作区之外：带上这个页面在哪个会话里，Host
+         才能用这个会话的沙箱策略去写（没有会话时写不出去，而那种失败必须说得出来）。 */
+      if (lastSessionId.length > 0) request.sessionId = lastSessionId
+      callHost('git/config-save', request).then(function (result) {
         if (result == null || result.ok !== true) {
-          pluginConfigError = text(result != null ? result.error : '') || '保存失败'
+          /* git 那套「这台机器 / 这个沙箱不让我做这件事」的说法是同一份（见
+             commandDetail）：这里也走它，免得写不进去时屏幕上什么都没有。 */
+          pluginConfigError = commandDetail(result) || text(result != null ? result.error : '') || '保存失败'
           pluginConfigSignal.notify()
           return
         }

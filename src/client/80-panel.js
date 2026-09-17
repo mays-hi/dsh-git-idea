@@ -68,20 +68,25 @@
          the 36 paths the changes tree was showing. They are the same answer for
          everything that is on screen.
 
-         So the whole tree is read on its own clock (opening the panel, the
-         refresh button, a repository-level operation, and once every
-         FULL_STATUS_MS), and everything the reader does between those — a tick,
-         an edit to a file that is already listed, a stage — is confirmed by a
-         read of the paths involved. A file that was clean and is now modified is
-         the one thing a pathspec read cannot see; the whole-tree read is what
-         catches it, which is why it still happens on a clock.
+         So the whole tree is read on its own clock (opening a repository the
+         plugin has not read yet, the refresh button, and once every fullReadGapMs
+         while the changes tab is on screen), and everything the reader does
+         between those — a tick, an edit to a file that is already listed, a stage,
+         a commit — is confirmed by a read of the paths involved. A file that was
+         clean and is now modified is the one thing a pathspec read cannot see; the
+         whole-tree read is what catches it, which is why it still happens on a
+         clock.
 
-         The latest snapshot and the last whole-tree read live in one object
-         rather than in the state alone: an effect keeps the render it was created
-         in, so a callback registered once would otherwise read a stale
-         `status` for as long as its dependencies do not move. */
-      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '', mutations: Promise.resolve() } })
+         The snapshot, the cost of the last whole-tree read and whether the next
+         read has to be a whole one live in one object rather than in the state
+         alone: an effect keeps the render it was created in, so a callback
+         registered once would otherwise read a stale `status` for as long as its
+         dependencies do not move. */
+      const [panelBox] = React.useState(function () { return { status: null, needFull: false, repo: '', costMs: 0, lastFull: false, mutations: Promise.resolve() } })
       panelBox.status = status
+      /* 一次全树读占住整条通道多久 —— 下一次该隔多久再量一遍由它决定（fullReadGapMs）。
+         进 state 的原因只有一个：间隔变了要把那个时钟重新起一遍。 */
+      const [treeCost, setTreeCost] = React.useState(0)
 
       /* work is the only truth about whether this path is a usable repository.
          Everything that reads refs, history or the index is gated on it, so a
@@ -89,6 +94,13 @@
          that each report a different flavour of failure. */
       const repoOk = work != null && work.ok === true
       const needsSetup = work != null && work.ok !== true
+
+      /* 读数按答复里的仓库记，不是按这次请求写的那个：请求里常常只有会话 id（Host 才知道
+         这个会话的工作区在哪）。收窄与否也是按这个路径记的。 */
+      const treeKey = function (status, fallback) {
+        const resolved = status != null ? text(status.repo) : ''
+        return resolved.length > 0 ? resolved : fallback
+      }
 
       const base = function (repo) {
         const request = { sessionId: sessionId }
@@ -114,47 +126,70 @@
           const full = paths == null || paths.length === 0
           const work = Object.assign({}, request)
           if (!full) work.paths = paths
+          const started = Date.now()
+          /* 全树那一次在飞的时候，全局那份读数就是「还没核对过」：chip 这时说的是
+             「正在核对」，而不是继续报一个它没验证过的数字。 */
+          /* 读数按**答复里的仓库**记，不是按这次请求写的那个：请求里常常只有会话 id
+             （Host 才知道这个会话的工作区在哪），而读数要能被 chip 按路径查到。 */
+          const resolved = text(data.repo).length > 0 ? text(data.repo) : asked
+          const finished = treeCountReadStart(resolved)
           callHost('git/panel', work).then(function (reply) {
+            finished()
             /* A read that came back after the path changed is not this path's
                answer; the effect below will load the new one anyway. */
             if (asked !== appliedRepo && asked.length > 0) return
             if (epoch !== repoEpoch(asked, sessionId)) return
+            panelBox.lastFull = full
+            /* 只问几条路径的那种读有多贵：贵到一定程度就说明父目录扫进了大树，这个仓库
+               从此收窄（见 pathsOfInterest）。 */
+            if (full !== true) pathsReadSpent(resolved, Math.round(Date.now() - started))
             if (full) {
-              panelBox.fullAt = Date.now()
+              /* 全树那一次花了多久，读数记下来。 */
+              const cost = Math.round(Date.now() - started)
+              panelBox.needFull = false
+              panelBox.costMs = cost
+              setTreeCost(cost)
               setStatus(reply != null && reply.ok === true ? reply : null)
               return
             }
             /* A partial answer says nothing about the rest of the tree: it is
                folded into the snapshot on screen, never put in its place. */
             setStatus(function (previous) { return mergePanelStatus(previous, reply) })
-          }).catch(function () { setStatus(null) })
+          }).catch(function () { finished(); setStatus(null) })
         }).catch(function (failure) {
           setError(failureText(failure))
         })
       }
 
-      /* How long a snapshot may stand before the whole tree is read again. The
-         cheap signature and the pathspec read between them cover everything that
-         touches a path the tree is already showing; this is the backstop for the
-         one thing they cannot see. Seconds of walking on a slow mount, so it is
-         on a clock rather than on every tick. */
-      const FULL_STATUS_MS = 30000
+      /* 快照能站多久。便宜的签名和路径读合起来覆盖了「已经显示着的那些路径」，它们
+         看不见的只有一件事：**本来干净、刚刚被改**的文件（或者一个干净目录里新出现的
+         文件）。那一次全树读在这台机器上是 5–8s，而且占住整条通道，所以它挂在时钟上，
+         而且间隔按上一次实测的代价来定（fullReadGapMs：至少 30s，最多 5 分钟）。 */
+      /* 量完就写进全局那一份读数（见 10-state.js）：面板是唯一既读全树、又读屏上那些
+         路径的地方，chip 上那个数字就来自这里 —— 两块屏幕于是不会各说各话。乐观的
+         tick（点击就地改的那份快照）也走这里，所以 chip 上的数字跟着手指走。 */
+      React.useEffect(function () {
+        if (status == null || status.ok !== true) return
+        /* 按答复里的仓库记：没应用过路径时请求里只有会话 id，而这份读数要能被 chip
+           按它查到的那个路径找到（Host 在答复里把会话的工作区解析成了路径）。 */
+        publishTreeRead(treeKey(status, appliedRepo), status, panelBox.lastFull === true, panelBox.costMs)
+      }, [status, appliedRepo])
 
       /* Whether this read may be about the paths on screen instead of the whole
-         tree: only when there is a snapshot to fold it into, and only while one
-         is recent enough to be worth trusting for the rest. */
+         tree: whenever there is a snapshot to fold it into. */
       const readChanges = function () {
         const snapshot = panelBox.status
-        const recent = panelBox.fullAt > 0 && (Date.now() - panelBox.fullAt) < FULL_STATUS_MS
-        const touch = recent && snapshot != null && snapshot.ok === true
-        loadWork(appliedRepo, touch ? pathsOfInterest(snapshot) : null)
+        /* 屏上有快照，问的就是屏上那些路径（0.2s）；换仓库、或明确要求整棵树时才重读
+           全部。一次「提交」之后的读因此也是 0.3s，而不是 8–10s。 */
+        const whole = panelBox.needFull === true || snapshot == null || snapshot.ok !== true
+        loadWork(appliedRepo, whole ? null : pathsOfInterest(snapshot, treeKey(snapshot, appliedRepo)))
       }
 
       /* Read the whole tree again, now. The flush is what makes it a read rather
          than a repaint of the Host's cache; the refresh button and the clock both
          go through here. */
       const reloadChanges = function () {
-        panelBox.fullAt = 0
+        panelBox.needFull = true
         callHost('git/flush', base(appliedRepo)).then(bump, bump)
       }
 
@@ -176,8 +211,8 @@
         setAppliedRepo(next)
         setStatus(null)
         panelBox.status = null
-        panelBox.fullAt = 0
-        panelBox.scope = ''
+        panelBox.needFull = true
+        panelBox.repo = ''
         setMaxCount(PAGE_COMMITS)
         resetFilters()
         setSelected(null)
@@ -219,6 +254,13 @@
         reloadChanges()
       }
 
+      /* 哪些操作能把整棵树改掉：切分支、pull、以及 merge/cherry-pick/revert（开始、
+         继续、跳过、中止都算）会重写工作区，它们的答案必须是一次全树读。别的（提交、
+         暂存、取消暂存、fetch、push、tag、建/删分支）只动索引或引用 —— 那里用屏上那些
+         路径确认就够了。真机上量到的是：一次全树读 8–10s，而且这期间整条 RPC 通道都被
+         它占着，为一次「提交」让读者等十秒、十秒内点什么都要排队，是没有道理的。 */
+      const REWRITES_TREE = ['git/checkout', 'git/pull', 'git/sequence', 'git/init']
+
       /* One path for every panel operation. A failed operation still re-reads,
          because the failures that matter — a conflicting cherry-pick, merge or
          revert — leave the repository in a different state than they found it. */
@@ -228,10 +270,7 @@
         setArmed('')
         setError(null)
         setNeedsUpstream(false)
-        /* A repository-level operation can move anything — a checkout rewrites
-           the working tree, a commit empties it — so what follows it is a read of
-           the whole tree, not of the paths that were on screen before it. */
-        panelBox.fullAt = 0
+        panelBox.needFull = REWRITES_TREE.indexOf(method) >= 0
         const request = base(appliedRepo)
         if (payload != null) Object.assign(request, payload)
         rpc(method, request).then(function () {
@@ -240,7 +279,18 @@
         }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
-          if (method === 'git/push' && failureText(failure).indexOf('upstream') >= 0) setNeedsUpstream(true)
+          if (method === 'git/push' && failureText(failure).indexOf('upstream') >= 0) {
+            /* 「这个分支还没有上游」是一次可以自己走完的失败：设置里开了这一条时，
+               就把横幅本来要问的那一步直接做掉（同一个请求，带上 setUpstream）。问过
+               的那一次不再自动重试 —— 它要是也失败，横幅照旧出现，读者还有得按。 */
+            const retry = payload == null || payload.setUpstream !== true
+            const remote = refs != null && refs.ok === true && refs.remote.length > 0 ? refs.remote[0].name : ''
+            if (plugin.pushSetUpstream === true && retry && remote.length > 0 && currentName.length > 0) {
+              runOp('git/push', { setUpstream: true, remote: remote, branch: currentName })
+              return
+            }
+            setNeedsUpstream(true)
+          }
           bump()
         })
       }
@@ -329,14 +379,12 @@
 
       React.useEffect(function () {
         if (props.ready !== true) return undefined
-        /* A different repository, or a different tab, is a different question:
-           the snapshot on screen is not an answer to it, so the read is a whole
-           one. A bump with the same scope is the repository having moved under
-           what is already on screen, which the pathspec read answers. */
-        const scope = appliedRepo + '\u0000' + tab
-        if (panelBox.scope !== scope) {
-          panelBox.scope = scope
-          panelBox.fullAt = 0
+        /* 换了仓库：屏幕上那份快照是别人的，只能整棵树重读一次。同一个仓库上的一次
+           bump（仓库在屏幕底下动过了）问的是屏上那些路径 —— 见 readChanges。标签页
+           不进这个判据：从「历史」切到「变更」不改变工作区是什么样。 */
+        if (panelBox.repo !== appliedRepo) {
+          panelBox.repo = appliedRepo
+          panelBox.needFull = true
         }
         readChanges()
         return undefined
@@ -352,8 +400,8 @@
         if (!repoOk || props.ready !== true || props.active !== true || tab !== 'changes') return undefined
         const timer = ctx.get('timer')
         if (timer === undefined) return undefined
-        return timer.interval(function () { reloadChanges() }, FULL_STATUS_MS)
-      }, [appliedRepo, repoOk, props.active, props.ready, tab])
+        return timer.interval(function () { reloadChanges() }, fullReadGapMs(treeCost))
+      }, [appliedRepo, repoOk, props.active, props.ready, tab, treeCost])
 
       React.useEffect(function () {
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
@@ -434,7 +482,7 @@
          entry to write into. */
       React.useEffect(function () {
         if (status == null || status.ok !== true) return
-        setWatchPaths(appliedRepo, sessionId, pathsOfInterest(status))
+        setWatchPaths(appliedRepo, sessionId, pathsOfInterest(status, treeKey(status, appliedRepo)))
       }, [status, appliedRepo, sessionId])
 
       /* One identity for as long as the repository does not change: the commit
@@ -508,11 +556,13 @@
         const request = base(appliedRepo)
         request.paths = paths
         const epoch = repoEpoch(appliedRepo, sessionId)
+        const finished = treeCountReadStart(appliedRepo)
         callHost('git/panel', request).then(function (reply) {
+          finished()
           if (epoch !== repoEpoch(appliedRepo, sessionId)) return
           if (reply == null || reply.ok !== true) return
           setStatus(function (previous) { return mergePanelStatus(previous, reply) })
-        }).catch(function () {})
+        }, function () { finished() })
       }
 
       /* ── one mutation after another, and none of them dims the panel ──
@@ -596,9 +646,10 @@
             setBusy(false)
             setError(null)
             setMessage('')
-            /* A commit empties the index and the list it was showing: the answer is
-               a read of the whole tree, not of the paths that were on it. */
-            reloadChanges()
+            /* 提交动的是索引和引用，屏上那些路径的读（0.3s）就是这次点击的答案：刚才
+               提交掉的那几个文件会立刻从列表里消失。整棵树留给时钟和 ⟳。 */
+            panelBox.needFull = false
+            bump()
           }, function (failure) {
             setBusy(false)
             setError(failureText(failure))
@@ -1137,7 +1188,9 @@
         h('div', { key: 'gne', className: 'dsh-git-grip dsh-git-grip-ne', title: '拖动调整宽高', onPointerDown: startDrag('ne') }),
         header,
         banner,
-        error !== null ? h('div', { className: 'dsh-git-error', style: { padding: '4px 10px' } }, error) : null,
+        /* pre-wrap：这条里出现换行的地方都是「那就是两条命令」，折成一行读起来是
+           一句话里塞了两条命令。git 自己的多行原话也顺便能按原样读。 */
+        error !== null ? h('div', { className: 'dsh-git-error', style: { padding: '4px 10px', whiteSpace: 'pre-wrap' } }, error) : null,
         body)
     }
 

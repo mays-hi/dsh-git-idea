@@ -1,0 +1,600 @@
+import fs from 'node:fs'
+
+/* ── the miniature React again (the restart emptied /tmp) ── */
+
+const store = {}
+const fakeDoc = {
+  defaultView: {
+    innerWidth: 1400, innerHeight: 900,
+    localStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v) },
+    },
+  },
+  _listeners: {},
+  addEventListener(t, f) { (this._listeners[t] = this._listeners[t] || []).push(f) },
+  removeEventListener(t, f) { this._listeners[t] = (this._listeners[t] || []).filter((x) => x !== f) },
+  fire(t, e) { (this._listeners[t] || []).slice().forEach((f) => f(e)) },
+}
+const INSIDE = { nodeType: 1, name: 'inside-panel' }
+const IN_CARD = { nodeType: 1, name: 'inside-switcher-card' }
+const IN_CHIP = { nodeType: 1, name: 'inside-composer-chip' }
+const OUTSIDE = { nodeType: 1, name: 'outside' }
+const fakeNode = { ownerDocument: fakeDoc, offsetWidth: 900, offsetHeight: 600, contains: () => false }
+/* 每个容器一个独立节点，才能区分「点在面板里」和「点在浮层卡片里」 */
+const panelNodeObj = { ownerDocument: fakeDoc, offsetWidth: 900, offsetHeight: 600, contains: (t) => t === INSIDE || t === IN_CARD }
+const cardNodeObj = { ownerDocument: fakeDoc, offsetWidth: 340, offsetHeight: 300, contains: (t) => t === IN_CARD }
+const chipNodeObj = { ownerDocument: fakeDoc, contains: (t) => t === IN_CHIP }
+const timers = []
+const fibers = new Map()
+let currentFiber = null
+let dirty = false
+
+function makeElement(type, props, ...children) {
+  const flat = []
+  const push = (c) => {
+    if (c === null || c === undefined || c === false || c === true) return
+    if (Array.isArray(c)) { c.forEach(push); return }
+    flat.push(c)
+  }
+  children.forEach(push)
+  const merged = Object.assign({}, props)
+  merged.children = flat
+  return { type: type, key: merged.key === undefined ? null : merged.key, props: merged }
+}
+/* memo：真实 React 会跳过 props 没变的子树，基准与断言都应该能看到这件事 */
+const memoCache = new Map()
+let memoSkips = 0
+function shallowSame(a, b) {
+  const ka = Object.keys(a)
+  const kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) { if (k === 'children') continue; if (a[k] !== b[k]) return false }
+  return true
+}
+const React = {
+  createElement: makeElement,
+  memo(component) { return { $$memo: true, render: component } },
+  /* useCallback 按依赖记忆，和真实 React 一样：否则 memo 永远命中不了，
+     基准和断言也就看不到「行级记忆」到底有没有生效 */
+  useCallback(fn, deps) {
+    const fiber = currentFiber
+    const index = fiber.cursor
+    fiber.cursor += 1
+    const previous = fiber.memos === undefined ? undefined : fiber.memos[index]
+    if (previous !== undefined && Array.isArray(deps) && Array.isArray(previous.deps)
+      && deps.length === previous.deps.length && deps.every((d, i) => d === previous.deps[i])) return previous.fn
+    if (fiber.memos === undefined) fiber.memos = []
+    fiber.memos[index] = { deps: deps, fn: fn }
+    return fn
+  },
+  useMemo(factory) { return factory() },
+  useState(initial) {
+    const fiber = currentFiber
+    const index = fiber.cursor
+    fiber.cursor += 1
+    if (fiber.hooks.length <= index) fiber.hooks[index] = typeof initial === 'function' ? initial() : initial
+    const setter = (next) => {
+      const value = typeof next === 'function' ? next(fiber.hooks[index]) : next
+      if (fiber.hooks[index] !== value) { fiber.hooks[index] = value; dirty = true }
+    }
+    return [fiber.hooks[index], setter]
+  },
+  useEffect(effect, deps) {
+    const fiber = currentFiber
+    const index = fiber.cursor
+    fiber.cursor += 1
+    const previous = fiber.effects[index]
+    const same = previous !== undefined && Array.isArray(deps) && Array.isArray(previous.deps)
+      && deps.length === previous.deps.length && deps.every((d, i) => d === previous.deps[i])
+    if (same) return
+    if (previous !== undefined && typeof previous.cleanup === 'function') previous.cleanup()
+    fiber.effects[index] = { deps: deps, cleanup: undefined }
+    fiber.pending.push(() => {
+      const cleanup = effect()
+      fiber.effects[index].cleanup = typeof cleanup === 'function' ? cleanup : undefined
+    })
+  },
+}
+function textOf(node) {
+  if (node === null || node === undefined) return ''
+  if (typeof node === 'string') return node
+  if (typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  if (node.props === undefined) return ''
+  return textOf(node.props.children)
+}
+function walk(node, visit) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (Array.isArray(node)) { node.forEach((c) => walk(c, visit)); return }
+  visit(node)
+  const kids = node.props !== undefined && Array.isArray(node.props.children) ? node.props.children : []
+  kids.forEach((c) => walk(c, visit))
+}
+function collect(node, out = []) {
+  if (node == null || typeof node !== 'object') return out
+  if (Array.isArray(node)) { node.forEach((c) => collect(c, out)); return out }
+  out.push(node)
+  const k = node.props && node.props.children
+  if (Array.isArray(k)) k.forEach((c) => collect(c, out))
+  return out
+}
+const buttons = (t) => collect(t).filter((n) => n.type === 'button')
+const inputs = (t) => collect(t).filter((n) => n.type === 'input')
+const byClass = (t, s) => collect(t).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(s) >= 0)
+const rows = (t) => byClass(t, 'dsh-git-bs-row')
+/* 操作行与分支行共用 .dsh-git-bs-row，取分支行时要排掉操作行 */
+const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
+const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
+const groups = (t) => byClass(t, 'dsh-git-bs-group')
+
+function renderRoot(element, label) {
+  const pending = []
+  const render = (node, path) => {
+    if (node === null || node === undefined) return null
+    if (typeof node === 'string' || typeof node === 'number') return node
+    if (Array.isArray(node)) return node.map((c, i) => render(c, path + '.' + i))
+    const type = node.type
+    if (type != null && typeof type === 'object' && type.$$memo === true) {
+      const memoKey = path + '#' + (type.render.name || 'memo')
+      const previous = memoCache.get(memoKey)
+      if (previous !== undefined && shallowSame(previous.props, node.props)) {
+        memoSkips += 1
+        return previous.tree
+      }
+      const tree = render({ type: type.render, props: node.props, key: node.key, props2: null }, path)
+      memoCache.set(memoKey, { props: node.props, tree: tree })
+      return tree
+    }
+    if (typeof type !== 'function') {
+      const kids = (node.props.children || []).map((c, i) => render(c, path + '/' + i))
+      const out = { type: type, key: node.key, props: Object.assign({}, node.props, { children: kids }) }
+      if (typeof node.props.ref === 'function') {
+        const cls = String(node.props.className || '')
+        let target = fakeNode
+        if (cls.indexOf('dsh-git-switch') >= 0) target = cardNodeObj
+        else if (cls.indexOf('dsh-git-pop') >= 0) target = panelNodeObj
+        else if (cls.indexOf('dsh-git-chip') >= 0) target = chipNodeObj
+        if (target !== fakeNode && !globalThis.__seen) globalThis.__seen = new Set()
+        if (target !== fakeNode && !globalThis.__seen.has(cls)) { globalThis.__seen.add(cls); console.log('  [ref→' + (target === panelNodeObj ? 'panel' : target === cardNodeObj ? 'card' : 'chip') + '] className=' + JSON.stringify(cls)) }
+        node.props.ref(target)
+      }
+      return out
+    }
+    const fiberKey = path + '#' + (type.name || 'anon') + '#' + (node.key === null ? '' : node.key)
+    let fiber = fibers.get(fiberKey)
+    if (fiber === undefined) { fiber = { hooks: [], memos: [], effects: [], cursor: 0, pending: [] }; fibers.set(fiberKey, fiber) }
+    fiber.cursor = 0
+    fiber.pending = []
+    const previous = currentFiber
+    currentFiber = fiber
+    let out
+    try { out = type(node.props) } finally { currentFiber = previous }
+    pending.push(fiber)
+    return render(out, path + '/' + (type.name || 'anon'))
+  }
+  const tree = render(element, label)
+  for (const fiber of pending) for (const job of fiber.pending.splice(0)) job()
+  return tree
+}
+async function renderUntilStable(element, label) {
+  let tree = null
+  for (let i = 0; i < 40; i += 1) {
+    dirty = false
+    tree = renderRoot(element, label)
+    await new Promise((r) => setTimeout(r, 0))
+    if (!dirty) return tree
+  }
+  throw new Error('render did not settle for ' + label)
+}
+
+/* ── mocks ── */
+
+const calls = []
+const nowSec = Math.floor(Date.now() / 1000)
+const OK_PANEL = { ok: true, repo: '/tmp/ws', branch: 'main', detached: false, upstream: 'origin/main', ahead: 2, behind: 1, sequencer: null, staged: [], unstaged: [], untracked: [], unmerged: [] }
+const branchesReply = {
+  ok: true, repo: '/tmp/ws', current: 'main', previous: 'solo',
+  branches: [
+    { name: 'main', current: true, committedAt: nowSec - 5, upstream: 'origin/main', track: '=', ahead: 2, behind: 1, head: 'aaa', subject: 'tip main' },
+    { name: 'solo', current: false, committedAt: nowSec - 3600, upstream: '', track: '', ahead: 0, behind: 0, head: 'bbb', subject: 'solo tip' },
+    { name: 'feature/one', current: false, committedAt: nowSec - 90000, upstream: 'origin/feature/one', track: '>', ahead: 1, behind: 0, head: 'ccc', subject: 'one tip' },
+    { name: 'zeta', current: false, committedAt: nowSec - 9000, upstream: '', track: '', ahead: 0, behind: 0, head: 'ddd', subject: 'z' },
+  ],
+  remotes: [{ name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r' }],
+}
+let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
+const host = {
+  call(method, args) {
+    calls.push({ method, args })
+    if (method === 'git/panel') return Promise.resolve(OK_PANEL)
+    if (method === 'git/branches') return Promise.resolve(branchesReply)
+    if (method === 'git/refs') return Promise.resolve({ ok: true, repo: '/tmp/ws', current: ['main'], local: [{ segments: ['main'], data: 'main' }, { segments: ['feature'], data: 'feature' }, { segments: ['stable'], data: 'stable' }], remote: [] })
+    if (method === 'git/authors') return Promise.resolve({
+      ok: true, repo: '/tmp/ws',
+      authors: [
+        { name: 'mays', email: 'mays@example.com', count: 12 },
+        { name: 'jiangzx', email: 'jiangzx@example.com', count: 30 },
+      ],
+    })
+    /* the graph echoes the ref it was asked for, so the scope is visible in the
+       reply as well as in the request the test records */
+    if (method === 'git/graph') return Promise.resolve({ ok: true, repo: '/tmp/ws', ref: (args && args.ref) || (args && args.allRefs === true ? '' : 'main'), currentBranch: 'main', commits: graphCommits, rows: [], lanes: 1 })
+    if (method === 'git/watch') return Promise.resolve({ ok: true, repo: '/tmp/ws', sig: 'SIG' })
+    if (method === 'git/commit-detail') return Promise.resolve({ ok: true, repo: '/tmp/ws', hash: (args && args.hash) || 'a', subject: 'detail subject', body: '', author: 'mays', date: '2026-09-16', files: [], branches: [] })
+    if (method === 'git/flush') return Promise.resolve({ ok: true })
+    if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/dsh-git-idea.json', config: { initBranch: 'main', cherryPickRecord: false } })
+    if (method === 'git/checkout') return Promise.resolve(checkoutReply)
+    return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
+  },
+}
+/* the history the mock hands back; a test may swap it to simulate a re-read */
+let graphCommits = [
+  { hash: 'aaa111', subject: 'tip commit', author: 'mays', date: '2026-09-16', committedAt: nowSec - 60, refs: ['HEAD -> dev'] },
+  { hash: 'bbb222', subject: 'second commit', author: 'mays', date: '2026-09-15', committedAt: nowSec - 3600, refs: [] },
+  { hash: 'ccc333', subject: 'third commit', author: 'jiangzx', date: '2026-09-14', committedAt: nowSec - 7200, refs: [] },
+]
+const registered = []
+const slots = { inject: (k, cb) => cb(), register: (o, c) => { registered.push({ options: o, component: c }); return () => {} } }
+const ctx = {
+  get(n) {
+    if (n === 'slots') return slots
+    if (n === 'timer') return {
+      interval(cb, delay) { const t = { kind: 'interval', cb, delay, dead: false }; timers.push(t); return () => { t.dead = true } },
+      timeout(cb, delay) { const t = { kind: 'timeout', cb, delay, dead: false }; timers.push(t); return () => { t.dead = true } },
+    }
+    return undefined
+  },
+  effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
+}
+const styles = { insert: () => () => {} }
+new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
+  ctx, React, host, styles, console).apply(ctx)
+
+const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
+const popover = registered.find((r) => r.options.id === 'dsh-git-idea-panel').component
+const section = registered.find((r) => r.options.id === 'dsh-git-idea').component
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms || 10))
+const popTree = (l) => renderUntilStable(makeElement(popover, { sessionId: 's-1' }), l || 'pop')
+const chipTree = (l) => renderUntilStable(makeElement(chip, { sessionId: 's-1' }), l || 'chip')
+async function settle(l) { let t = null; for (let i = 0; i < 4; i += 1) { t = await popTree(l); await wait(10) } return t }
+async function openPanel() {
+  let t = await chipTree()
+  if (t.props.className.indexOf('dsh-git-chip-open') < 0) { t.props.onClick(); await wait(10) }
+  return await settle()
+}
+async function openSwitcher() {
+  const t = await openPanel()
+  const chipBtn = byClass(t, 'dsh-git-branch-chip')[0]
+  chipBtn.props.onClick()
+  await wait(10)
+  return await settle()
+}
+
+const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + label + (value ? '' : '   ← 不符合预期'))
+/* ═══ gp43：机器上的 git，和它在网上做的事 ═══
+   设置页一直只有两样东西：插件自己的两个开关，和本浏览器的外观。而读者真正会去那里
+   找的是另外三件事 —— 我是谁（提交身份）、我用的是哪个 git（装在 PATH 之外时怎么
+   办）、以及 fetch / pull / push 到底带不带那几个参数。这个套件盯的就是这三块，加上
+   它们唯一一处会动手的地方：推送没有上游的分支时，面板会不会自己把那一步走完。
+
+   1. 提交身份：此刻生效的那一份（连来源一起）、缺哪一半、预填、写入时带的 scope
+   2. 空框不写：`git config user.name ''` 正是那个错误的来路，面板不制造它
+   3. git 位置：PATH 上的 / 设置里写的 / 写错了 / 一个都没有，四种话各不相同
+   4. 远程同步：三个开关，以及「也就是」那行照着实参说
+   5. 推送没有上游：开着就自己走完，关着就问一句；走完的那次不再重试
+
+   两条关于这个骨架的注意（踩过）：同一个组件的两次渲染要用**同一个 label**，否则
+   fiber 是新的、组件等于重新挂载（状态和 effect 都会重来）；而 `timer.timeout` 在这
+   里只是被记下来，不会自己到点 —— 去抖的保存要手动推一下。 */
+
+const configReply = function (over) {
+  return Object.assign({
+    ok: true, path: '/home/u/.dsh/dsh-git-idea.json',
+    config: { initBranch: 'main', cherryPickRecord: false, gitPath: '', fetchPrune: true, pullRebase: false, pushSetUpstream: false },
+  }, over)
+}
+
+const baseCall = host.call
+const identityCalls = []
+const identitySaves = []
+const toolCalls = []
+const configSaves = []
+let configNow = configReply().config
+let identityReply = {
+  ok: true, repo: '/tmp/ws', insideRepo: true,
+  name: 'Ada Lovelace', email: 'ada@example.com',
+  nameOrigin: '/home/u/.gitconfig', emailOrigin: '/home/u/.gitconfig',
+  globalName: 'Ada Lovelace', globalEmail: 'ada@example.com',
+  needsIdentity: false, nameMissing: false, emailMissing: false,
+}
+let toolReply = { ok: true, configured: '', fromPath: true, path: '/usr/bin/git', version: 'git version 2.43.0', found: true, reason: '', platform: 'ok' }
+
+host.call = function (method, args) {
+  if (method === 'git/identity') { identityCalls.push(args); return Promise.resolve(identityReply) }
+  if (method === 'git/identity-save') {
+    identitySaves.push(args)
+    return Promise.resolve({
+      ok: true, scope: args.scope, written: ['user.name', 'user.email'],
+      repo: args.scope === 'local' ? '/tmp/ws' : null,
+      name: args.name, email: args.email,
+      nameOrigin: args.scope === 'local' ? '.git/config' : '/home/u/.gitconfig', emailOrigin: '/home/u/.gitconfig',
+      globalName: args.name, globalEmail: args.email, needsIdentity: false,
+    })
+  }
+  if (method === 'git/toolchain') { toolCalls.push(args); return Promise.resolve(toolReply) }
+  if (method === 'git/config') return Promise.resolve(configReply({ config: configNow }))
+  if (method === 'git/config-save') { configSaves.push(args.config); configNow = args.config; return Promise.resolve(configReply({ config: args.config })) }
+  return baseCall(method, args)
+}
+
+const sectionTree = async function (label) { return await renderUntilStable(makeElement(section, {}), label) }
+/* 去抖的保存靠这个推一下：骨架里的 timer 只被记下来。 */
+const fireTimers = function () {
+  timers.filter(function (t) { return t.kind === 'timeout' && t.dead !== true }).forEach(function (t) { t.cb() })
+}
+const rowTexts = function (t) { return byClass(t, 'dsh-git-set-row').map(function (r) { return textOf(r) }) }
+const setRow = function (t, label) { return byClass(t, 'dsh-git-set-row').filter(function (r) { return textOf(r).indexOf(label) >= 0 })[0] }
+const inputFor = function (t, label) {
+  const row = setRow(t, label)
+  return row === undefined ? undefined : collect(row).filter(function (n) { return n.type === 'input' })[0]
+}
+const inputByPlaceholder = function (t, placeholder) {
+  return collect(t).filter(function (n) { return n.type === 'input' && n.props.placeholder === placeholder })[0]
+}
+const btnWith = function (t, label) { return buttons(t).filter(function (b) { return textOf(b) === label })[0] }
+const warnText = function (t) { return byClass(t, 'dsh-git-warn').map(function (n) { return textOf(n) }).join(' | ') }
+const effectiveRow = function (t) { return rowTexts(t).filter(function (x) { return x.indexOf('此刻生效') >= 0 })[0] || '' }
+
+/* ── 1. 缺一半的时候说什么 ── */
+
+console.log('')
+console.log('== 设置页 · 提交身份：缺哪一半 ==')
+identityReply = Object.assign({}, identityReply, { needsIdentity: true, nameMissing: true, name: '', email: '', nameOrigin: '', emailOrigin: '', globalName: '', globalEmail: '' })
+let st = await sectionTree('gp43-ident-missing')
+console.log('  缺一半:', JSON.stringify(warnText(st)))
+ok('缺名字时明说原因是它，并且说清后果',
+  warnText(st).indexOf('还缺：名字') >= 0 && warnText(st).indexOf('提交会被 git 拒绝') >= 0)
+ok('这一行是警告色', byClass(st, 'dsh-git-warn').length > 0)
+ok('读的时候只给 session id（路径由 Host 从会话解出来，和面板同一条路）',
+  identityCalls.length >= 1 && identityCalls[0].repo === undefined && identityCalls[0].sessionId === undefined)
+
+/* ── 2. 有身份时：值 + 来源、预填、写入 ── */
+
+console.log('')
+console.log('== 设置页 · 提交身份：写进去 ==')
+identityReply = {
+  ok: true, repo: '/tmp/ws', insideRepo: true,
+  name: 'Ada Lovelace', email: 'ada@example.com',
+  nameOrigin: '/home/u/.gitconfig', emailOrigin: '.git/config',
+  globalName: 'Ada Lovelace', globalEmail: 'ada@example.com',
+  needsIdentity: false, nameMissing: false, emailMissing: false,
+}
+st = await sectionTree('gp43-ident')
+console.log('  此刻生效:', JSON.stringify(effectiveRow(st)))
+ok('「此刻生效」把值连来源一起说（来自哪个文件才有意义）',
+  effectiveRow(st).indexOf('Ada Lovelace（来自 /home/u/.gitconfig）') >= 0
+  && effectiveRow(st).indexOf('ada@example.com（来自 .git/config）') >= 0)
+ok('两个输入框预填了此刻生效的那一份',
+  String(inputFor(st, '名字').props.value) === 'Ada Lovelace'
+  && String(inputFor(st, '邮箱').props.value) === 'ada@example.com')
+ok('有身份时没有警告', byClass(st, 'dsh-git-warn').length === 0)
+const radios = collect(st).filter(function (n) { return n.type === 'input' && n.props.type === 'radio' })
+ok('写入范围默认是这台机器（--global），也就是 git 自己建议的那一条',
+  radios.length === 2 && radios[0].props.checked === true && radios[1].props.checked === false)
+
+inputFor(st, '邮箱').props.onChange({ target: { value: 'new@example.com' } })
+await wait(5)
+st = await sectionTree('gp43-ident')
+console.log('  改了邮箱，再点写入')
+btnWith(st, '写入 git 配置').props.onClick()
+await wait(20)
+st = await sectionTree('gp43-ident')
+console.log('  写出去的:', JSON.stringify(identitySaves[0]))
+ok('点一下就把两个值写出去，scope 是 global',
+  identitySaves.length === 1 && identitySaves[0].scope === 'global'
+  && identitySaves[0].name === 'Ada Lovelace' && identitySaves[0].email === 'new@example.com')
+ok('写完之后页面把结果说出来（写到哪、写了哪两个字段）',
+  rowTexts(st).join(' | ').indexOf('已写进这台机器的 git 配置') >= 0
+  && rowTexts(st).join(' | ').indexOf('user.name') >= 0)
+
+/* ── 3. 只对这个仓库：谁记着这个页面在哪个会话里 ── */
+
+console.log('')
+console.log('== 只对这个仓库 ==')
+/* 设置页是全局的，自己不知道在哪个会话里 —— chip 一直挂在输入框旁，是它把 session
+   id 记下来的。先渲染一次 chip，模拟「读者在会话里开着 GUI」。 */
+await chipTree('gp43-chip')
+st = await sectionTree('gp43-ident')
+collect(st).filter(function (n) { return n.type === 'input' && n.props.type === 'radio' })[1].props.onChange()
+await wait(5)
+st = await sectionTree('gp43-ident')
+const localBtn = btnWith(st, '写入 git 配置')
+ok('切到「只对这个仓库」之后按钮仍然可按（这个会话有仓库）', localBtn !== undefined && localBtn.props.disabled !== true)
+ok('这一行说得出「这个仓库」到底是哪个', rowTexts(st).join(' | ').indexOf('这个仓库 = /tmp/ws') >= 0)
+localBtn.props.onClick()
+await wait(20)
+console.log('  第二次写出去的:', JSON.stringify(identitySaves[1]))
+ok('本地 scope 带着 session id（Host 靠它解出仓库，也靠它选沙箱）',
+  identitySaves.length === 2 && identitySaves[1].scope === 'local' && identitySaves[1].sessionId === 's-1')
+ok('落点也换成了这个仓库', rowTexts(await sectionTree('gp43-ident')).join(' | ').indexOf('已写进 /tmp/ws 的 .git/config') >= 0)
+
+/* 不知道是哪个仓库时：那条路要关掉并说清，而不是猜一个路径往里写。 */
+identityReply = Object.assign({}, identityReply, { repo: null, insideRepo: false })
+st = await sectionTree('gp43-ident-nowhere')
+console.log('  不知道仓库时:', JSON.stringify(rowTexts(st).filter(function (x) { return x.indexOf('还不知道') >= 0 })[0] || ''))
+ok('不知道仓库时，页面上写着这件事', rowTexts(st).join(' | ').indexOf('还不知道是哪个会话的仓库') >= 0)
+/* 全局那一份仍然可以写（它不需要知道是哪个仓库）；要写本地就没有落点，按钮关掉。 */
+ok('这时候全局那份照旧能写', btnWith(st, '写入 git 配置').props.disabled !== true)
+collect(st).filter(function (n) { return n.type === 'input' && n.props.type === 'radio' })[1].props.onChange()
+await wait(5)
+st = await sectionTree('gp43-ident-nowhere')
+ok('选「只对这个仓库」而不知道是哪个仓库时，按钮关掉（不猜一个路径往里写）',
+  btnWith(st, '写入 git 配置').props.disabled === true)
+identityReply = Object.assign({}, identityReply, { repo: '/tmp/ws', insideRepo: true })
+
+/* ── 4. git 位置 ── */
+
+console.log('')
+console.log('== 设置页 · git 位置 ==')
+const toolRow = function (t) {
+  return rowTexts(t).filter(function (x) {
+    return x.indexOf('现在用的是') >= 0 || x.indexOf('不可用') >= 0 || x.indexOf('PATH 上没有 git') >= 0
+  })[0] || ''
+}
+st = await sectionTree('gp43-tool')
+console.log('  PATH 上:', JSON.stringify(toolRow(st)))
+ok('默认说的是「用的是 PATH 上的那一个」，并带版本',
+  toolRow(st).indexOf('现在用的是 /usr/bin/git（来自 PATH）') >= 0 && toolRow(st).indexOf('git version 2.43.0') >= 0)
+ok('默认这一行不是警告色', byClass(st, 'dsh-git-warn').length === 0)
+
+toolReply = { ok: true, configured: '', fromPath: true, path: '', version: '', found: false, reason: 'not-on-path', platform: 'ok' }
+st = await sectionTree('gp43-tool-none')
+console.log('  机器上没有:', JSON.stringify(toolRow(st)))
+ok('PATH 上找不到 git 时说的是「装上它，或写一个绝对路径」',
+  toolRow(st).indexOf('PATH 上没有 git') >= 0 && toolRow(st).indexOf('绝对路径') >= 0)
+ok('这一行是警告色（读者要动手）', byClass(st, 'dsh-git-warn').length > 0)
+
+toolReply = { ok: true, configured: '/opt/nope/git', fromPath: false, path: '', version: '', found: false, reason: 'configured-missing', platform: 'ok' }
+st = await sectionTree('gp43-tool-bad')
+console.log('  写错了:', JSON.stringify(toolRow(st)))
+ok('写进去的路径不可用时，说的是「设置里写的这个路径不可用」，而不是「这台机器没有 git」',
+  toolRow(st).indexOf('设置里写的这个路径不可用') >= 0 && toolRow(st).indexOf('PATH 上没有 git') < 0)
+
+/* 改路径：去抖之后写进插件配置，同时立刻再检查一次「它到底能不能跑」。 */
+toolReply = { ok: true, configured: '/usr/local/bin/git', fromPath: false, path: '/usr/local/bin/git', version: 'git version 2.44.0', found: true, reason: '', platform: 'ok' }
+const pathBox = inputByPlaceholder(st, '留空 = 用 PATH 里的 git')
+ok('有一个写路径的输入框', pathBox !== undefined)
+const toolCallsBefore = toolCalls.length
+pathBox.props.onChange({ target: { value: '/usr/local/bin/git' } })
+await wait(5)
+fireTimers()
+await wait(20)
+st = await sectionTree('gp43-tool-bad')
+console.log('  存下来的 gitPath:', JSON.stringify(configSaves.length > 0 ? configSaves[configSaves.length - 1].gitPath : null))
+ok('路径写进插件配置（跟着插件走，换浏览器也一致）',
+  configSaves.length >= 1 && configSaves[configSaves.length - 1].gitPath === '/usr/local/bin/git')
+ok('改完立刻又问了一次「它到底能不能跑」', toolCalls.length > toolCallsBefore)
+ok('结果就显示在下面（写的就是它、版本是新的那个）',
+  toolRow(st).indexOf('git version 2.44.0') >= 0 && toolRow(st).indexOf('设置里写的就是它') >= 0)
+
+/* ── 5. 远程同步 ── */
+
+console.log('')
+console.log('== 设置页 · 远程同步 ==')
+const boxNamed = function (t, label) {
+  const row = setRow(t, label)
+  return row === undefined ? undefined : collect(row).filter(function (n) { return n.type === 'input' && n.props.type === 'checkbox' })[0]
+}
+const commandLine = function (t) { return rowTexts(t).filter(function (x) { return x.indexOf('也就是') >= 0 })[0] || '' }
+st = await sectionTree('gp43-net')
+const fetchBox = boxNamed(st, 'fetch 时删掉远端已经删了的远程分支')
+const pullBox = boxNamed(st, 'pull 用 rebase')
+const pushBox = boxNamed(st, '推送没有上游的分支时直接推上去')
+ok('三个开关都在，而且默认值就是原来的行为',
+  fetchBox !== undefined && fetchBox.props.checked === true
+  && pullBox !== undefined && pullBox.props.checked === false
+  && pushBox !== undefined && pushBox.props.checked === false)
+console.log('  也就是:', JSON.stringify(commandLine(st)))
+ok('「也就是」那行照着实参说：--prune、不加 --rebase、推送先问一句',
+  commandLine(st).indexOf('git fetch --all --prune') >= 0 && commandLine(st).indexOf('git pull ·') >= 0
+  && commandLine(st).indexOf('git push（没有上游时由面板问一句）') >= 0)
+
+fetchBox.props.onChange({ target: { checked: false } })
+await wait(5)
+fireTimers()
+await wait(20)
+st = await sectionTree('gp43-net')
+console.log('  关掉 prune:', JSON.stringify(commandLine(st)))
+ok('关掉 prune：fetch 那行就不带它了', commandLine(st).indexOf('git fetch --all ·') >= 0)
+ok('同一个插件配置里存下了 false', configSaves[configSaves.length - 1].fetchPrune === false)
+
+boxNamed(st, 'pull 用 rebase').props.onChange({ target: { checked: true } })
+await wait(5)
+fireTimers()
+await wait(20)
+st = await sectionTree('gp43-net')
+ok('打开 rebase：pull 那行带上 --rebase', commandLine(st).indexOf('git pull --rebase') >= 0)
+ok('存下了 true', configSaves[configSaves.length - 1].pullRebase === true)
+
+boxNamed(st, '推送没有上游的分支时直接推上去').props.onChange({ target: { checked: true } })
+await wait(5)
+fireTimers()
+await wait(20)
+st = await sectionTree('gp43-net')
+console.log('  开了自动上游:', JSON.stringify(commandLine(st)))
+ok('打开自动上游：那行说的是 push -u，而不是「由面板问一句」',
+  commandLine(st).indexOf('git push -u <remote> <branch>') >= 0 && commandLine(st).indexOf('问一句') < 0)
+ok('三个开关都进了同一个配置文件', configSaves[configSaves.length - 1].pushSetUpstream === true)
+
+/* ── 6. 推送没有上游：自己走完，还是问一句 ── */
+
+console.log('')
+console.log('== 面板 · 推送没有上游 ==')
+const pushCalls = []
+let pushSetUpstream = false
+const panelSaved = host.call
+host.call = function (method, args) {
+  if (method === 'git/push') {
+    pushCalls.push(args)
+    /* 第一次失败在 git 自己的那句话上；带上 -u 的那一次成功。 */
+    if (args != null && args.setUpstream === true) return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
+    return Promise.resolve({ ok: false, repo: '/tmp/ws', stdout: '', stderr: 'fatal: The current branch main has no upstream branch', exitCode: 128 })
+  }
+  if (method === 'git/refs') {
+    return Promise.resolve({
+      ok: true, repo: '/tmp/ws', current: ['main'], previous: '',
+      local: [{ segments: ['main'], data: 'main' }],
+      remote: [{ name: 'origin', remote: 'origin', refs: [{ segments: ['origin', 'main'], data: 'origin/main' }] }],
+    })
+  }
+  if (method === 'git/config') return Promise.resolve(configReply({ config: Object.assign({}, configNow, { pushSetUpstream: pushSetUpstream }) }))
+  return panelSaved(method, args)
+}
+/* 面板读的是内存里那份插件配置（usePluginConfig 只从 Host 拉一次），所以要改它得走
+   设置页自己那扇门：勾一下那个开关。这样「设了之后面板怎么做」测的就是真路径，而不是
+   测试往内存里塞一个值。 */
+const setPushSetting = async function (on) {
+  const t = await sectionTree('gp43-net')
+  const box = boxNamed(t, '推送没有上游的分支时直接推上去')
+  box.props.onChange({ target: { checked: on } })
+  await wait(5)
+  fireTimers()
+  await wait(20)
+  await sectionTree('gp43-net')
+}
+/* 注意 label：`ready` 是弹层自己「开过一次」之后才为真的，而 fiber 是按 label 认的 ——
+   换个 label 渲染就等于重新挂载，`git/refs` 不会发出去，横幅也就永远画不出来（第一版
+   就是这么错的）。所以整段都留在 `openPanel` 用的那个 label 上。 */
+const clickPush = async function () {
+  const t = await openPanel()
+  const btn = buttons(t).filter(function (b) { return String(b.props.title).indexOf('push：推送当前分支') === 0 })[0]
+  if (btn !== undefined) btn.props.onClick()
+  await wait(30)
+  return await settle('pop')
+}
+
+await setPushSetting(false)
+let pushTree = await clickPush()
+console.log('  关着:', JSON.stringify({ 次数: pushCalls.length, 横幅: textOf(pushTree).indexOf('推送并设为上游') >= 0 }))
+ok('关着的时候只推一次，然后问一句（原来的行为没变）',
+  pushCalls.length === 1 && pushCalls[0].setUpstream === undefined)
+ok('横幅还在，读者可以自己按', textOf(pushTree).indexOf('推送并设为上游') >= 0)
+
+pushCalls.length = 0
+pushSetUpstream = true
+await setPushSetting(true)
+pushTree = await clickPush()
+console.log('  开着:', JSON.stringify({
+  次数: pushCalls.length,
+  参数: pushCalls.map(function (a) { return a.setUpstream === true ? 'setUpstream' : 'plain' }),
+  横幅: textOf(pushTree).indexOf('推送并设为上游') >= 0,
+}))
+ok('开着的时候自己走完那一步：第二次带着 -u、远端和分支',
+  pushCalls.length === 2 && pushCalls[1].setUpstream === true
+  && pushCalls[1].remote === 'origin' && pushCalls[1].branch === 'main')
+ok('走完了就不用再问一句', textOf(pushTree).indexOf('推送并设为上游') < 0)
+ok('没有第二次重试（-u 那次失败也不会再套一层）', pushCalls.filter(function (a) { return a.setUpstream === true }).length === 1)
+
+host.call = panelSaved

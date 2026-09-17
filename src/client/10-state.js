@@ -216,6 +216,124 @@
       repoEpochs[repoEpochKey(repo, sessionId)] = repoEpoch(repo, sessionId) + 1
     }
 
+    /* ── 工作区读数：整个插件只有一份 ──
+
+       `git status` 全树在这台机器上就是几秒（读者那个 /mnt/d 工作区、5093 个文件：
+       8.1s 冷，`-uno` 也要 5.3s），而这条 RPC 通道一次只跑一个处理函数 —— 一次全树读
+       在飞的时候，屏幕上每一次点击、另一块屏幕的每一次读，全都排在它后面。真机上量到
+       的是：终端里提交一次（引用变了），队列 18–21s 才排空，其中 13s 是两次全树读；
+       面板关着时那一次也要 10.6s，而屏幕上看到的就是「点了没反应」。
+
+       所以「工作区现在什么样」全局只留一份：谁读到的都写在这里，面板和 chip 都从这一
+       份渲染 —— 两块屏幕于是不可能各说各话，也不会各量一遍（同一个问题在 Host 那边本来
+       也只会起一个进程）。一条记录里四样东西各有各的用处：
+
+         status  最后一次合并好的工作区快照（和面板「变更」页上那份是同一个东西）
+         at      最后一次**任何**读数的时刻（全树，或只问屏上那几条路径）
+         fullAt  最后一次**全树**读数的时刻：只有它证明这份快照是完整的
+         costMs  那次全树读占住通道多久；下一次该隔多久由它决定                      */
+    const treeReads = {}
+    let treeVersion = 0
+    const treeSignal = createSignal(function () { return treeVersion })
+    const useTreeVersion = treeSignal.use
+
+    function treeRecord(repo) {
+      const found = treeReads[repo]
+      return found === undefined ? null : found
+    }
+
+    function treeCount(repo) {
+      const record = treeRecord(repo)
+      return record === null ? 0 : record.count
+    }
+
+    function publishTreeRead(repo, status, full, costMs) {
+      if (repo == null || repo.length === 0 || status == null || status.ok !== true) return
+      const previous = treeRecord(repo)
+      const now = Date.now()
+      treeReads[repo] = {
+        status: status,
+        count: mergeChanges(status).length,
+        at: now,
+        fullAt: full === true ? now : (previous === null ? 0 : previous.fullAt),
+        costMs: typeof costMs === 'number' && isFinite(costMs) && costMs >= 0
+          ? costMs
+          : (previous === null ? 0 : previous.costMs),
+      }
+      treeVersion += 1
+      treeSignal.notify()
+    }
+
+    /* 一次全树读之后，隔多久才值得再来一次：它占住整条通道 costMs 毫秒，那就让空档至少
+       是它的 8 倍。量得快的仓库照旧 30 秒一次；慢挂载上不会每 30 秒冻 8 秒（上限 5 分钟）。 */
+    const FULL_READ_FLOOR_MS = 30000
+    const FULL_READ_CEIL_MS = 300000
+    const FULL_READ_FACTOR = 8
+    function fullReadGapMs(costMs) {
+      const cost = typeof costMs === 'number' && isFinite(costMs) && costMs > 0 ? costMs : 0
+      const wanted = Math.round(cost * FULL_READ_FACTOR)
+      if (wanted <= FULL_READ_FLOOR_MS) return FULL_READ_FLOOR_MS
+      return wanted > FULL_READ_CEIL_MS ? FULL_READ_CEIL_MS : wanted
+    }
+
+    /* 这份快照还完整吗：true 表示该有人再整棵树量一次。 */
+    function treeReadDue(repo) {
+      const record = treeRecord(repo)
+      if (record === null || record.fullAt === 0) return true
+      return Date.now() - record.fullAt >= fullReadGapMs(record.costMs)
+    }
+
+    /* 有一次**会改变那个数字**的读正在飞（这个仓库）—— 全树读，或者只问几条路径的那种
+       都算。它落地之前，屏幕上那个数字不能当成「刚刚核对过」：chip 这时说的是
+       「正在核对」，而不是继续报一个它还没验证过的数字。 */
+    const treeReadings = {}
+    function treeCountReadStart(repo) {
+      if (repo == null || repo.length === 0) return function () {}
+      treeReadings[repo] = (treeReadings[repo] === undefined ? 0 : treeReadings[repo]) + 1
+      treeVersion += 1
+      treeSignal.notify()
+      let done = false
+      return function () {
+        if (done) return
+        done = true
+        if (treeReadings[repo] > 0) treeReadings[repo] -= 1
+        treeVersion += 1
+        treeSignal.notify()
+      }
+    }
+
+    function treeCountReading(repo) {
+      return repo != null && repo.length > 0 && treeReadings[repo] !== undefined && treeReadings[repo] > 0
+    }
+
+    /* 上一次全树读里那些脏路径。一次 bump 之后拿它问一次（0.2s）就能把屏幕上那份快照
+       更新掉 —— 提交之后那几个文件就是这样立刻消失的，而不是等一次新的全树读。 */
+    function treeReadPaths(repo) {
+      const record = treeRecord(repo)
+      if (record === null || record.status == null) return []
+      return pathsOfInterest(record.status, repo)
+    }
+
+    /* 一条路径读比这个还贵，就说明父目录那一层把大树扫进去了：这个仓库从此只问那几条
+       路径本身。读者那个仓库（Windows 挂载）上，12 条含父目录 6138ms、9 条不含 295ms。 */
+    const PATHS_READ_MAX_MS = 1500
+
+    /* 一次「只问屏上那几条路径」的读花了多久。父目录那一层（为了「改动文件旁边新出现的
+       文件」）在某些仓库上会把旁边整棵大树扫一遍 —— 量到一次超时就收窄，只问那几条路径
+       本身（见 52-detail.js 里的数）。 */
+    const treeNarrowed = {}
+    function treeWide(repo) {
+      return treeNarrowed[repo] !== true
+    }
+
+    function pathsReadSpent(repo, ms) {
+      if (repo == null || repo.length === 0 || treeNarrowed[repo] === true) return
+      if (!(typeof ms === 'number' && isFinite(ms) && ms >= PATHS_READ_MAX_MS)) return
+      treeNarrowed[repo] = true
+      treeVersion += 1
+      treeSignal.notify()
+    }
+
     /* Which switcher is showing, if either: the dropdown hanging off the panel
        header's branch chip ('panel'), or the card the composer chip opens on
        hover ('hover'). One at a time, never both with the panel. */
@@ -294,6 +412,24 @@
     let repoApplied = 0
     const repoAppliedSignal = createSignal(function () { return repoApplied })
     const useRepoApplied = repoAppliedSignal.use
+
+    /* The same answer for the one surface that has no session of its own: the
+       settings page is global, so it cannot name a session — and it must not name
+       a *path* either, because the Host is the one that resolves a session's
+       workspace (see `repoFrom` in the Host half). So what is remembered here is
+       only the id, and the settings page hands that back to the Host: the same
+       resolution, the same sandbox policy, one source of truth. */
+    let lastSessionId = ''
+    const lastSessionSignal = createSignal(function () { return lastSessionId })
+    const useLastSession = lastSessionSignal.use
+
+    function rememberSession(sessionId) {
+      if (sessionId === undefined || sessionId === null) return
+      const one = String(sessionId)
+      if (one.length === 0 || one === lastSessionId) return
+      lastSessionId = one
+      lastSessionSignal.notify()
+    }
 
     function sessionRepo(sessionId) {
       if (sessionId === undefined || sessionId === null) return ''

@@ -489,3 +489,30 @@ ok('连不到可见祖先的边也是虚线', gpaths[2] !== undefined && gpaths[
 /* 行高 26：最后一行的圆心在 y=91，行底是 117。老写法会停在 91（自己下面一行）。 */
 ok('离开这一页的线一直画到画出来的最后一行底下（y=117，而不是 91）',
   dOf(2).indexOf('M 24 65') === 0 && dOf(2).slice(-4) === ' 117')
+
+/* ── 一个提交都还没有的仓库（刚 init） ──
+   `git log <branch>` 在这里必然失败，但历史是空的，不是读不动 —— 宿主现在直接回
+   `ok:true, unborn:true, commits:[]`（见 gp34a 那段）。客户端要是把它说成「没有匹配的
+   提交」，人就会去清筛选，而屏幕上一个筛选都没开。 */
+const unbornSaved = host.call
+const unbornPanel = async (graph) => {
+  host.call = function (method, args) {
+    if (method === 'git/graph') return Promise.resolve(Object.assign({ ok: true, repo: '/tmp/ws', ref: 'main', currentBranch: 'main', rows: [], lanes: 1, hasMore: false }, graph))
+    return unbornSaved(method, args)
+  }
+  fibers.clear()
+  fresh = await openPanel()
+  await wait(15)
+  const tree = await settle('pop')
+  host.call = unbornSaved
+  return byClass(tree, 'dsh-git-pane').map(textOf).join(' | ')
+}
+const unbornText = await unbornPanel({ unborn: true, commits: [] })
+console.log('  还没有提交时:', JSON.stringify(unbornText))
+ok('还没有提交时说的是「这个仓库还没有提交」', unbornText.indexOf('这个仓库还没有提交') >= 0)
+ok('不说成「没有匹配的提交」（那会让人去清一个没开的筛选）', unbornText.indexOf('没有匹配') < 0)
+/* 负对照：真的是筛选没匹配到时，句子还得是原来那句 */
+const filteredText = await unbornPanel({ commits: [] })
+console.log('  筛完没匹配时:', JSON.stringify(filteredText))
+ok('（对照）筛选没匹配到仍然是「没有匹配的提交」',
+  filteredText.indexOf('没有匹配的提交') >= 0 && filteredText.indexOf('还没有提交') < 0)

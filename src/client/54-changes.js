@@ -362,6 +362,13 @@
 
       const side = h('div', { className: 'dsh-git-commitpane' },
         h('div', { className: 'dsh-git-group-title' }, '提交信息'),
+        /* 先说出来，而不是等读者写完提交信息再被 git 拒一次。两条路都留着：设置页里
+           能填的那个地方（面板里点得到），和在终端里跑的两条命令（面板不一定开着）。 */
+        props.work.needsIdentity === true
+          ? h('div', { key: 'ident', className: 'dsh-git-hint dsh-git-warn' },
+            '这台机器还没配 git 提交身份，提交会被 git 拒绝。设置页「dsh-git-idea配置 → 提交身份」里能填，'
+            + '或在终端里跑：git config --global user.name "你的名字"、git config --global user.email "你的邮箱"。')
+          : null,
         clearable('msg', h('textarea', {
           className: 'dsh-git-input',
           rows: 6,

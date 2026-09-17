@@ -650,3 +650,52 @@ ok('没有 git 时说的是机器上找不到 git，不是仓库有问题',
   nogit !== null && nogitText.indexOf('这台机器上找不到 git') >= 0)
 ok('不再把 bash 的 command not found 丢给读者看', nogitText.indexOf('command not found') < 0)
 host.call = plainCheckout
+
+/* ── 一个提交都还没有的仓库：这张卡片不能承诺它兑现不了的事 ──
+
+   这种仓库里 `git stash` 必然失败（"You do not have the initial commit yet"），
+   所以「有 N 个未提交改动 —— 先暂存再切（切完自动恢复）」那一行不能出现；而「本地」
+   那一组也不能只说「这个仓库还没有本地分支」—— chip 上明明写着 main。 */
+const unbornSavedCall = host.call
+const dirtyPanel = Object.assign({}, OK_PANEL, {
+  untracked: [{ path: 'a.txt', code: '??' }, { path: 'b.txt', code: '??' }],
+})
+const switcherWith = async (branches, panel) => {
+  host.call = function (method, args) {
+    if (method === 'git/branches') return Promise.resolve(branches)
+    if (method === 'git/panel') return Promise.resolve(panel)
+    return unbornSavedCall.call(host, method, args)
+  }
+  /* 整棵重挂一次：卡片只在挂载时读分支表（之后靠版本号），不重挂就会拿上一份数据，
+     测的就成了缓存。重挂之前它是关着的，重挂之后可能是开着的 —— 两种都要摆平。 */
+  fibers.clear()
+  await wait(20)
+  let tree = await openPanel()
+  if (byClass(tree, 'dsh-git-bs').length > 0) {
+    byClass(tree, 'dsh-git-branch-chip')[0].props.onClick()
+    await wait(10)
+    tree = await settle()
+  }
+  tree = await openSwitcher()
+  await wait(20)
+  tree = await settle()
+  host.call = unbornSavedCall
+  return tree
+}
+
+const unbornCard = await switcherWith(
+  { ok: true, repo: '/tmp/ws', current: 'main', previous: '', unborn: true, branches: [], remotes: [] },
+  dirtyPanel)
+const unbornCardText = textOf(unbornCard)
+console.log('  还没有提交时卡片里:', JSON.stringify(unbornCardText.slice(0, 110)))
+ok('说得出当前分支叫什么', unbornCardText.indexOf('当前在 main，还没有第一个提交') >= 0)
+ok('不说成「这个仓库还没有本地分支」', unbornCardText.indexOf('这个仓库还没有本地分支') < 0)
+ok('不留「先暂存再切」那一行（这里 git stash 一定失败）',
+  byClass(unbornCard, 'dsh-git-bs-check').length === 0)
+
+/* 负对照：普通仓库里那行还得在 —— 在那里 stash 是能用的，撤回它就是把能救人的路
+   一起撤了。 */
+const normalCard = await switcherWith(branchesReply, dirtyPanel)
+console.log('  普通仓库里同一行:', JSON.stringify(textOf(byClass(normalCard, 'dsh-git-bs-check')[0]).slice(0, 60)))
+ok('（对照）普通仓库里「先暂存再切」还在', byClass(normalCard, 'dsh-git-bs-check').length === 1)
+ok('（对照）普通仓库也不会冒出 unborn 那句', textOf(normalCard).indexOf('还没有第一个提交') < 0)

@@ -242,6 +242,124 @@ return {
       repoEpochs[repoEpochKey(repo, sessionId)] = repoEpoch(repo, sessionId) + 1
     }
 
+    /* ── 工作区读数：整个插件只有一份 ──
+
+       `git status` 全树在这台机器上就是几秒（读者那个 /mnt/d 工作区、5093 个文件：
+       8.1s 冷，`-uno` 也要 5.3s），而这条 RPC 通道一次只跑一个处理函数 —— 一次全树读
+       在飞的时候，屏幕上每一次点击、另一块屏幕的每一次读，全都排在它后面。真机上量到
+       的是：终端里提交一次（引用变了），队列 18–21s 才排空，其中 13s 是两次全树读；
+       面板关着时那一次也要 10.6s，而屏幕上看到的就是「点了没反应」。
+
+       所以「工作区现在什么样」全局只留一份：谁读到的都写在这里，面板和 chip 都从这一
+       份渲染 —— 两块屏幕于是不可能各说各话，也不会各量一遍（同一个问题在 Host 那边本来
+       也只会起一个进程）。一条记录里四样东西各有各的用处：
+
+         status  最后一次合并好的工作区快照（和面板「变更」页上那份是同一个东西）
+         at      最后一次**任何**读数的时刻（全树，或只问屏上那几条路径）
+         fullAt  最后一次**全树**读数的时刻：只有它证明这份快照是完整的
+         costMs  那次全树读占住通道多久；下一次该隔多久由它决定                      */
+    const treeReads = {}
+    let treeVersion = 0
+    const treeSignal = createSignal(function () { return treeVersion })
+    const useTreeVersion = treeSignal.use
+
+    function treeRecord(repo) {
+      const found = treeReads[repo]
+      return found === undefined ? null : found
+    }
+
+    function treeCount(repo) {
+      const record = treeRecord(repo)
+      return record === null ? 0 : record.count
+    }
+
+    function publishTreeRead(repo, status, full, costMs) {
+      if (repo == null || repo.length === 0 || status == null || status.ok !== true) return
+      const previous = treeRecord(repo)
+      const now = Date.now()
+      treeReads[repo] = {
+        status: status,
+        count: mergeChanges(status).length,
+        at: now,
+        fullAt: full === true ? now : (previous === null ? 0 : previous.fullAt),
+        costMs: typeof costMs === 'number' && isFinite(costMs) && costMs >= 0
+          ? costMs
+          : (previous === null ? 0 : previous.costMs),
+      }
+      treeVersion += 1
+      treeSignal.notify()
+    }
+
+    /* 一次全树读之后，隔多久才值得再来一次：它占住整条通道 costMs 毫秒，那就让空档至少
+       是它的 8 倍。量得快的仓库照旧 30 秒一次；慢挂载上不会每 30 秒冻 8 秒（上限 5 分钟）。 */
+    const FULL_READ_FLOOR_MS = 30000
+    const FULL_READ_CEIL_MS = 300000
+    const FULL_READ_FACTOR = 8
+    function fullReadGapMs(costMs) {
+      const cost = typeof costMs === 'number' && isFinite(costMs) && costMs > 0 ? costMs : 0
+      const wanted = Math.round(cost * FULL_READ_FACTOR)
+      if (wanted <= FULL_READ_FLOOR_MS) return FULL_READ_FLOOR_MS
+      return wanted > FULL_READ_CEIL_MS ? FULL_READ_CEIL_MS : wanted
+    }
+
+    /* 这份快照还完整吗：true 表示该有人再整棵树量一次。 */
+    function treeReadDue(repo) {
+      const record = treeRecord(repo)
+      if (record === null || record.fullAt === 0) return true
+      return Date.now() - record.fullAt >= fullReadGapMs(record.costMs)
+    }
+
+    /* 有一次**会改变那个数字**的读正在飞（这个仓库）—— 全树读，或者只问几条路径的那种
+       都算。它落地之前，屏幕上那个数字不能当成「刚刚核对过」：chip 这时说的是
+       「正在核对」，而不是继续报一个它还没验证过的数字。 */
+    const treeReadings = {}
+    function treeCountReadStart(repo) {
+      if (repo == null || repo.length === 0) return function () {}
+      treeReadings[repo] = (treeReadings[repo] === undefined ? 0 : treeReadings[repo]) + 1
+      treeVersion += 1
+      treeSignal.notify()
+      let done = false
+      return function () {
+        if (done) return
+        done = true
+        if (treeReadings[repo] > 0) treeReadings[repo] -= 1
+        treeVersion += 1
+        treeSignal.notify()
+      }
+    }
+
+    function treeCountReading(repo) {
+      return repo != null && repo.length > 0 && treeReadings[repo] !== undefined && treeReadings[repo] > 0
+    }
+
+    /* 上一次全树读里那些脏路径。一次 bump 之后拿它问一次（0.2s）就能把屏幕上那份快照
+       更新掉 —— 提交之后那几个文件就是这样立刻消失的，而不是等一次新的全树读。 */
+    function treeReadPaths(repo) {
+      const record = treeRecord(repo)
+      if (record === null || record.status == null) return []
+      return pathsOfInterest(record.status, repo)
+    }
+
+    /* 一条路径读比这个还贵，就说明父目录那一层把大树扫进去了：这个仓库从此只问那几条
+       路径本身。读者那个仓库（Windows 挂载）上，12 条含父目录 6138ms、9 条不含 295ms。 */
+    const PATHS_READ_MAX_MS = 1500
+
+    /* 一次「只问屏上那几条路径」的读花了多久。父目录那一层（为了「改动文件旁边新出现的
+       文件」）在某些仓库上会把旁边整棵大树扫一遍 —— 量到一次超时就收窄，只问那几条路径
+       本身（见 52-detail.js 里的数）。 */
+    const treeNarrowed = {}
+    function treeWide(repo) {
+      return treeNarrowed[repo] !== true
+    }
+
+    function pathsReadSpent(repo, ms) {
+      if (repo == null || repo.length === 0 || treeNarrowed[repo] === true) return
+      if (!(typeof ms === 'number' && isFinite(ms) && ms >= PATHS_READ_MAX_MS)) return
+      treeNarrowed[repo] = true
+      treeVersion += 1
+      treeSignal.notify()
+    }
+
     /* Which switcher is showing, if either: the dropdown hanging off the panel
        header's branch chip ('panel'), or the card the composer chip opens on
        hover ('hover'). One at a time, never both with the panel. */
@@ -320,6 +438,24 @@ return {
     let repoApplied = 0
     const repoAppliedSignal = createSignal(function () { return repoApplied })
     const useRepoApplied = repoAppliedSignal.use
+
+    /* The same answer for the one surface that has no session of its own: the
+       settings page is global, so it cannot name a session — and it must not name
+       a *path* either, because the Host is the one that resolves a session's
+       workspace (see `repoFrom` in the Host half). So what is remembered here is
+       only the id, and the settings page hands that back to the Host: the same
+       resolution, the same sandbox policy, one source of truth. */
+    let lastSessionId = ''
+    const lastSessionSignal = createSignal(function () { return lastSessionId })
+    const useLastSession = lastSessionSignal.use
+
+    function rememberSession(sessionId) {
+      if (sessionId === undefined || sessionId === null) return
+      const one = String(sessionId)
+      if (one.length === 0 || one === lastSessionId) return
+      lastSessionId = one
+      lastSessionSignal.notify()
+    }
 
     function sessionRepo(sessionId) {
       if (sessionId === undefined || sessionId === null) return ''
@@ -442,7 +578,9 @@ return {
       watchEnabled: true,
       watchChip: true,
       watchFastSec: 3,
-      watchSlowSec: 15,
+      /* 面板关着时 chip 那条慢 lane。它现在只发一次便宜签名（真机上 0.12s），所以可以
+         问得比过去勤：15s 的话，终端里提交完要过十几秒 chip 才改口。 */
+      watchSlowSec: 5,
       hoverSwitch: true,
       /* Which of the two changes views the panel opens in: the directory tree
          (IDEA's default) or the flat list of paths. A preference of this browser
@@ -501,7 +639,13 @@ return {
        half, so they travel across browsers and machines. As an ordinary plugin
        this is exactly what its config section would hold. */
 
-    const PLUGIN_CONFIG_DEFAULTS = { initBranch: 'main', cherryPickRecord: false }
+    const PLUGIN_CONFIG_DEFAULTS = {
+      initBranch: 'main', cherryPickRecord: false,
+      /* 空 = 用部署 PATH 里的 git。 */
+      gitPath: '',
+      /* 这三条是插件自己给 git 的实参，不是 git 设置的副本。 */
+      fetchPrune: true, pullRebase: false, pushSetUpstream: false,
+    }
     let pluginConfig = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
     let pluginConfigPath = ''
     let pluginConfigLoaded = false
@@ -509,11 +653,23 @@ return {
     const pluginConfigSignal = createSignal(function () { return pluginConfig })
     const usePluginConfig = pluginConfigSignal.use
 
+    /* 每次**Host 确认过**的配置计数。屏幕上那份草稿是即时的（`savePluginConfig` 当场
+       改内存，400ms 后才落盘），所以「问 Host 一件事」不能挂在草稿上：挂上去的话每敲
+       一个键都是一次询问，而且问到的是 Host 手里那份还没更新的配置 —— 真机上量到的
+       是界面永远慢一步。这个计数只在答复带着配置回来时才动（初次读取、保存成功）。 */
+    let pluginConfigCommitted = 0
+    const pluginConfigCommittedSignal = createSignal(function () { return pluginConfigCommitted })
+    const usePluginConfigCommitted = pluginConfigCommittedSignal.use
+
     function normalizePluginConfig(raw) {
       const out = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
       if (raw == null || typeof raw !== 'object') return out
       if (typeof raw.initBranch === 'string') out.initBranch = raw.initBranch.trim().slice(0, 120)
       out.cherryPickRecord = raw.cherryPickRecord === true
+      if (typeof raw.gitPath === 'string') out.gitPath = raw.gitPath.trim().slice(0, 400)
+      out.fetchPrune = raw.fetchPrune !== false
+      out.pullRebase = raw.pullRebase === true
+      out.pushSetUpstream = raw.pushSetUpstream === true
       return out
     }
 
@@ -523,7 +679,9 @@ return {
         if (data.config !== undefined) pluginConfig = normalizePluginConfig(data.config)
         pluginConfigError = ''
       }
+      pluginConfigCommitted += 1
       pluginConfigSignal.notify()
+      pluginConfigCommittedSignal.notify()
     }
 
     function loadPluginConfig() {
@@ -543,9 +701,15 @@ return {
     let configSaveTimer = null
 
     function writePluginConfig() {
-      callHost('git/config-save', { config: pluginConfig }).then(function (result) {
+      const request = { config: pluginConfig }
+      /* 写在部署的配置目录里，也就是任何工作区之外：带上这个页面在哪个会话里，Host
+         才能用这个会话的沙箱策略去写（没有会话时写不出去，而那种失败必须说得出来）。 */
+      if (lastSessionId.length > 0) request.sessionId = lastSessionId
+      callHost('git/config-save', request).then(function (result) {
         if (result == null || result.ok !== true) {
-          pluginConfigError = text(result != null ? result.error : '') || '保存失败'
+          /* git 那套「这台机器 / 这个沙箱不让我做这件事」的说法是同一份（见
+             commandDetail）：这里也走它，免得写不进去时屏幕上什么都没有。 */
+          pluginConfigError = commandDetail(result) || text(result != null ? result.error : '') || '保存失败'
           pluginConfigSignal.notify()
           return
         }
@@ -1387,7 +1551,12 @@ textarea.dsh-git-input{resize:vertical}
             : '无法读取提交历史'
         return h('div', { className: 'dsh-git-pane dsh-git-error' }, reason)
       }
-      if (count === 0) return h('div', { className: 'dsh-git-pane dsh-git-dim' }, '没有匹配的提交')
+      if (count === 0) {
+        /* 空历史有两种：这个仓库还没有第一个提交（刚 init），和筛选没匹配到。
+           前者不是「没有匹配」，说成那样会让人去清筛选。 */
+        return h('div', { className: 'dsh-git-pane dsh-git-dim' },
+          graph != null && graph.unborn === true ? '这个仓库还没有提交' : '没有匹配的提交')
+      }
 
       const laneNum = Math.max(1, graph.lanes)
       const graphWidth = laneNum * LANE_W + 6
@@ -1782,6 +1951,10 @@ textarea.dsh-git-input{resize:vertical}
         ok: true, repo: partial.repo, branch: partial.branch, detached: partial.detached,
         upstream: partial.upstream, ahead: partial.ahead, behind: partial.behind,
         sequencer: partial.sequencer,
+        /* 和 branch、upstream 一样来自这一次读：身份缺不缺是机器上的事实，不随路径
+           部分读而改变，但也不能因为一次合并就把它丢掉（丢掉的后果是提交区那个提示
+           闪一下又没了）。 */
+        needsIdentity: partial.needsIdentity === true,
         staged: keep(current.staged).concat(list(partial.staged)),
         unstaged: keep(current.unstaged).concat(list(partial.unstaged)),
         untracked: keep(current.untracked).concat(list(partial.untracked)),
@@ -1797,8 +1970,22 @@ textarea.dsh-git-input{resize:vertical}
        the whole tree again, which is the cost this is here to avoid. */
     const PATHS_MAX = 200
 
-    function pathsOfInterest(status) {
+    /* ── 父目录那一层有多贵 ──
+
+       「改动文件旁边新出现的文件」确实要问它所在的目录才看得见，可是**目录条目
+       （`.../`，git 把没跟踪的目录折叠成一条）本身就是自己的子树**：再带上它的上一层
+       就是把旁边整棵大树扫一遍。读者那个仓库上量到的是：
+
+         7 条原始路径（其中 3 条是折叠目录）        280ms
+         12 条（每条再带上父目录）                6138ms   ← `holox-modules` 一条吃掉了全部
+         9 条（目录条目不带父目录）                 295ms
+
+       所以目录条目不带上父目录；文件的父目录留着（文件旁边新出现的文件还是由它看见）。
+       另外量到一次路径读本身就很贵（`PATHS_READ_MAX_MS`，见 10-state.js）时，这个仓库
+       整个收窄成只问那几条路径本身 —— 那种仓库上新文件就交给整棵树的时钟。 */
+    function pathsOfInterest(status, repo) {
       if (status == null || status.ok !== true) return []
+      const wide = repo === undefined || repo === null || repo.length === 0 ? true : treeWide(repo) === true
       const seen = {}
       const out = []
       const add = function (path) {
@@ -1812,8 +1999,10 @@ textarea.dsh-git-input{resize:vertical}
         for (let k = 0; k < entries.length; k += 1) {
           const path = entryPath(entries[k])
           if (path.length === 0) continue
-          const bare = path.slice(-1) === '/' ? path.slice(0, -1) : path
+          const collapsed = path.slice(-1) === '/'
+          const bare = collapsed ? path.slice(0, -1) : path
           add(bare)
+          if (collapsed === true || wide !== true) continue
           const cut = bare.lastIndexOf('/')
           if (cut > 0) add(bare.slice(0, cut))
         }
@@ -1835,14 +2024,17 @@ textarea.dsh-git-input{resize:vertical}
         return byPath[path]
       }
       const list = function (value) { return Array.isArray(value) ? value : [] }
+      /* 四条列表都走 `entryPath`：git 那边这三种形状都可能出现（对象最常，裸字符串也
+         合法），读 `entry.path` 会把裸字符串那一条**整条丢掉** —— 列表里少一行，而
+         「有几个改动」那个数字（mergeChanges 的长度）也跟着少一个。 */
       const staged = list(work.staged)
-      for (let i = 0; i < staged.length; i += 1) put(text(staged[i].path), { staged: true, indexCode: text(staged[i].code) })
+      for (let i = 0; i < staged.length; i += 1) put(entryPath(staged[i]), { staged: true, indexCode: text(staged[i].code) })
       const unstaged = list(work.unstaged)
-      for (let i = 0; i < unstaged.length; i += 1) put(text(unstaged[i].path), { workCode: text(unstaged[i].code) })
+      for (let i = 0; i < unstaged.length; i += 1) put(entryPath(unstaged[i]), { workCode: text(unstaged[i].code) })
       const untracked = list(work.untracked)
       for (let i = 0; i < untracked.length; i += 1) put(entryPath(untracked[i]), { workCode: '??', untracked: true })
       const unmerged = list(work.unmerged)
-      for (let i = 0; i < unmerged.length; i += 1) put(text(unmerged[i].path), { workCode: text(unmerged[i].code), conflict: true })
+      for (let i = 0; i < unmerged.length; i += 1) put(entryPath(unmerged[i]), { workCode: text(unmerged[i].code), conflict: true })
       const out = []
       for (let i = 0; i < order.length; i += 1) {
         const entry = byPath[order[i]]
@@ -2216,6 +2408,13 @@ textarea.dsh-git-input{resize:vertical}
 
       const side = h('div', { className: 'dsh-git-commitpane' },
         h('div', { className: 'dsh-git-group-title' }, '提交信息'),
+        /* 先说出来，而不是等读者写完提交信息再被 git 拒一次。两条路都留着：设置页里
+           能填的那个地方（面板里点得到），和在终端里跑的两条命令（面板不一定开着）。 */
+        props.work.needsIdentity === true
+          ? h('div', { key: 'ident', className: 'dsh-git-hint dsh-git-warn' },
+            '这台机器还没配 git 提交身份，提交会被 git 拒绝。设置页「dsh-git-idea配置 → 提交身份」里能填，'
+            + '或在终端里跑：git config --global user.name "你的名字"、git config --global user.email "你的邮箱"。')
+          : null,
         clearable('msg', h('textarea', {
           className: 'dsh-git-input',
           rows: 6,
@@ -2635,6 +2834,26 @@ textarea.dsh-git-input{resize:vertical}
       }
       const err = text(result.stderr).replace(/\s+$/, '')
       const detail = err.length > 0 ? err.slice(0, 400) : text(result.stdout).replace(/\s+$/, '').slice(0, 400)
+      /* git 在这件事上说八行，其中七行是建议（"Run git config --global ..."），最后
+         一行才是拒绝本身。这里说的是同一件事，但先说面板里能点的那个地方（设置页的
+         提交身份），再给能照抄的命令 —— 两条路都留着，因为面板并不总是开着的。 */
+      if (result.needsIdentity === true) {
+        const lines = err.length > 0 ? err.split('\n') : []
+        let last = ''
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+          if (lines[i].trim().length > 0) { last = lines[i].trim(); break }
+        }
+        const why = 'git 不知道这次提交该署谁的名字，所以把它拒了 —— 作者身份写在 git 的配置里，'
+          + '不在这个仓库里。设置页「dsh-git-idea配置 → 提交身份」里可以填，'
+          + '或者在终端里跑一遍：\n'
+          + '  git config --global user.name "你的名字"\n'
+          + '  git config --global user.email "你的邮箱"\n'
+          + '不加 --global 只对这个仓库生效。'
+        /* git 的原话照旧留在下面一行：身份缺失是这次提交过不去的一道坎，但不一定是
+           唯一一道 —— 一个失败的钩子、一次没解决的冲突各自另有话说，把那句话丢掉就是
+           同一类误诊（"这台机器上没有 git" 曾经也这样盖掉过真正的答案）。 */
+        return last.length > 0 ? why + '\n' + last : why
+      }
       /* git says "Unable to create ... .git/index.lock: Permission denied", which
          reads as a broken repository. It is the file sandbox refusing the write,
          and the reader can act on that (widen the session's file policy, or move
@@ -3388,8 +3607,14 @@ textarea.dsh-git-input{resize:vertical}
           h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(group.rows.length))))
         if (shut) continue
         if (group.rows.length === 0) {
-          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' },
-            needle.length > 0 ? '没有匹配的分支' : '这个仓库还没有本地分支'))
+          /* 一个本地分支都没有有两种：真的没有，和「当前这个分支还没有第一个提交」
+             —— 后者嘴里得说出它叫什么，不然 chip 上写着 main，卡片却说没有分支。 */
+          const empty = needle.length > 0
+            ? '没有匹配的分支'
+            : (data != null && data.unborn === true && text(data.current).length > 0
+                ? '当前在 ' + text(data.current) + '，还没有第一个提交'
+                : '这个仓库还没有本地分支')
+          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' }, empty))
           continue
         }
         for (let r = 0; r < group.rows.length; r += 1) {
@@ -3424,7 +3649,10 @@ textarea.dsh-git-input{resize:vertical}
           onClick: function () { setStash(true); choose(pending, true) },
         }, '先暂存本地改动，再切到 ' + pending))
       }
-      if (props.dirty > 0) {
+      /* 还没有第一个提交的仓库里 `git stash` 必然失败（"You do not have the initial
+         commit yet"），所以这一个勾选框不能出现 —— 「切完自动恢复」在这里是一句
+         兑现不了的承诺。改动本身不会丢：切分支时 git 会自己拒绝或带过去。 */
+      if (props.dirty > 0 && (data == null || data.unborn !== true)) {
         foot.push(h('label', {
           key: 'stash', className: 'dsh-git-bs-check',
           title: '把本地改动 stash 起来，切过去之后再自动 pop 回来',
@@ -3607,20 +3835,25 @@ textarea.dsh-git-input{resize:vertical}
          the 36 paths the changes tree was showing. They are the same answer for
          everything that is on screen.
 
-         So the whole tree is read on its own clock (opening the panel, the
-         refresh button, a repository-level operation, and once every
-         FULL_STATUS_MS), and everything the reader does between those — a tick,
-         an edit to a file that is already listed, a stage — is confirmed by a
-         read of the paths involved. A file that was clean and is now modified is
-         the one thing a pathspec read cannot see; the whole-tree read is what
-         catches it, which is why it still happens on a clock.
+         So the whole tree is read on its own clock (opening a repository the
+         plugin has not read yet, the refresh button, and once every fullReadGapMs
+         while the changes tab is on screen), and everything the reader does
+         between those — a tick, an edit to a file that is already listed, a stage,
+         a commit — is confirmed by a read of the paths involved. A file that was
+         clean and is now modified is the one thing a pathspec read cannot see; the
+         whole-tree read is what catches it, which is why it still happens on a
+         clock.
 
-         The latest snapshot and the last whole-tree read live in one object
-         rather than in the state alone: an effect keeps the render it was created
-         in, so a callback registered once would otherwise read a stale
-         `status` for as long as its dependencies do not move. */
-      const [panelBox] = React.useState(function () { return { status: null, fullAt: 0, scope: '', mutations: Promise.resolve() } })
+         The snapshot, the cost of the last whole-tree read and whether the next
+         read has to be a whole one live in one object rather than in the state
+         alone: an effect keeps the render it was created in, so a callback
+         registered once would otherwise read a stale `status` for as long as its
+         dependencies do not move. */
+      const [panelBox] = React.useState(function () { return { status: null, needFull: false, repo: '', costMs: 0, lastFull: false, mutations: Promise.resolve() } })
       panelBox.status = status
+      /* 一次全树读占住整条通道多久 —— 下一次该隔多久再量一遍由它决定（fullReadGapMs）。
+         进 state 的原因只有一个：间隔变了要把那个时钟重新起一遍。 */
+      const [treeCost, setTreeCost] = React.useState(0)
 
       /* work is the only truth about whether this path is a usable repository.
          Everything that reads refs, history or the index is gated on it, so a
@@ -3628,6 +3861,13 @@ textarea.dsh-git-input{resize:vertical}
          that each report a different flavour of failure. */
       const repoOk = work != null && work.ok === true
       const needsSetup = work != null && work.ok !== true
+
+      /* 读数按答复里的仓库记，不是按这次请求写的那个：请求里常常只有会话 id（Host 才知道
+         这个会话的工作区在哪）。收窄与否也是按这个路径记的。 */
+      const treeKey = function (status, fallback) {
+        const resolved = status != null ? text(status.repo) : ''
+        return resolved.length > 0 ? resolved : fallback
+      }
 
       const base = function (repo) {
         const request = { sessionId: sessionId }
@@ -3653,47 +3893,70 @@ textarea.dsh-git-input{resize:vertical}
           const full = paths == null || paths.length === 0
           const work = Object.assign({}, request)
           if (!full) work.paths = paths
+          const started = Date.now()
+          /* 全树那一次在飞的时候，全局那份读数就是「还没核对过」：chip 这时说的是
+             「正在核对」，而不是继续报一个它没验证过的数字。 */
+          /* 读数按**答复里的仓库**记，不是按这次请求写的那个：请求里常常只有会话 id
+             （Host 才知道这个会话的工作区在哪），而读数要能被 chip 按路径查到。 */
+          const resolved = text(data.repo).length > 0 ? text(data.repo) : asked
+          const finished = treeCountReadStart(resolved)
           callHost('git/panel', work).then(function (reply) {
+            finished()
             /* A read that came back after the path changed is not this path's
                answer; the effect below will load the new one anyway. */
             if (asked !== appliedRepo && asked.length > 0) return
             if (epoch !== repoEpoch(asked, sessionId)) return
+            panelBox.lastFull = full
+            /* 只问几条路径的那种读有多贵：贵到一定程度就说明父目录扫进了大树，这个仓库
+               从此收窄（见 pathsOfInterest）。 */
+            if (full !== true) pathsReadSpent(resolved, Math.round(Date.now() - started))
             if (full) {
-              panelBox.fullAt = Date.now()
+              /* 全树那一次花了多久，读数记下来。 */
+              const cost = Math.round(Date.now() - started)
+              panelBox.needFull = false
+              panelBox.costMs = cost
+              setTreeCost(cost)
               setStatus(reply != null && reply.ok === true ? reply : null)
               return
             }
             /* A partial answer says nothing about the rest of the tree: it is
                folded into the snapshot on screen, never put in its place. */
             setStatus(function (previous) { return mergePanelStatus(previous, reply) })
-          }).catch(function () { setStatus(null) })
+          }).catch(function () { finished(); setStatus(null) })
         }).catch(function (failure) {
           setError(failureText(failure))
         })
       }
 
-      /* How long a snapshot may stand before the whole tree is read again. The
-         cheap signature and the pathspec read between them cover everything that
-         touches a path the tree is already showing; this is the backstop for the
-         one thing they cannot see. Seconds of walking on a slow mount, so it is
-         on a clock rather than on every tick. */
-      const FULL_STATUS_MS = 30000
+      /* 快照能站多久。便宜的签名和路径读合起来覆盖了「已经显示着的那些路径」，它们
+         看不见的只有一件事：**本来干净、刚刚被改**的文件（或者一个干净目录里新出现的
+         文件）。那一次全树读在这台机器上是 5–8s，而且占住整条通道，所以它挂在时钟上，
+         而且间隔按上一次实测的代价来定（fullReadGapMs：至少 30s，最多 5 分钟）。 */
+      /* 量完就写进全局那一份读数（见 10-state.js）：面板是唯一既读全树、又读屏上那些
+         路径的地方，chip 上那个数字就来自这里 —— 两块屏幕于是不会各说各话。乐观的
+         tick（点击就地改的那份快照）也走这里，所以 chip 上的数字跟着手指走。 */
+      React.useEffect(function () {
+        if (status == null || status.ok !== true) return
+        /* 按答复里的仓库记：没应用过路径时请求里只有会话 id，而这份读数要能被 chip
+           按它查到的那个路径找到（Host 在答复里把会话的工作区解析成了路径）。 */
+        publishTreeRead(treeKey(status, appliedRepo), status, panelBox.lastFull === true, panelBox.costMs)
+      }, [status, appliedRepo])
 
       /* Whether this read may be about the paths on screen instead of the whole
-         tree: only when there is a snapshot to fold it into, and only while one
-         is recent enough to be worth trusting for the rest. */
+         tree: whenever there is a snapshot to fold it into. */
       const readChanges = function () {
         const snapshot = panelBox.status
-        const recent = panelBox.fullAt > 0 && (Date.now() - panelBox.fullAt) < FULL_STATUS_MS
-        const touch = recent && snapshot != null && snapshot.ok === true
-        loadWork(appliedRepo, touch ? pathsOfInterest(snapshot) : null)
+        /* 屏上有快照，问的就是屏上那些路径（0.2s）；换仓库、或明确要求整棵树时才重读
+           全部。一次「提交」之后的读因此也是 0.3s，而不是 8–10s。 */
+        const whole = panelBox.needFull === true || snapshot == null || snapshot.ok !== true
+        loadWork(appliedRepo, whole ? null : pathsOfInterest(snapshot, treeKey(snapshot, appliedRepo)))
       }
 
       /* Read the whole tree again, now. The flush is what makes it a read rather
          than a repaint of the Host's cache; the refresh button and the clock both
          go through here. */
       const reloadChanges = function () {
-        panelBox.fullAt = 0
+        panelBox.needFull = true
         callHost('git/flush', base(appliedRepo)).then(bump, bump)
       }
 
@@ -3715,8 +3978,8 @@ textarea.dsh-git-input{resize:vertical}
         setAppliedRepo(next)
         setStatus(null)
         panelBox.status = null
-        panelBox.fullAt = 0
-        panelBox.scope = ''
+        panelBox.needFull = true
+        panelBox.repo = ''
         setMaxCount(PAGE_COMMITS)
         resetFilters()
         setSelected(null)
@@ -3758,6 +4021,13 @@ textarea.dsh-git-input{resize:vertical}
         reloadChanges()
       }
 
+      /* 哪些操作能把整棵树改掉：切分支、pull、以及 merge/cherry-pick/revert（开始、
+         继续、跳过、中止都算）会重写工作区，它们的答案必须是一次全树读。别的（提交、
+         暂存、取消暂存、fetch、push、tag、建/删分支）只动索引或引用 —— 那里用屏上那些
+         路径确认就够了。真机上量到的是：一次全树读 8–10s，而且这期间整条 RPC 通道都被
+         它占着，为一次「提交」让读者等十秒、十秒内点什么都要排队，是没有道理的。 */
+      const REWRITES_TREE = ['git/checkout', 'git/pull', 'git/sequence', 'git/init']
+
       /* One path for every panel operation. A failed operation still re-reads,
          because the failures that matter — a conflicting cherry-pick, merge or
          revert — leave the repository in a different state than they found it. */
@@ -3767,10 +4037,7 @@ textarea.dsh-git-input{resize:vertical}
         setArmed('')
         setError(null)
         setNeedsUpstream(false)
-        /* A repository-level operation can move anything — a checkout rewrites
-           the working tree, a commit empties it — so what follows it is a read of
-           the whole tree, not of the paths that were on screen before it. */
-        panelBox.fullAt = 0
+        panelBox.needFull = REWRITES_TREE.indexOf(method) >= 0
         const request = base(appliedRepo)
         if (payload != null) Object.assign(request, payload)
         rpc(method, request).then(function () {
@@ -3779,7 +4046,18 @@ textarea.dsh-git-input{resize:vertical}
         }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
-          if (method === 'git/push' && failureText(failure).indexOf('upstream') >= 0) setNeedsUpstream(true)
+          if (method === 'git/push' && failureText(failure).indexOf('upstream') >= 0) {
+            /* 「这个分支还没有上游」是一次可以自己走完的失败：设置里开了这一条时，
+               就把横幅本来要问的那一步直接做掉（同一个请求，带上 setUpstream）。问过
+               的那一次不再自动重试 —— 它要是也失败，横幅照旧出现，读者还有得按。 */
+            const retry = payload == null || payload.setUpstream !== true
+            const remote = refs != null && refs.ok === true && refs.remote.length > 0 ? refs.remote[0].name : ''
+            if (plugin.pushSetUpstream === true && retry && remote.length > 0 && currentName.length > 0) {
+              runOp('git/push', { setUpstream: true, remote: remote, branch: currentName })
+              return
+            }
+            setNeedsUpstream(true)
+          }
           bump()
         })
       }
@@ -3868,14 +4146,12 @@ textarea.dsh-git-input{resize:vertical}
 
       React.useEffect(function () {
         if (props.ready !== true) return undefined
-        /* A different repository, or a different tab, is a different question:
-           the snapshot on screen is not an answer to it, so the read is a whole
-           one. A bump with the same scope is the repository having moved under
-           what is already on screen, which the pathspec read answers. */
-        const scope = appliedRepo + '\u0000' + tab
-        if (panelBox.scope !== scope) {
-          panelBox.scope = scope
-          panelBox.fullAt = 0
+        /* 换了仓库：屏幕上那份快照是别人的，只能整棵树重读一次。同一个仓库上的一次
+           bump（仓库在屏幕底下动过了）问的是屏上那些路径 —— 见 readChanges。标签页
+           不进这个判据：从「历史」切到「变更」不改变工作区是什么样。 */
+        if (panelBox.repo !== appliedRepo) {
+          panelBox.repo = appliedRepo
+          panelBox.needFull = true
         }
         readChanges()
         return undefined
@@ -3891,8 +4167,8 @@ textarea.dsh-git-input{resize:vertical}
         if (!repoOk || props.ready !== true || props.active !== true || tab !== 'changes') return undefined
         const timer = ctx.get('timer')
         if (timer === undefined) return undefined
-        return timer.interval(function () { reloadChanges() }, FULL_STATUS_MS)
-      }, [appliedRepo, repoOk, props.active, props.ready, tab])
+        return timer.interval(function () { reloadChanges() }, fullReadGapMs(treeCost))
+      }, [appliedRepo, repoOk, props.active, props.ready, tab, treeCost])
 
       React.useEffect(function () {
         if (!repoOk || props.ready !== true || tab !== 'log') return undefined
@@ -3973,7 +4249,7 @@ textarea.dsh-git-input{resize:vertical}
          entry to write into. */
       React.useEffect(function () {
         if (status == null || status.ok !== true) return
-        setWatchPaths(appliedRepo, sessionId, pathsOfInterest(status))
+        setWatchPaths(appliedRepo, sessionId, pathsOfInterest(status, treeKey(status, appliedRepo)))
       }, [status, appliedRepo, sessionId])
 
       /* One identity for as long as the repository does not change: the commit
@@ -4047,11 +4323,13 @@ textarea.dsh-git-input{resize:vertical}
         const request = base(appliedRepo)
         request.paths = paths
         const epoch = repoEpoch(appliedRepo, sessionId)
+        const finished = treeCountReadStart(appliedRepo)
         callHost('git/panel', request).then(function (reply) {
+          finished()
           if (epoch !== repoEpoch(appliedRepo, sessionId)) return
           if (reply == null || reply.ok !== true) return
           setStatus(function (previous) { return mergePanelStatus(previous, reply) })
-        }).catch(function () {})
+        }, function () { finished() })
       }
 
       /* ── one mutation after another, and none of them dims the panel ──
@@ -4135,9 +4413,10 @@ textarea.dsh-git-input{resize:vertical}
             setBusy(false)
             setError(null)
             setMessage('')
-            /* A commit empties the index and the list it was showing: the answer is
-               a read of the whole tree, not of the paths that were on it. */
-            reloadChanges()
+            /* 提交动的是索引和引用，屏上那些路径的读（0.3s）就是这次点击的答案：刚才
+               提交掉的那几个文件会立刻从列表里消失。整棵树留给时钟和 ⟳。 */
+            panelBox.needFull = false
+            bump()
           }, function (failure) {
             setBusy(false)
             setError(failureText(failure))
@@ -4676,7 +4955,9 @@ textarea.dsh-git-input{resize:vertical}
         h('div', { key: 'gne', className: 'dsh-git-grip dsh-git-grip-ne', title: '拖动调整宽高', onPointerDown: startDrag('ne') }),
         header,
         banner,
-        error !== null ? h('div', { className: 'dsh-git-error', style: { padding: '4px 10px' } }, error) : null,
+        /* pre-wrap：这条里出现换行的地方都是「那就是两条命令」，折成一行读起来是
+           一句话里塞了两条命令。git 自己的多行原话也顺便能按原样读。 */
+        error !== null ? h('div', { className: 'dsh-git-error', style: { padding: '4px 10px', whiteSpace: 'pre-wrap' } }, error) : null,
         body)
     }
 
@@ -4685,6 +4966,191 @@ textarea.dsh-git-input{resize:vertical}
        id/order/label with no icon field, and swapping a glyph the shell owns
        would be a workaround around its own tree, not a feature. */
     const SETTINGS_NAV_LABEL = 'dsh-git-idea配置'
+
+    /* ── 提交身份：写在 git 自己的配置里 ──
+
+       这一组和上面那个插件配置文件不是一回事：`user.name` / `user.email` 是 git 的
+       设置，写进去以后终端里的 git、IDEA、钩子看到的都是同一个作者。所以这里既读又
+       写，而且写什么由读者挑：这台机器的所有仓库（`--global`），还是只这一个仓库
+       （`--local`）。
+
+       面板不替你署名：空着的框一个字节都不写（`git config user.name ''` 正是「empty
+       ident name」那个错误的来路），两个都空就什么也不做并说清楚。 */
+    function GitIdentityGroup() {
+      const sessionId = useLastSession()
+      const [state, setState] = React.useState(null)
+      const [name, setName] = React.useState('')
+      const [email, setEmail] = React.useState('')
+      const [scope, setScope] = React.useState('global')
+      const [busy, setBusy] = React.useState(false)
+      const [note, setNote] = React.useState('')
+      const [problem, setProblem] = React.useState('')
+
+      /* 只把 session id 交给 Host，路径由它自己从会话的工作区解出来 —— 和面板、
+         chip 走的是同一条路，也就落在这个会话的沙箱策略里。 */
+      const request = function () {
+        return sessionId.length > 0 ? { sessionId: sessionId } : {}
+      }
+      const load = function () {
+        callHost('git/identity', request()).then(function (data) {
+          setState(data)
+          setProblem('')
+          /* 预填：先给此刻生效的那一份，没有再给机器上的那一份。读者要改的就是它。 */
+          const effectiveName = text(data.name)
+          const effectiveEmail = text(data.email)
+          setName(effectiveName.length > 0 ? effectiveName : text(data.globalName))
+          setEmail(effectiveEmail.length > 0 ? effectiveEmail : text(data.globalEmail))
+        }, function (failure) { setProblem(failureText(failure)) })
+      }
+      React.useEffect(function () { load() }, [sessionId])
+
+      const save = function () {
+        if (busy) return
+        setBusy(true)
+        setNote('')
+        setProblem('')
+        const payload = { scope: scope, name: name, email: email }
+        if (sessionId.length > 0) payload.sessionId = sessionId
+        callHost('git/identity-save', payload).then(function (result) {
+          setBusy(false)
+          setState(result)
+          setNote(result.scope === 'local'
+            ? ('已写进 ' + text(result.repo) + ' 的 .git/config：' + result.written.join('、'))
+            : ('已写进这台机器的 git 配置：' + result.written.join('、')))
+        }, function (failure) {
+          setBusy(false)
+          setProblem(failureText(failure))
+        })
+      }
+
+      const ready = state != null
+      const missing = ready && state.needsIdentity === true
+      const source = function (value, origin) {
+        const one = text(value)
+        if (one.length === 0) return '没有配'
+        const from = text(origin)
+        return from.length === 0 ? one : (one + '（来自 ' + from + '）')
+      }
+      const toggle = function (next) {
+        return h('label', { className: 'dsh-git-set-check' },
+          h('input', {
+            type: 'radio', checked: scope === next, name: 'dsh-git-ident-scope',
+            onChange: function () { setScope(next) },
+          }),
+          h('span', null, next === 'global' ? '这台机器的所有仓库（--global）' : '只对这个仓库（--local）'))
+      }
+
+      return h('div', null,
+        h('div', { className: 'dsh-git-set-group' }, '提交身份（写在 git 自己的配置里）'),
+        h('div', { className: 'dsh-git-set-hint' },
+          'git 不知道作者是谁时会拒绝提交，而这台机器上终端里的 git 也用同一份配置。面板空着的框一个字节都不写。'),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '此刻生效'),
+          h('span', { className: missing === true ? 'dsh-git-set-hint dsh-git-warn' : 'dsh-git-set-hint' },
+            ready !== true ? '正在读取…'
+              : (missing === true
+                ? '还缺：' + (state.nameMissing === true ? '名字' : '邮箱') + ' —— 提交会被 git 拒绝'
+                : (source(state.name, state.nameOrigin) + ' · ' + source(state.email, state.emailOrigin))))),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '名字'),
+          h('input', {
+            className: 'dsh-git-input dsh-git-set-input',
+            placeholder: '提交里显示的名字',
+            value: name,
+            onChange: function (event) { setName(event.target.value) },
+          })),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '邮箱'),
+          h('input', {
+            className: 'dsh-git-input dsh-git-set-input',
+            placeholder: 'you@example.com',
+            value: email,
+            onChange: function (event) { setEmail(event.target.value) },
+          })),
+
+        h('div', { className: 'dsh-git-set-row' }, h('span', { className: 'dsh-git-set-label' }, '写进哪里'), toggle('global')),
+        h('div', { className: 'dsh-git-set-row' }, h('span', { className: 'dsh-git-set-label' }, ''), toggle('local')),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, ''),
+          h('span', { className: 'dsh-git-set-hint' },
+            text(state != null ? state.repo : '').length > 0
+              ? ('这个仓库 = ' + state.repo)
+              : '这个页面还不知道是哪个会话的仓库 —— 先打开一次面板（或输入框旁的 Git 按钮），或只写全局那一份')),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('button', {
+            type: 'button', className: 'dsh-git-btn dsh-git-primary',
+            disabled: busy || (scope === 'local' && text(state != null ? state.repo : '').length === 0),
+            onClick: save,
+          }, busy ? '写入中…' : '写入 git 配置'),
+          h('span', { className: 'dsh-git-set-hint' }, '写进去就是以后所有提交的作者，别的工具也看得到')),
+
+        note.length > 0 ? h('div', { className: 'dsh-git-set-row dsh-git-set-hint' }, note) : null,
+        problem.length > 0 ? h('div', { className: 'dsh-git-set-row dsh-git-error' }, problem) : null)
+    }
+
+    /* ── git 位置：这台机器上的哪个 git ──
+
+       每一行命令都以同一个词开头，而那个词默认来自部署的 PATH。装在不在这条 PATH 上的
+       地方（Homebrew 前缀、IDE 自带的 git、nix profile）时，面板以前只会说「这台机器
+       上找不到 git」—— 既是错的，也没给出下一步。所以它是个设置。 */
+    function GitToolchainGroup() {
+      const plugin = usePluginConfig()
+      const committed = usePluginConfigCommitted()
+      const [draftPath, setDraftPath] = React.useState(plugin.gitPath)
+      const [tool, setTool] = React.useState(null)
+      React.useEffect(function () { setDraftPath(plugin.gitPath) }, [plugin.gitPath])
+
+      const probe = function () {
+        callHost('git/toolchain', {}).then(function (data) { setTool(data) }, function (failure) {
+          setTool({ ok: false, path: '', version: '', found: false, reason: 'probe-failed', error: failureText(failure) })
+        })
+      }
+      /* 问的时机是**Host 确认过之后**，不是敲键的时候：草稿是即时的，而
+         `savePluginConfig` 有 400ms 去抖，落盘之后 Host 才回话。挂在草稿上问，
+         问到的是上一份配置 —— 真机上量到的就是界面永远慢一步（写入坏路径之后那一行
+         还说「来自 PATH」，要等下一次改动才改口）；挂在每次按键上还会把一次询问变成
+         每个字符一次。`committed` 只在答复带着配置回来时动。 */
+      React.useEffect(function () { probe() }, [committed])
+
+      const commitPath = function (value) {
+        setDraftPath(value)
+        const next = Object.assign({}, plugin)
+        next.gitPath = value
+        savePluginConfig(next)
+      }
+      const found = tool != null && tool.found === true
+      const reason = tool == null ? '' : text(tool.reason)
+      const verdict = tool == null
+        ? '正在检查…'
+        : (found
+          ? ('现在用的是 ' + tool.path + (tool.fromPath === true ? '（来自 PATH）' : '（设置里写的就是它）')
+            + ' · ' + text(tool.version))
+          : (reason === 'configured-missing'
+            ? '设置里写的这个路径不可用：它不存在，或者不是可执行文件。面板里的每条命令都会失败。'
+            : '这台机器的 PATH 上没有 git。装上它，或者在下面写一个绝对路径。'))
+
+      return h('div', null,
+        h('div', { className: 'dsh-git-set-group' }, 'git 位置'),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '可执行文件'),
+          h('input', {
+            className: 'dsh-git-input dsh-git-set-input',
+            placeholder: '留空 = 用 PATH 里的 git',
+            value: draftPath,
+            onChange: function (event) { commitPath(event.target.value) },
+          })),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, ''),
+          h('span', { className: found === true ? 'dsh-git-set-hint' : 'dsh-git-set-hint dsh-git-warn' }, verdict)),
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, ''),
+          h('button', { type: 'button', className: 'dsh-git-btn', onClick: probe }, '再检查一次'),
+          h('span', { className: 'dsh-git-set-hint' }, '面板读、写、初始化用的都是这一个')))
+    }
 
     function GitSettingsSection(props) {
       const settings = useGitSettings()
@@ -4751,9 +5217,48 @@ textarea.dsh-git-input{resize:vertical}
             }),
             h('span', null, 'cherry-pick 时记录来源（-x）'))),
 
+        h('div', { className: 'dsh-git-set-group' }, '远程同步'),
+        h('div', { className: 'dsh-git-set-hint' },
+          '这三条是面板给 git 的实参，不是 git 自己的设置：下面没勾的，就是 git 原本的行为（`push.default`、`pull.rebase` 照旧生效）。'),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('label', { className: 'dsh-git-set-check' },
+            h('input', {
+              type: 'checkbox', checked: pdraft.fetchPrune !== false,
+              onChange: function (event) { setPlugin('fetchPrune', event.target.checked) },
+            }),
+            h('span', null, 'fetch 时删掉远端已经删了的远程分支（--prune）'))),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('label', { className: 'dsh-git-set-check' },
+            h('input', {
+              type: 'checkbox', checked: pdraft.pullRebase === true,
+              onChange: function (event) { setPlugin('pullRebase', event.target.checked) },
+            }),
+            h('span', null, 'pull 用 rebase 而不是 merge（--rebase）'))),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('label', { className: 'dsh-git-set-check' },
+            h('input', {
+              type: 'checkbox', checked: pdraft.pushSetUpstream === true,
+              onChange: function (event) { setPlugin('pushSetUpstream', event.target.checked) },
+            }),
+            h('span', null, '推送没有上游的分支时直接推上去并设上游（push -u）'))),
+
+        h('div', { className: 'dsh-git-set-row' },
+          h('span', { className: 'dsh-git-set-label' }, '也就是'),
+          h('span', { className: 'dsh-git-set-hint' },
+            'git fetch --all' + (pdraft.fetchPrune !== false ? ' --prune' : '')
+            + ' · git pull' + (pdraft.pullRebase === true ? ' --rebase' : '')
+            + ' · ' + (pdraft.pushSetUpstream === true ? 'git push -u <remote> <branch>（没有上游时）' : 'git push（没有上游时由面板问一句）'))),
+
+        h(GitToolchainGroup),
+
         pluginConfigError.length > 0
           ? h('div', { className: 'dsh-git-set-row dsh-git-error' }, '保存失败：' + pluginConfigError)
           : null,
+
+        h(GitIdentityGroup),
 
         h('div', { className: 'dsh-git-set-group' }, '本浏览器'),
         h('div', { className: 'dsh-git-set-hint' }, '这些只是外观和使用节奏，换浏览器各管各的。'),
@@ -4828,24 +5333,37 @@ textarea.dsh-git-input{resize:vertical}
           }, '本浏览器全部恢复默认')))
     }
 
-    /* The last count that was actually measured, per repository. Two sessions
-       usually point at the same workspace, and the count is a property of the
-       repository, not of the session looking at it — so a session opened for the
-       first time can show the number instead of a gap while its own full read
-       grinds through the working tree. */
-    const pendingByRepo = {}
+    /* ── 输入框旁边那个 chip ──
+
+       屏幕上那个数字不是这块地方自己量的，它来自全局那一份工作区读数（10-state.js）。
+       一次全树读在这台机器上 8–10s，而且占住整条通道（一次只跑一个处理函数）：每次
+       醒过来都量一遍，面板那条 0.3s 的路径读就排在它后面 —— 屏幕上就是「面板反应过来了，
+       chip 还没反应过来」。所以这里只做三件事：问身份（0.1–0.4s）、把上次那些脏路径
+       重新问一次（0.2s，和面板问的是同一个问题，Host 那边只起一个进程），以及在这份
+       读数确实该完整重来一遍时发一次全树读（压后 2 秒，让这次点击的反馈先走）。 */
+
+    /* 全树读压后多久：屏幕上先有这一帧的反馈，再让那条 8–10s 的读去占通道。 */
+    const COUNT_FULL_DELAY_MS = 2000
 
     function GitChip(props) {
       const isOpen = useOpen()
       const switching = useSwitchingTo()
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
       const reloadAt = useDataVersion()
+      /* 谁写了那份读数都要重画：面板量完一次，chip 上的数字跟着变。 */
+      useTreeVersion()
       /* Applying a directory in the panel changes which repository this chip is
          about, and this signal is how the chip hears about it: without the render
          it went on reading — and watching — the workspace it started with. */
       const repoVersion = useRepoApplied()
       const watched = sessionRepo(props.sessionId)
       const sessionId = props.sessionId
+      const repo = info.repo.length > 0 ? info.repo : watched
+      const record = treeRecord(repo)
+      const known = record !== null
+      const pending = record === null ? 0 : record.count
+      /* 正在核对：这份读数该重新完整量一次，或者那一次正在飞（几秒）。 */
+      const due = treeReadDue(repo) === true || treeCountReading(repo) === true
 
       React.useEffect(function () {
         loadSettings(chipNode != null ? chipNode.ownerDocument : null)
@@ -4866,8 +5384,14 @@ textarea.dsh-git-input{resize:vertical}
         return watchRepo(watched, sessionId, bumpData, false)
       }, [watched, repoVersion, sessionId, isOpen])
 
+      /* 这个页面在哪个会话里 —— chip 一直挂在输入框旁边，所以它是把这件事记下来的
+         那个面（设置页是全局的，自己不知道）。放在 effect 里而不是渲染里：渲染期间
+         通知订阅者就是渲染期间改别人的 state。 */
+      React.useEffect(function () { rememberSession(sessionId) }, [sessionId])
+
       React.useEffect(function () {
         let alive = true
+        let stopFull = null
         const request = { sessionId: sessionId }
         const mine = watched
         if (mine.length > 0) request.repo = mine
@@ -4881,21 +5405,9 @@ textarea.dsh-git-input{resize:vertical}
             const branch = text(data.branch)
             const detached = data.detached === true
             const repo = text(data.repo)
-            const measured = data.partial !== true
-            const counted = data.staged.length + data.unstaged.length + data.untracked.length + data.unmerged.length
-            /* The cheap read answers in a fifth of a second and carries no working
-               tree at all, so its "no changes" means "not asked", not "nothing to
-               report". Counting it dropped the badge to nothing on every poll tick
-               — and on a Windows-mounted worktree it stayed gone for the seven
-               seconds the full read takes, which reads as the number having been
-               lost. What was last measured is kept until something measures it
-               again, and `stale` says so out loud, so a stale number is never
-               shown as fact. */
-            const known = chipLabels[sessionId]
-            const remembered = known !== undefined && known.phase === 'repo' && known.repo === repo
-            const carried = remembered ? known.pending : (pendingByRepo[repo] !== undefined ? pendingByRepo[repo] : 0)
-            if (measured) pendingByRepo[repo] = counted
-            const pending = measured ? counted : carried
+            /* 数字来自全局那一份读数，不是这一次读算出来的：快读（身份）根本不带工作区，
+               它的「没有改动」意思是「没问过」。 */
+            const pending = treeCount(repo)
             /* Kept outside React state because the hover card needs the count and
                hangs in a different subtree; a switch offer should not have to
                re-derive it with another read. */
@@ -4905,11 +5417,6 @@ textarea.dsh-git-input{resize:vertical}
               phase: 'repo',
               label: detached ? 'HEAD' : (branch.length > 0 ? branch : 'HEAD'),
               pending: pending,
-              /* Only a session that has something to carry is stale: the first
-                 visit of a workspace still shows the last count this browser saw
-                 for that repository, which is better than a gap that fills in
-                 seven seconds later. */
-              stale: measured !== true && (remembered || pendingByRepo[repo] !== undefined),
               repo: repo,
               reason: '',
             }
@@ -4924,32 +5431,78 @@ textarea.dsh-git-input{resize:vertical}
           setInfo(chipLabels[sessionId])
         }
 
-        /* Two reads, cheapest first. The identity read answers in about a fifth
-           of a second on a repository where the full one takes seven, and it
-           carries everything the chip shows except the change count — so the
-           workspace you switched to is named immediately and the badge catches
-           up. The full read also leaves the Host's cache warm for the panel,
-           which is what usually opens next. */
+        /* 数字怎么来：
+           1. 这份读数在这个仓库上还没有过 → 整棵树量一次（不量 chip 上就一个数字都没有）；
+           2. 有过、而且上次那些脏路径还在 → 只问那些路径（0.2s）。提交之后那几个文件
+              就是这样立刻消失的，而且和面板屏幕上那份快照是同一个问题；
+           3. 没有脏路径可以问（上一次量出来是干净的），或者这份读数确实该完整重来一遍
+              （fullAt 太旧）→ 整棵树量一次；已经有数字时压后 2 秒，让这次点击的反馈先走。
+
+           一次 bump 意味着仓库动过（引用、索引或 HEAD）：干净的那份读数这时不能继续当
+           「现在也干净」用 —— 所以第 3 条也在每次 bump 时成立。 */
+        const refreshCount = function (repoNow) {
+          const current = treeRecord(repoNow)
+          const paths = treeReadPaths(repoNow)
+          if (current !== null && paths.length > 0) {
+            const finished = treeCountReadStart(repoNow)
+            const started = Date.now()
+            callHost('git/panel', Object.assign({ paths: paths }, request)).then(function (reply) {
+              finished()
+              /* 这一次路径读有多贵 —— 贵到一定程度就说明父目录扫进了大树，这个仓库从此
+                 收窄成只问那几条路径本身（见 pathsOfInterest）。 */
+              pathsReadSpent(repoNow, Math.round(Date.now() - started))
+              if (alive !== true || reply == null || reply.ok !== true) return
+              publishTreeRead(repoNow, mergePanelStatus(current.status, reply), false, null)
+            }, function () { finished() })
+          }
+          const nothingToAsk = current === null || paths.length === 0
+          if (treeReadDue(repoNow) !== true && nothingToAsk !== true) return
+          const wholeTree = function () {
+            const started = Date.now()
+            const finished = treeCountReadStart(repoNow)
+            callHost('git/panel', request).then(function (full) {
+              finished()
+              if (alive !== true || full == null || full.ok !== true) return
+              publishTreeRead(repoNow, full, true, Date.now() - started)
+            }, function () { finished() })
+          }
+          /* 没有数字可以报（这个仓库还没量过）：现在就得量，8–10s 也认了。上一次量出来
+             是干净的、或者按间隔该完整重来一遍：那次全树读压后 2 秒，让这次点击的反馈
+             （分支名、面板那条 0.2s 的路径读）先走。 */
+          const defer = current !== null && nothingToAsk !== true
+          if (defer !== true) { wholeTree(); return }
+          const timer = ctx.get('timer')
+          if (timer === undefined) { wholeTree(); return }
+          stopFull = timer.timeout(wholeTree, COUNT_FULL_DELAY_MS)
+        }
+
+        /* The identity read answers in about a fifth of a second on a repository
+           where the full one takes eight, and it carries everything the chip shows
+           except the change count — so the workspace you switched to is named
+           immediately and the badge follows from the shared reading. */
         callHost('git/panel', Object.assign({ quick: true }, request)).then(function (data) {
-          if (!alive) return
+          if (alive !== true) return
           apply(data)
-          callHost('git/panel', request).then(function (full) {
-            if (alive) apply(full)
-          }).catch(function () {})
+          const repoNow = data != null && data.ok === true ? text(data.repo) : ''
+          if (repoNow.length === 0) return
+          prefetchBranches(sessionId, repoNow)
+          refreshCount(repoNow)
         }).catch(function () {
-          if (alive) setInfo({ phase: 'none', label: null, pending: 0, repo: '', reason: '' })
+          if (alive === true) setInfo({ phase: 'none', label: null, pending: 0, repo: '', reason: '' })
         })
-        return function () { alive = false }
+        return function () { alive = false; if (stopFull !== null) stopFull() }
       }, [watched, repoVersion, isOpen, sessionId, reloadAt])
 
       const isRepo = info.phase === 'repo'
       const where = info.repo.length > 0 ? info.repo : '当前会话工作区'
-      /* While the cheap read is in flight the count on screen is the last one
-         that was measured, so the tooltip says that instead of claiming the
-         working tree is clean. */
-      const count = info.pending > 0
-        ? String(info.pending) + ' 个改动' + (info.stale === true ? '（正在核对）' : '')
-        : (info.stale === true ? '正在核对改动…' : '工作区干净')
+      /* 数字来自全局那一份读数，而不是这次快读 —— 快读根本不带工作区。还没量过就说
+         「正在核对」，不说「工作区干净」：没量出来和没改动是两件事。读数该完整重来
+         一遍时（due）也这么说，因为那一次全树读确实正在排。 */
+      const count = known !== true
+        ? '正在核对改动…'
+        : (pending > 0
+          ? String(pending) + ' 个改动' + (due === true ? '（正在核对）' : '')
+          : (due === true ? '正在核对改动…' : '工作区干净'))
       let title = 'Git'
       if (info.phase === 'loading') title = 'Git'
       else if (isRepo) title = info.label + ' · ' + info.repo + ' · ' + count
@@ -4957,19 +5510,25 @@ textarea.dsh-git-input{resize:vertical}
       else if (info.reason === 'file') title = '这不是一个目录：' + where + ' —— 点击修改路径'
       else if (info.reason === 'git-error') title = where + ' 读取失败 —— 点击查看原因'
       else if (info.reason === 'no-git') title = where + '：这台机器上找不到 git —— 点击查看'
+      /* 路径还没定：这一页要人填一个目录，所以这里得说「填」，不能说「这个目录不是
+         仓库」—— 那时候连是哪个目录都还不知道。 */
+      else if (info.reason === 'no-path') title = '还没确定看哪个目录 —— 点击填写'
+      /* 「这个目录不是 Git 仓库」那一页没有路径框（路径不是问题，没什么可填的），
+         所以这里也不再承诺「点击选择路径」—— 承诺一个点不到的东西比不承诺更坏。 */
+      else if (info.reason === 'not-a-repo') title = where + ' 这个目录不是 Git 仓库 —— 点击查看'
       else if (info.reason === '') title = 'Git —— 点击打开面板'
-      else title = where + ' 这个目录不是 Git 仓库 —— 点击选择路径或在这里初始化'
+      else title = where + ' 读不动这个目录 —— 点击查看'
 
       const children = [h(BranchIcon, {
         key: 'icon', size: 14, plus: !isRepo && info.phase === 'none',
         spin: switching !== null,
       })]
       if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
-      if (isRepo && info.pending > 0) {
+      if (isRepo && known === true && pending > 0) {
         children.push(h('span', {
-          className: 'dsh-git-badge' + (info.stale === true ? ' dsh-git-badge-stale' : ''),
+          className: 'dsh-git-badge' + (due === true ? ' dsh-git-badge-stale' : ''),
           key: 'badge',
-        }, String(info.pending)))
+        }, String(pending)))
       }
 
       return h('button', {
@@ -4998,6 +5557,9 @@ textarea.dsh-git-input{resize:vertical}
     function GitPopover(props) {
       const isOpen = useOpen()
       const mode = useSwitchMode()
+      /* 分支卡片上那个「几个改动」也来自全局那一份读数：同一个数字在面板、chip 和这张
+         卡片上必须是同一个。 */
+      useTreeVersion()
       /* Unmounting on close threw away the tab, the filters, the selection and
          the scroll position, and made every reopen a fresh mount that re-read
          everything. Closing now only hides it: the panel keeps its state, and
@@ -5064,7 +5626,9 @@ textarea.dsh-git-input{resize:vertical}
                 ? chipInfoFor(props.sessionId).repo
                 : sessionRepo(props.sessionId),
               mode: 'hover',
-              dirty: chipInfoFor(props.sessionId).pending,
+              dirty: treeCount(chipInfoFor(props.sessionId).repo.length > 0
+                ? chipInfoFor(props.sessionId).repo
+                : sessionRepo(props.sessionId)),
               onDone: function () { setSwitchMode(null) },
               onClose: function () { setSwitchMode(null) },
             }))

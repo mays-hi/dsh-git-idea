@@ -54,6 +54,15 @@ function sequencerShell() {
   ].join('\n')
 }
 
+/* Whether this machine can sign a commit at all, asked in the same process as
+   the rest of the whole-tree read — git's own lookup, and a marker instead of an
+   exit code for the same reason `PANEL_NO_GIT` is one (see 10-shell.js). It is
+   here so the commit pane can say it before the reader writes a message and gets
+   refused, rather than after. */
+function identityShell(target) {
+  return "    LC_ALL=C " + gitCmd() + " -C " + shq(target) + " var GIT_AUTHOR_IDENT >/dev/null 2>&1 || printf '" + PANEL_NO_IDENT + "\\n'"
+}
+
 /* The branch half of the identity read, in one git process instead of three.
 
    The branch name comes out of `$gd/HEAD` itself rather than out of
@@ -82,7 +91,7 @@ function branchIdentityShell(target) {
     '    fi',
     '    if [ -n "$b" ]; then',
     "      printf 'B:%s\\n' \"$b\"",
-    "      printf 'U:%s\\n' \"$(LC_ALL=C git -C " + shq(target) + " for-each-ref --format='%(upstream:short)%1f%(upstream:track)' \"refs/heads/$b\" 2>/dev/null)\"",
+    "      printf 'U:%s\\n' \"$(LC_ALL=C " + gitCmd() + " -C " + shq(target) + " for-each-ref --format='%(upstream:short)%1f%(upstream:track)' \"refs/heads/$b\" 2>/dev/null)\"",
     '    fi',
   ].join('\n')
 }
@@ -101,18 +110,18 @@ function pathShell(target, middle) {
        is a repository is answered by the filesystem above and stays true on a
        machine with no git; what is not true is everything the middle would then
        report, because an empty answer from a git that never ran is not "there is
-       nothing here". This is the multiplexed half of `GIT_GUARD` — see there for
+       nothing here". This is the multiplexed half of `gitGuard` — see there for
        why the answer comes out as a marker instead of an exit code — and it
        stops the script rather than letting the middle fail in a way that would
        be read as git refusing the repository. `pathKind` is deliberately on the
        other side of it: whether the path exists does not need git, so it still
        answers here. */
-    '  if ! command -v git >/dev/null 2>&1; then printf ' + shq(PANEL_NO_GIT + '\\n') + '; exit 0; fi',
+    '  if ! command -v ' + gitCmd() + ' >/dev/null 2>&1; then printf ' + shq(PANEL_NO_GIT + '\\n') + '; exit 0; fi',
     /* Guarded by `repoHere` and not left to git: without the guard,
        `git rev-parse` in a directory that is not a repository walks up and
        answers for a parent one. */
     '  if ' + repoHere(target) + '; then',
-    '    gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
+    '    gd=$(' + gitCmd() + ' -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
     '  else',
     "    gd=''",
     '  fi',
@@ -183,7 +192,7 @@ function panelCommand(target, paths) {
   const asked = paths == null ? [] : paths
   return pathShell(target, [
     '  if ' + repoHere(target) + '; then',
-    "    out=$(git -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal" + pathspecSuffix(asked) + " 2>&1); rc=$?",
+    "    out=$(" + gitCmd() + " -C " + quoted + " --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal" + pathspecSuffix(asked) + " 2>&1); rc=$?",
     '  else',
     "    out='fatal: not a git repository'; rc=1",
     '  fi',
@@ -191,6 +200,7 @@ function panelCommand(target, paths) {
     "  printf 'RC:%s\n' \"$rc\"",
     '  if [ -n "$gd" ]; then',
     sequencerShell(),
+    identityShell(target),
     '  fi',
   ].join('\n'))
 }
@@ -232,7 +242,7 @@ function watchCommand(target, deep, paths) {
   const out = [
     "st() { stat -c '%Y:%s' \"$1\" 2>/dev/null || stat -f '%m:%z' \"$1\" 2>/dev/null; }",
     'if ' + repoHere(target) + '; then',
-    '  gd=$(git -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
+    '  gd=$(' + gitCmd() + ' -C ' + quoted + ' rev-parse --absolute-git-dir 2>/dev/null)',
     'else',
     "  gd=''",
     'fi',
@@ -246,11 +256,11 @@ function watchCommand(target, deep, paths) {
        it. The same command over the paths the tree was showing is 0.5s. A file
        that was clean and is now modified is the one thing this cannot see; the
        panel reads the whole tree for that on its own clock. */
-    out.push('if [ -n "$gd" ]; then git -C ' + quoted + ' --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal' + pathspecSuffix(asked) + ' 2>&1; fi')
+    out.push('if [ -n "$gd" ]; then ' + gitCmd() + ' -C ' + quoted + ' --no-optional-locks -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=normal' + pathspecSuffix(asked) + ' 2>&1; fi')
   }
   out.push(
-    "printf 'F:%s\\n' \"" + whenRepo("git -C " + quoted + " for-each-ref --format='%(refname):%(objectname)' refs/heads refs/remotes 2>/dev/null") + "\"",
-    "printf 'H:%s\\n' \"" + whenRepo("git -C " + quoted + " rev-parse -q --verify HEAD 2>/dev/null") + "\"",
+    "printf 'F:%s\\n' \"" + whenRepo(gitCmd() + " -C " + quoted + " for-each-ref --format='%(refname):%(objectname)' refs/heads refs/remotes 2>/dev/null") + "\"",
+    "printf 'H:%s\\n' \"" + whenRepo(gitCmd() + " -C " + quoted + " rev-parse -q --verify HEAD 2>/dev/null") + "\"",
     "printf 'I:%s\\n' \"$(st \"$gd/index\")\"",
     /* The HEAD *file*, not just its stamp. Two branches can point at the same
        commit — `git switch -c` always does, and so does any pair left level by a

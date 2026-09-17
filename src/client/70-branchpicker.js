@@ -513,8 +513,14 @@
           h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(group.rows.length))))
         if (shut) continue
         if (group.rows.length === 0) {
-          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' },
-            needle.length > 0 ? '没有匹配的分支' : '这个仓库还没有本地分支'))
+          /* 一个本地分支都没有有两种：真的没有，和「当前这个分支还没有第一个提交」
+             —— 后者嘴里得说出它叫什么，不然 chip 上写着 main，卡片却说没有分支。 */
+          const empty = needle.length > 0
+            ? '没有匹配的分支'
+            : (data != null && data.unborn === true && text(data.current).length > 0
+                ? '当前在 ' + text(data.current) + '，还没有第一个提交'
+                : '这个仓库还没有本地分支')
+          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' }, empty))
           continue
         }
         for (let r = 0; r < group.rows.length; r += 1) {
@@ -549,7 +555,10 @@
           onClick: function () { setStash(true); choose(pending, true) },
         }, '先暂存本地改动，再切到 ' + pending))
       }
-      if (props.dirty > 0) {
+      /* 还没有第一个提交的仓库里 `git stash` 必然失败（"You do not have the initial
+         commit yet"），所以这一个勾选框不能出现 —— 「切完自动恢复」在这里是一句
+         兑现不了的承诺。改动本身不会丢：切分支时 git 会自己拒绝或带过去。 */
+      if (props.dirty > 0 && (data == null || data.unborn !== true)) {
         foot.push(h('label', {
           key: 'stash', className: 'dsh-git-bs-check',
           title: '把本地改动 stash 起来，切过去之后再自动 pop 回来',

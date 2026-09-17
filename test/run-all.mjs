@@ -24,6 +24,8 @@ const COUNTING = [
   'gp40-refactor-test.mjs',
   'gp41-watch-test.mjs',
   'gp42-diff-test.mjs',
+  'gp43-settings-test.mjs',
+  'gp44-shared-test.mjs',
 ]
 /* Suites that report by exit code and print their own lines. */
 const PROSE = ['gp34a-host-test.mjs', 'gp34d-config-test.mjs', 'gp34e-bridge-test.mjs']

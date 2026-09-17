@@ -25,7 +25,8 @@ const ctx = {
   get: (n) => (n === 'shell' ? { resolve: (r) => r, run: runShell } : undefined),
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
-const harness = { defineTool: (d) => d, registerTool: () => () => {}, handle(n, f) { handlers.set(n, f); return () => {} } }
+/* harness 现在只有 handle：这个插件不注册工具（见 gp34a 那段断言）。 */
+const harness = { handle(n, f) { handlers.set(n, f); return () => {} } }
 new Function('ctx', 'harness', 'console', 'btoa', 'atob', 'TextEncoder', 'TextDecoder', body)(
   ctx, harness, console, (s) => Buffer.from(s, 'binary').toString('base64'),
   (s) => Buffer.from(s, 'base64').toString('binary'), TextEncoder, TextDecoder).apply(ctx)

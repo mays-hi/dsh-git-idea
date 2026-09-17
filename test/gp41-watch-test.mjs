@@ -304,7 +304,9 @@ console.log('=== 手动切分支之前：chip 的轮询长什么样 ===')
 const first = await chipTree()
 ok('chip 显示当前分支 main', labelOf(first) === 'main')
 ok('chip 自己注册了一个轮询', lanes().length === 1)
-ok('没有面板时走慢车道（15 秒）', lanes()[0].delay === 15000)
+/* 5 秒是慢车道的默认值（20-prefs.js）：它只发一次便宜签名（真机上 0.12s），
+   所以问得比过去勤 —— 15 秒的话，终端里提交完要过十几秒 chip 才改口。 */
+ok('没有面板时走慢车道（5 秒）', lanes()[0].delay === 5000)
 
 let mark = calls.length
 tick()
@@ -326,7 +328,10 @@ ok('签名变了 → chip 换成新分支 release/2.0', labelOf(moved) === 'rele
 const seq = methodsSince(mark)
 ok('先 flush 主机缓存，再重读（否则读到的还是缓存里的旧分支）',
   seq.indexOf('git/flush') >= 0 && seq.indexOf('git/flush') < seq.indexOf('git/panel'))
-ok('重读走的是先便宜后完整那两段，不是一整条状态读',
+/* 一次 bump 之后最多两次读：先身份（0.15s），再只问上次那些脏路径（0.2s）。
+   整棵树那一次不在这条路上 —— 它在这台机器上 8–10s，而且占住整条通道。
+   （这份快照在这个套件里是「干净的」，所以第二次是全树读；见下一节。） */
+ok('重读走的是先便宜、再只问那些路径那两段，不是一整条状态读',
   seq.filter((m) => m === 'git/panel').length === 2)
 
 console.log('')
@@ -519,6 +524,27 @@ ok('机器上没有 git 时，chip 说的是找不到 git',
   String(chipNoGit.props.title).indexOf('这台机器上找不到 git') >= 0)
 ok('chip 不再跟着首帧说「这个目录不是 Git 仓库」',
   String(chipNoGit.props.title).indexOf('不是 Git 仓库') < 0)
+
+/* 「这个目录不是 Git 仓库」那一页是没有路径框的（路径不是问题，没什么可填的），
+   所以 chip 也不能承诺「点击选择路径」—— 承诺一个点不到的东西比不承诺更坏。 */
+ok('（对照）not-a-repo 时 chip 不再承诺「点击选择路径」',
+  String(forSetup.props.title).indexOf('选择路径') < 0
+  && String(forSetup.props.title).indexOf('点击查看') >= 0)
+
+/* 第三种状态：连看哪个目录都还不知道（no-path，刚切会话那一瞬间就是这样）。
+   那时要人填一个目录，说法也就得是「填」，不能说「这个目录不是仓库」。 */
+SETUP_REPLY.reason = 'no-path'
+chipNoGit.props.onClick()
+await wait(30)
+const chipNoPathOpen = await chipTree()
+chipNoPathOpen.props.onClick()
+await wait(30)
+const chipNoPath = await chipTree()
+console.log('  路径没定时 chip 的 tooltip:', JSON.stringify(String(chipNoPath.props.title).slice(0, 60)))
+ok('路径没定时 chip 说的是「还没确定看哪个目录」',
+  String(chipNoPath.props.title).indexOf('还没确定看哪个目录') >= 0)
+ok('也不再说成「这个目录不是 Git 仓库」',
+  String(chipNoPath.props.title).indexOf('不是 Git 仓库') < 0)
 console.log('  引导页上有「打开这个目录」:', openHere !== undefined)
 openHere.props.onClick()
 await wait(30)

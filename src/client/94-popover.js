@@ -1,6 +1,9 @@
     function GitPopover(props) {
       const isOpen = useOpen()
       const mode = useSwitchMode()
+      /* 分支卡片上那个「几个改动」也来自全局那一份读数：同一个数字在面板、chip 和这张
+         卡片上必须是同一个。 */
+      useTreeVersion()
       /* Unmounting on close threw away the tab, the filters, the selection and
          the scroll position, and made every reopen a fresh mount that re-read
          everything. Closing now only hides it: the panel keeps its state, and
@@ -67,7 +70,9 @@
                 ? chipInfoFor(props.sessionId).repo
                 : sessionRepo(props.sessionId),
               mode: 'hover',
-              dirty: chipInfoFor(props.sessionId).pending,
+              dirty: treeCount(chipInfoFor(props.sessionId).repo.length > 0
+                ? chipInfoFor(props.sessionId).repo
+                : sessionRepo(props.sessionId)),
               onDone: function () { setSwitchMode(null) },
               onClose: function () { setSwitchMode(null) },
             }))

@@ -77,6 +77,12 @@ async function readRefs(input, repo) {
   }
   const remote = []
   remoteMap.forEach(function (entries, name) { remote.push({ name: name, refs: entries }) })
+  /* 一个 ref 都没标出当前分支，可能不是游离 HEAD，而是这个分支还没有提交 ——
+     那也要说出它的名字（见 `headBranchWithoutCommit`）。 */
+  if (current.length === 0) {
+    const unborn = await headBranchWithoutCommit(args)
+    if (unborn.length > 0) current.push(unborn)
+  }
   return { ok: true, repo: listed.cwd, current: current, local: local, remote: remote }
 }
 
@@ -172,9 +178,17 @@ async function readBranches(input, repo) {
   }
   const prev = await git(args, ['rev-parse', '--abbrev-ref', '@{-1}'], null, {})
   const previous = prev.exitCode === 0 ? prev.stdout.trim() : ''
+  /* 当前分支还没有提交时，ref 表里没有它 —— 头上那行不能因此写成 HEAD（见
+     `headBranchWithoutCommit`）。它不进 `branches`：那是一份 ref 清单，而它还不是
+     一个 ref，列进去会给人一个点得动的、其实不存在的东西。 */
+  const unborn = current.length === 0 ? await headBranchWithoutCommit(args) : ''
   return {
-    ok: true, repo: listed.cwd, current: current,
+    ok: true, repo: listed.cwd, current: current.length === 0 ? unborn : current,
     previous: previous === 'HEAD' || previous === current ? '' : previous,
+    /* 说出来，切换器才有办法换一套说法：一个提交都没有的仓库里，`git stash`
+       直接失败（"You do not have the initial commit yet"），所以那张卡片上「先暂存
+       再切（切完自动恢复）」这句承诺在这里兑现不了。 */
+    unborn: unborn.length > 0,
     branches: branches, remotes: remotes,
   }
 }

@@ -18,40 +18,82 @@ async function configPath() {
 }
 
 function normalizeConfig(raw) {
-  const out = { initBranch: 'main', cherryPickRecord: false }
+  const out = {
+    initBranch: 'main', cherryPickRecord: false,
+    /* Which git to run. Empty means "the one on the deployment's PATH", which is
+       what every command used before this key existed. */
+    gitPath: '',
+    /* The three choices the plugin itself makes about the network — each one is
+       the argument this plugin passes, not a copy of a git setting: `git fetch`
+       is `--all --prune` here, pull merges, and a push to a branch with no
+       upstream asks first. git's own `push.default` / `pull.rebase` still apply
+       underneath and are not overridden. */
+    fetchPrune: true, pullRebase: false, pushSetUpstream: false,
+  }
   if (raw == null || typeof raw !== 'object') return out
   if (isStr(raw.initBranch)) out.initBranch = raw.initBranch.trim().slice(0, 120)
   out.cherryPickRecord = raw.cherryPickRecord === true
+  if (isStr(raw.gitPath)) out.gitPath = cleanGitPath(raw.gitPath)
+  out.fetchPrune = raw.fetchPrune !== false
+  out.pullRebase = raw.pullRebase === true
+  out.pushSetUpstream = raw.pushSetUpstream === true
   return out
 }
+
+/* ── 这份配置文件走 shell，不走文件服务 ──
+
+   它住在部署的配置目录里（`<DSH_HOME>/dsh-git-idea.json`），也就是**任何工作区之外**。
+   文件服务是按工作区发策略的，而这条路径不在任何一个工作区里：写它的时候拿到的是部署
+   默认那份策略（workspace-write），于是被拒绝 —— 而且拒得安静：面板里点了保存、磁盘上
+   一个字节没变、屏幕上什么也没说。这是真机上抓到的（改用 `git` 路径时）。
+
+   所以它和这个插件改的所有东西走同一条路：`invoke` + 会话自己的沙箱策略（`sandboxFor`），
+   失败时答复里带着 sandboxDenied 和 git 那句话，界面上说得出为什么。读也一样走这条路，
+   免得读到一个地方、写到另一个地方。 */
 
 async function readConfigFile() {
   if (configCache !== null) return configCache
   const path = await configPath()
-  const fsService = ctx.get('fs')
-  if (path === null || fsService === undefined) { configCache = normalizeConfig(null); return configCache }
+  if (path === null) { configCache = applyConfig(normalizeConfig(null)); return configCache }
+  /* `[ -f … ]` 先说有没有这个文件：不存在不是错误，是「还没有配置过」。 */
+  const probe = await invoke('[ -f ' + shq(path) + ' ] && cat ' + shq(path) + '\n', {}, null, { timeoutMs: 10000 })
+  if (probe.exitCode !== 0) { configCache = applyConfig(normalizeConfig(null)); return configCache }
   try {
-    const target = await fsService.resolve(path)
-    const info = await fsService.stat(target)
-    if (info === undefined) { configCache = normalizeConfig(null); return configCache }
-    configCache = normalizeConfig(JSON.parse(await fsService.readText(target)))
+    configCache = applyConfig(normalizeConfig(JSON.parse(probe.stdout)))
   } catch (error) {
-    console.error('dsh-git-idea: could not read the plugin config', String(error))
-    configCache = normalizeConfig(null)
+    console.error('dsh-git-idea: could not parse the plugin config', String(error))
+    configCache = applyConfig(normalizeConfig(null))
   }
   return configCache
 }
 
-async function writeConfigFile(raw) {
+async function writeConfigFile(raw, args) {
   const path = await configPath()
-  if (path === null) return { ok: false, error: '无法确定配置目录' }
-  const fsService = ctx.get('fs')
-  if (fsService === undefined) return { ok: false, error: '文件系统服务不可用' }
+  if (path === null) return { ok: false, error: '无法确定配置目录', stderr: '读不出部署的配置目录' }
   const next = normalizeConfig(raw)
   try {
-    const target = await fsService.resolve(path)
-    await fsService.writeText(target, JSON.stringify(next, null, 2) + '\n')
-    configCache = next
+    /* `mkdir -p` 先来一次：`DSH_HOME` 可以指到一个还不存在的目录，而重定向不会替
+       你建目录。`printf %s` 而不是 heredoc —— 值里可能有引号、反斜杠、换行，`shq`
+       一个都不挑。 */
+    const dir = path.slice(0, path.lastIndexOf('/'))
+    const written = await invoke(
+      'mkdir -p ' + shq(dir) + ' && printf %s ' + shq(JSON.stringify(next, null, 2) + '\n') + ' > ' + shq(path) + '\n',
+      args, null, { timeoutMs: 10000 })
+    if (written.exitCode !== 0) {
+      return {
+        ok: false, path: path,
+        error: written.sandboxDenied === true ? '文件沙箱不允许写这个配置文件' : '写不进这个配置文件',
+        stderr: written.stderr, stdout: written.stdout,
+        sandboxDenied: written.sandboxDenied === true,
+        noGit: false,
+      }
+    }
+    /* 换了一个 git，所有读的答案都可能跟着变 —— 可能从「读不动这个目录」变成读得动，
+       反过来也一样。缓存不作废的话，读者在设置页里把路径改对了，面板还在拿上一个二进
+       制留下的答案说话（这条是 fixture 抓出来的：改完之后同一棵树仍然回答旧的那一份）。 */
+    const before = gitExe
+    configCache = applyConfig(next)
+    if (before !== gitExe) invalidateRepo(null)
     return { ok: true, path: path, config: next }
   } catch (error) {
     const detail = error != null && error.message !== undefined ? String(error.message) : String(error)
