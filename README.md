@@ -28,7 +28,7 @@
 要求 DSH `0.1.5-rc.1` 及兼容版本（peer：`@deepseek-ai/dsh-tools ^0.1.5-rc.1`、`@deepseek-ai/cordis ^4.0.2`）。
 
 ```sh
-# 从 npm（发布后）
+# 从 npm
 dsh plugin --profile web add dsh-git-idea
 
 # 或直接从 GitHub
