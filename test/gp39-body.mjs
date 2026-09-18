@@ -101,3 +101,21 @@ const firstRows = firstCard === undefined ? [] : byClass(firstCard, 'dsh-git-bs-
 console.log('  第一帧里的行:', JSON.stringify(firstRows.map(textOf).slice(0, 5)))
 ok('预热过：第一帧就列出了分支（不是「正在读取分支…」）', firstRows.length > 0)
 ok('读的是 s-2 自己的仓库 /tmp/ws2', calls.filter((c) => c.method === 'git/branches').every((c) => c.args.repo === '/tmp/ws2'))
+console.log('')
+console.log('== 同一个工作区里换会话：面板第一帧就用记忆里那份，不闪「正在读取仓库…」 ==')
+
+/* DSH 换会话时整棵 session 作用域的 slot 子树会重挂，组件 state 全部从头来。但
+   s-2 的 chip 已经读过它的工作区（/tmp/ws2，1 个改动），那份快照按仓库记在全局读数
+   里 —— 所以重挂出来的面板第一帧就该是它，而不是先空一帧「正在读取仓库…」。 */
+const seededFrame = renderRoot(makeElement(popover, { sessionId: 's-2' }), 'pop-seeded')
+const seededText = textOf(seededFrame)
+const seededBadge = byClass(seededFrame, 'dsh-git-tool-badge')[0]
+console.log('  重挂后的第一帧:', JSON.stringify(seededText.slice(0, 130)))
+console.log('  第一帧上的变更数:', seededBadge === undefined ? '(没有)' : JSON.stringify(textOf(seededBadge)))
+ok('第一帧不再是「正在读取仓库…」', seededText.indexOf('正在读取仓库') < 0)
+ok('第一帧就带着记忆里那份改动数', seededBadge !== undefined && textOf(seededBadge) === '1')
+
+/* 没有记忆的会话（这个工作区从来没读过）必须照旧先空一帧，不能凭空编一个仓库出来。 */
+const coldFrame = renderRoot(makeElement(popover, { sessionId: 's-cold' }), 'pop-cold')
+console.log('  没见过的会话第一帧:', JSON.stringify(textOf(coldFrame).slice(0, 130)))
+ok('没见过的会话仍从「正在读取仓库…」开始', textOf(coldFrame).indexOf('正在读取仓库') >= 0)

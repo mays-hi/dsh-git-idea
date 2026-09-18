@@ -341,6 +341,28 @@ return {
       return record === null ? 0 : record.count
     }
 
+    /* ── 换会话时，先铺上已经知道的那一份 ──
+
+       面板属于会话，DSH 在换会话时会把整个 session 作用域的 slot 子树重挂（组件
+       state 从头来，见 dsh-client-ui-renderer 的 SessionMaybeEntry / StrictSessionEntry）。
+       但"重挂"不等于"要重新测"：这份工作区读数按**仓库**记在这里，Host 那边每一次读
+       也是按仓库缓存的 —— 同一个工作区里换会话，拿到的本来就是同一份答案。
+
+       所以重挂时先把记忆里的快照交出去，屏幕上就不会先闪一帧「正在读取仓库…」再换成
+       同样的东西；挂载时那次读照旧发出，用它的答复确认或纠正（见 80-panel.js）。
+
+       只有过一次**整树**读的记录才算数（fullAt !== 0）：只问了几条路径的读不足以
+       证明这份快照的其余部分是完整的，那种情况宁可照旧从空的开始。仓库的路径取这个
+       会话真正会请求的那个 —— 应用过的路径优先，其次才是 Host 上次解析出来的工作区。 */
+    function rememberedPanel(sessionId) {
+      const applied = sessionRepo(sessionId)
+      const repo = applied.length > 0 ? applied : chipInfoFor(sessionId).repo
+      if (repo.length === 0) return null
+      const record = treeRecord(repo)
+      if (record === null || record.status == null || record.fullAt === 0) return null
+      return { repo: repo, status: record.status, costMs: record.costMs }
+    }
+
     function publishTreeRead(repo, status, full, costMs) {
       if (repo == null || repo.length === 0 || status == null || status.ok !== true) return
       const previous = treeRecord(repo)
@@ -3845,15 +3867,20 @@ textarea.dsh-git-input{resize:vertical}
          exception is a path the reader picked on the setup page after the
          workspace turned out not to be a repository yet. */
       const [appliedRepo, setAppliedRepo] = React.useState(sessionRepo(sessionId))
+      /* 这个会话的工作区，上一次读到的样子（如果还在记忆里）。DSH 换会话时这里会
+         整个重挂，但"重挂"不等于"要重新测"——同一个工作区里换会话，Host 和全局读数
+         拿到的本来就是同一份答案（见 10-state.js 的 rememberedPanel）。先把它铺上，
+         挂载时那次读照旧发出，用答复确认或纠正。 */
+      const [remembered] = React.useState(function () { return rememberedPanel(sessionId) })
       const [refs, setRefs] = React.useState(null)
       const [authors, setAuthors] = React.useState(null)
       const [graph, setGraph] = React.useState(null)
       const [detail, setDetail] = React.useState(null)
-      const [work, setWork] = React.useState(null)
+      const [work, setWork] = React.useState(remembered === null ? null : remembered.status)
       /* The working tree, read separately from the repository's identity: on a
          Windows-mounted worktree that part alone costs seconds, and nothing on
          screen needs it before the frame is drawn. */
-      const [status, setStatus] = React.useState(null)
+      const [status, setStatus] = React.useState(remembered === null ? null : remembered.status)
       const [maxCount, setMaxCount] = React.useState(PAGE_COMMITS)
       const [message, setMessage] = React.useState('')
       const [selected, setSelected] = React.useState(null)
@@ -3917,11 +3944,23 @@ textarea.dsh-git-input{resize:vertical}
          alone: an effect keeps the render it was created in, so a callback
          registered once would otherwise read a stale `status` for as long as its
          dependencies do not move. */
-      const [panelBox] = React.useState(function () { return { status: null, needFull: false, repo: '', costMs: 0, lastFull: false, mutations: Promise.resolve() } })
+      const [panelBox] = React.useState(function () {
+        return {
+          status: remembered === null ? null : remembered.status,
+          /* 记忆里那份先当屏上的快照用，挂载时的那次全树读照旧发出：要么命中 Host 的
+             按仓库缓存（同一个工作区，几毫秒），要么给出真正的新答案。 */
+          needFull: remembered !== null,
+          repo: '',
+          costMs: remembered === null ? 0 : remembered.costMs,
+          lastFull: false,
+          mutations: Promise.resolve(),
+        }
+      })
       panelBox.status = status
       /* 一次全树读占住整条通道多久 —— 下一次该隔多久再量一遍由它决定（fullReadGapMs）。
-         进 state 的原因只有一个：间隔变了要把那个时钟重新起一遍。 */
-      const [treeCost, setTreeCost] = React.useState(0)
+         进 state 的原因只有一个：间隔变了要把那个时钟重新起一遍。记忆里那份带着上次
+         实测的代价，第一帧就把时钟的间隔定对。 */
+      const [treeCost, setTreeCost] = React.useState(remembered === null ? 0 : remembered.costMs)
 
       /* work is the only truth about whether this path is a usable repository.
          Everything that reads refs, history or the index is gated on it, so a

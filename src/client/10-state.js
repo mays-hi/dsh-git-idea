@@ -247,6 +247,28 @@
       return record === null ? 0 : record.count
     }
 
+    /* ── 换会话时，先铺上已经知道的那一份 ──
+
+       面板属于会话，DSH 在换会话时会把整个 session 作用域的 slot 子树重挂（组件
+       state 从头来，见 dsh-client-ui-renderer 的 SessionMaybeEntry / StrictSessionEntry）。
+       但"重挂"不等于"要重新测"：这份工作区读数按**仓库**记在这里，Host 那边每一次读
+       也是按仓库缓存的 —— 同一个工作区里换会话，拿到的本来就是同一份答案。
+
+       所以重挂时先把记忆里的快照交出去，屏幕上就不会先闪一帧「正在读取仓库…」再换成
+       同样的东西；挂载时那次读照旧发出，用它的答复确认或纠正（见 80-panel.js）。
+
+       只有过一次**整树**读的记录才算数（fullAt !== 0）：只问了几条路径的读不足以
+       证明这份快照的其余部分是完整的，那种情况宁可照旧从空的开始。仓库的路径取这个
+       会话真正会请求的那个 —— 应用过的路径优先，其次才是 Host 上次解析出来的工作区。 */
+    function rememberedPanel(sessionId) {
+      const applied = sessionRepo(sessionId)
+      const repo = applied.length > 0 ? applied : chipInfoFor(sessionId).repo
+      if (repo.length === 0) return null
+      const record = treeRecord(repo)
+      if (record === null || record.status == null || record.fullAt === 0) return null
+      return { repo: repo, status: record.status, costMs: record.costMs }
+    }
+
     function publishTreeRead(repo, status, full, costMs) {
       if (repo == null || repo.length === 0 || status == null || status.ok !== true) return
       const previous = treeRecord(repo)
