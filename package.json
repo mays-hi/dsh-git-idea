@@ -1,7 +1,7 @@
 {
   "name": "dsh-git-idea",
-  "version": "0.2.3",
-  "description": "A git panel inside the DSH session: a repository chip in the composer, a panel with the branch tree, commit graph, working tree and commit detail, and a Settings page.",
+  "version": "0.2.4",
+  "description": "A git plugin for DSH modelled on IDEA's VCS: a git icon beside the permission mode in the composer with the branch and pending-change count, a branch switcher on hover, an IDEA-style VCS panel on click, and a settings page. Registers no model tools.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -29,6 +29,9 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"
   },
+  "engines": {
+    "dsh": ">=0.1.5-rc.1 <0.1.6"
+  },
   "scripts": {
     "build": "node build.mjs && node build-package.mjs",
     "check": "node build.mjs --check && node build-package.mjs --check",
@@ -50,6 +53,8 @@
     "dsh-plugin",
     "deepseek-harness",
     "git",
+    "idea",
+    "vcs",
     "ui",
     "commit-graph"
   ],

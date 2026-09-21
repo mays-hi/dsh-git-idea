@@ -1,19 +1,24 @@
 # dsh-git-idea
 
-在 DSH 会话里看 Git：输入框左侧一个**仓库 chip**，点开是**浮层面板** —— 分支树、提交历史与提交图、变更与暂存、提交详情、文件差异，外加一个设置页。
+照着 IDEA 的 VCS 做的 Git 集成，装进 DSH 会话：输入框「**权限模式**」旁边一个 Git 图标 —— 显示当前分支与未提交改动数，**悬停**切分支，**点击**弹出 IDEA 风格的面板（分支树、提交历史与提交图、变更与暂存、提交详情、文件差异），另有一个**设置页**管提交身份、git 位置和网络参数。
 
 **不向 DSH 注册任何模型工具**（模型要跑 git 本来就有 `bash`，见[不注册工具](#不注册工具)）。
 **面板属于会话，不属于窗口**：同一页面里的每个会话各看各的工作区。
 
-> A git panel for DeepSeek Harness — a repository chip in the composer and a floating panel with the branch tree, commit graph, working tree, commit detail and file diff. Registers no model tools.
+> Git integration for DeepSeek Harness, modelled on IDEA's VCS — a git icon beside the permission mode in the composer (branch + pending count), a branch switcher on hover, an IDEA-style VCS panel on click, and a settings page. Registers no model tools with DSH.
 
-仓库：<https://github.com/mays-hi/dsh-git-idea>
+| | |
+|---|---|
+| 当前版本 | **0.2.4** |
+| 下载 / 安装 | `dsh plugin --profile web add dsh-git-idea`（npm）· `github:mays-hi/dsh-git-idea`（GitHub）· 本地目录 |
+| 依赖 | DSH `>=0.1.5-rc.1 <0.1.6`（`engines.dsh`）；`@deepseek-ai/cordis ^4.0.2`（peer） |
+| 仓库 | <https://github.com/mays-hi/dsh-git-idea> |
 
 ---
 
 ## 安装
 
-要求 DSH `0.1.5-rc.1` 及兼容版本（peer：`@deepseek-ai/cordis ^4.0.2`）。
+要求 DSH `>=0.1.5-rc.1 <0.1.6`（peer：`@deepseek-ai/cordis ^4.0.2`）。
 
 ```sh
 dsh plugin --profile web add dsh-git-idea                    # npm
@@ -29,7 +34,7 @@ dsh plugin --profile web add /path/to/dsh-git-idea            # 本地
 
 ## 用法
 
-### chip（输入框左侧）
+### chip（输入框「权限模式」旁边那个 Git 图标）
 
 | 操作 | 结果 |
 |---|---|
