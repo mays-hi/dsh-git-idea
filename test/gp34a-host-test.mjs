@@ -1144,6 +1144,33 @@ check('扫的确实是真答复（不是一堆 null）',
   shapes.filter((s) => s[1] != null).length === shapes.length
   && shapes.filter((s) => s[1].ok === false).length > 0)
 
+console.log('')
+console.log('=== 执行器换了形状：0.1.7 的 execute/result ===')
+/* DSH 0.1.7 把执行器的一次性 `run(spec)` 换成了 `execute(spec)`：调用先拿到一个
+   句柄，`result()` 才是跑完的那份答案。这里把同一个 shell 服务临时换成新形状 ——
+   真命令照跑 —— 面板的读必须照样有答案，而且必须确实走了新那条路。两个计数器是
+   唯一的证人：`run` 还在（旧版会用它），只看答复分不出走的是哪条。 */
+let executeCalls = 0
+let runCalls = 0
+const realRunBeforeShape = shellService.run
+const realExecuteBeforeShape = shellService.execute
+shellService.execute = function (spec) {
+  executeCalls += 1
+  return Promise.resolve({ result: function () { return realRunBeforeShape(spec) } })
+}
+shellService.run = function (spec) {
+  runCalls += 1
+  return realRunBeforeShape(spec)
+}
+await H('git/flush')({ repo: R })
+const viaExecute = await H('git/branches')({ repo: R })
+check('新形状下读得到真实分支列表',
+  viaExecute != null && Array.isArray(viaExecute.branches) && viaExecute.branches.some((b) => b.name === 'main'))
+check('走的是 execute/result，而不是旧的 run', executeCalls > 0 && runCalls === 0)
+console.log('  execute 次数:', executeCalls, ' run 次数:', runCalls)
+shellService.execute = realExecuteBeforeShape
+shellService.run = realRunBeforeShape
+
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {
   console.log('')
