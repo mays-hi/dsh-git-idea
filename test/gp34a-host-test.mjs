@@ -19,8 +19,12 @@ const handlers = new Map()
    change nothing, so a test that wants to see the command line has to wrap this
    very object's `run`. */
 const shellService = { resolve: r => r, run: runShell }
+/* Everything the body reaches by name, held in one object so a suite can hand a
+   service in for the length of one check and take it away again — the storage
+   fallback below is exactly that. */
+const services = { shell: shellService }
 const ctx = {
-  get: n => (n === 'shell' ? shellService : undefined),
+  get: n => services[n],
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
 const TOOLS = new Map()
@@ -1170,6 +1174,25 @@ check('走的是 execute/result，而不是旧的 run', executeCalls > 0 && runC
 console.log('  execute 次数:', executeCalls, ' run 次数:', runCalls)
 shellService.execute = realExecuteBeforeShape
 shellService.run = realRunBeforeShape
+
+console.log('')
+console.log('=== 非活动会话：工作区从存储里解析 ===')
+/* DSH 0.1.7 的 `sessions.get(id)` 只回答**活着的**会话（0.1.5 会从存储里加载）。
+   面板刚挂上、会话还在恢复的那一瞬就落在这一条上：解析不到工作区，读到的是
+   not-a-repository，于是面板一直说「未检测到仓库」，而晚一步的 chip 却报出了分支。
+   这里把 sessions 换成「查不到」，把 sessionPersistence 换成「存着这条会话」，
+   同一个请求必须解析出工作区。 */
+services.sessions = { get: () => undefined }
+const noStore = await H('git/branches')({ sessionId: 'session-not-live' })
+/* 没有存储时，这个请求只能落到 shell 自己的默认工作目录（跑测试时就是插件仓库
+   本身），能不能读成仓库取决于那个目录 —— 但它绝不该是这条会话的工作区。 */
+check('（对照）没有存储时解析不到那个会话的工作区', noStore != null && noStore.repo !== R)
+services.sessionPersistence = { stat: async () => ({ header: { cwd: R } }) }
+await H('git/flush')({ repo: R })
+const viaStore = await H('git/branches')({ sessionId: 'session-not-live' })
+check('存储里那份工作区被解析出来了', viaStore != null && viaStore.ok === true && viaStore.repo === R)
+delete services.sessionPersistence
+delete services.sessions
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {

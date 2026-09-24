@@ -9,7 +9,7 @@
 
 | | |
 |---|---|
-| 当前版本 | **0.2.5** |
+| 当前版本 | **0.2.6** |
 | 下载 / 安装 | `dsh plugin --profile web add dsh-git-idea`（npm）· `github:mays-hi/dsh-git-idea`（GitHub）· 本地目录 |
 | 依赖 | DSH `>=0.1.5-rc.1`（`engines.dsh`，只声明最低版本）；`@deepseek-ai/cordis ^4.0.2`（peer） |
 | 仓库 | <https://github.com/mays-hi/dsh-git-idea> |
@@ -18,7 +18,7 @@
 
 ## 安装
 
-要求 DSH `>=0.1.5-rc.1`（只声明最低版本；peer：`@deepseek-ai/cordis ^4.0.2`）。DSH 0.1.7 把执行器的一次性 `run(spec)` 换成了 `execute(spec)` 加 `result()`，Host 那一半两种形状都认 —— 0.1.5/0.1.6 和 0.1.7+ 装的是同一份包。
+要求 DSH `>=0.1.5-rc.1`（只声明最低版本；peer：`@deepseek-ai/cordis ^4.0.2`）。DSH 0.1.7 把执行器的一次性 `run(spec)` 换成了 `execute(spec)` 加 `result()`，Host 那一半两种形状都认 —— 0.1.5/0.1.6 和 0.1.7+ 装的是同一份包。0.1.7 的 `sessions.get` 也只回答活着的会话，解析会话工作区时会退到 `sessionPersistence` 读会话头，刚选中、还在恢复的会话因此也能读到。
 
 ```sh
 dsh plugin --profile web add dsh-git-idea                    # npm

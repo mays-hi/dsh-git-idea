@@ -10,7 +10,9 @@
 function onRpc(name, handler) {
   ctx.effect(function () {
     return harness.handle(name, function (input) {
-      return readConfigFile().then(function () { return handler(input) })
+      return readConfigFile()
+        .then(function () { return withSessionRepo(input) })
+        .then(function (resolved) { return handler(resolved) })
     })
   }, 'dsh-git-idea rpc ' + name)
 }

@@ -4194,7 +4194,17 @@ textarea.dsh-git-input{resize:vertical}
         }
         readChanges()
         return undefined
-      }, [appliedRepo, tab, freshAt, props.ready])
+      }, [appliedRepo, tab, freshAt, props.ready, sessionId])
+
+      /* A read that came back “not a repository” while the session was still
+         being resolved must not be the last word: closing and reopening the
+         panel asks again. A working repository keeps its snapshot — that is
+         what makes reopening instant — so only a failed verdict is retried. */
+      React.useEffect(function () {
+        if (props.active !== true || props.ready !== true) return
+        if (work == null || work.ok === true) return
+        readChanges()
+      }, [props.active, props.ready])
 
       /* ── the whole tree, on a clock ──
 

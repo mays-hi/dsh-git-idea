@@ -10,6 +10,11 @@
    that directory does not exist the spawn itself fails before git is ever reached
    and the caller sees a rejected promise instead of the diagnosis it asked for. */
 function sessionWorkdir(input) {
+  /* The async resolution that runs before every handler already went to storage
+     for a session that is not live (see `withSessionRepo`), and hands the answer
+     back on the input. Read it first so every synchronous reader — including a
+     probe whose own target does not exist — sees the session's directory. */
+  if (input != null && isStr(input.sessionCwd) && input.sessionCwd.length > 0) return input.sessionCwd
   if (input == null || !isStr(input.sessionId)) return undefined
   const sessions = ctx.get('sessions')
   if (sessions === undefined) return undefined
@@ -22,6 +27,56 @@ function sessionWorkdir(input) {
     console.error('dsh-git-idea: could not resolve the session working directory', String(error))
   }
   return undefined
+}
+
+/* ── the session's own workspace, resolved before the handler runs ──
+
+   DSH 0.1.7 changed sessions.get(id): it answers for a session that is LIVE in
+   this process and nothing else (0.1.5 loaded one from storage). A session the
+   reader has just selected is briefly not live while it restores — and one
+   selected, switched away from and left there is not live either — so the
+   synchronous repoFrom saw no workspace at all and every read answered
+   not-a-repository: the panel said「未检测到仓库」while the chip, whose read landed
+   a moment later, named the branch.
+
+   So the workspace is resolved once here, before the handler: the live session
+   first, its stored header second (sessionPersistence.stat reads the generation
+   header without the event log, and never takes ownership). The answer travels
+   on the input as sessionCwd — the SESSION's directory, deliberately not the
+   requested one, so the probe in 62-panel.js that must not spawn inside a target
+   that does not exist keeps the right workdir. */
+function sessionCwdOf(input) {
+  if (input == null || !isStr(input.sessionId) || input.sessionId.length === 0) return Promise.resolve(undefined)
+  const sessions = ctx.get('sessions')
+  if (sessions !== undefined) {
+    try {
+      const live = sessions.get(input.sessionId)
+      const header = live != null ? live.header : undefined
+      const cwd = header != null ? header.cwd : undefined
+      if (isStr(cwd) && cwd.length > 0) return Promise.resolve(cwd)
+    } catch (error) {
+      console.error('dsh-git-idea: could not read the live session working directory', String(error))
+    }
+  }
+  const store = ctx.get('sessionPersistence')
+  if (store === undefined) return Promise.resolve(undefined)
+  try {
+    return Promise.resolve(store.stat(input.sessionId)).then(function (snapshot) {
+      const header = snapshot != null ? snapshot.header : undefined
+      const cwd = header != null ? header.cwd : undefined
+      return isStr(cwd) && cwd.length > 0 ? cwd : undefined
+    }, function () { return undefined })
+  } catch (error) {
+    return Promise.resolve(undefined)
+  }
+}
+
+function withSessionRepo(input) {
+  if (input == null || !isStr(input.sessionId) || input.sessionId.length === 0) return Promise.resolve(input)
+  if (isStr(input.sessionCwd) && input.sessionCwd.length > 0) return Promise.resolve(input)
+  return sessionCwdOf(input).then(function (cwd) {
+    return cwd === undefined ? input : Object.assign({}, input, { sessionCwd: cwd })
+  })
 }
 
 function repoFrom(input) {
