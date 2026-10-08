@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 
 /* ── the miniature React again (the restart emptied /tmp) ── */
@@ -42,8 +43,33 @@ function makeElement(type, props, ...children) {
   merged.children = flat
   return { type: type, key: merged.key === undefined ? null : merged.key, props: merged }
 }
+/* memo：真实 React 会跳过 props 没变的子树，基准与断言都应该能看到这件事 */
+const memoCache = new Map()
+let memoSkips = 0
+function shallowSame(a, b) {
+  const ka = Object.keys(a)
+  const kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) { if (k === 'children') continue; if (a[k] !== b[k]) return false }
+  return true
+}
 const React = {
   createElement: makeElement,
+  memo(component) { return { $$memo: true, render: component } },
+  /* useCallback 按依赖记忆，和真实 React 一样：否则 memo 永远命中不了，
+     基准和断言也就看不到「行级记忆」到底有没有生效 */
+  useCallback(fn, deps) {
+    const fiber = currentFiber
+    const index = fiber.cursor
+    fiber.cursor += 1
+    const previous = fiber.memos === undefined ? undefined : fiber.memos[index]
+    if (previous !== undefined && Array.isArray(deps) && Array.isArray(previous.deps)
+      && deps.length === previous.deps.length && deps.every((d, i) => d === previous.deps[i])) return previous.fn
+    if (fiber.memos === undefined) fiber.memos = []
+    fiber.memos[index] = { deps: deps, fn: fn }
+    return fn
+  },
+  useMemo(factory) { return factory() },
   useState(initial) {
     const fiber = currentFiber
     const index = fiber.cursor
@@ -79,13 +105,6 @@ function textOf(node) {
   if (node.props === undefined) return ''
   return textOf(node.props.children)
 }
-function walk(node, visit) {
-  if (node === null || node === undefined || typeof node !== 'object') return
-  if (Array.isArray(node)) { node.forEach((c) => walk(c, visit)); return }
-  visit(node)
-  const kids = node.props !== undefined && Array.isArray(node.props.children) ? node.props.children : []
-  kids.forEach((c) => walk(c, visit))
-}
 function collect(node, out = []) {
   if (node == null || typeof node !== 'object') return out
   if (Array.isArray(node)) { node.forEach((c) => collect(c, out)); return out }
@@ -103,13 +122,29 @@ const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexO
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
 const groups = (t) => byClass(t, 'dsh-git-bs-group')
 
+/* 这两行是给 gp35 的「这次读是哪棵树发的」用的：harness 把最近一次 render 的 label
+   记在每条 RPC 上，套件据此把「面板的重读」和「芯片自己那次状态读」分开。别的套件
+   不看这个字段。 */
+let currentLabel = ''
 function renderRoot(element, label) {
+  currentLabel = label
   const pending = []
   const render = (node, path) => {
     if (node === null || node === undefined) return null
     if (typeof node === 'string' || typeof node === 'number') return node
     if (Array.isArray(node)) return node.map((c, i) => render(c, path + '.' + i))
     const type = node.type
+    if (type != null && typeof type === 'object' && type.$$memo === true) {
+      const memoKey = path + '#' + (type.render.name || 'memo')
+      const previous = memoCache.get(memoKey)
+      if (previous !== undefined && shallowSame(previous.props, node.props)) {
+        memoSkips += 1
+        return previous.tree
+      }
+      const tree = render({ type: type.render, props: node.props, key: node.key, props2: null }, path)
+      memoCache.set(memoKey, { props: node.props, tree: tree })
+      return tree
+    }
     if (typeof type !== 'function') {
       const kids = (node.props.children || []).map((c, i) => render(c, path + '/' + i))
       const out = { type: type, key: node.key, props: Object.assign({}, node.props, { children: kids }) }
@@ -127,7 +162,7 @@ function renderRoot(element, label) {
     }
     const fiberKey = path + '#' + (type.name || 'anon') + '#' + (node.key === null ? '' : node.key)
     let fiber = fibers.get(fiberKey)
-    if (fiber === undefined) { fiber = { hooks: [], effects: [], cursor: 0, pending: [] }; fibers.set(fiberKey, fiber) }
+    if (fiber === undefined) { fiber = { hooks: [], memos: [], effects: [], cursor: 0, pending: [] }; fibers.set(fiberKey, fiber) }
     fiber.cursor = 0
     fiber.pending = []
     const previous = currentFiber
@@ -170,20 +205,34 @@ const branchesReply = {
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
   call(method, args) {
-    calls.push({ method, args })
+    calls.push({ method, args, tree: currentLabel })
     if (method === 'git/panel') return Promise.resolve(OK_PANEL)
     if (method === 'git/branches') return Promise.resolve(branchesReply)
-    if (method === 'git/refs') return Promise.resolve({ ok: true, repo: '/tmp/ws', current: ['main'], local: [{ segments: ['main'], data: 'main' }], remote: [] })
-    if (method === 'git/authors') return Promise.resolve({ ok: true, repo: '/tmp/ws', authors: [] })
-    if (method === 'git/graph') return Promise.resolve({ ok: true, repo: '/tmp/ws', ref: 'main', currentBranch: 'main', commits: [], rows: [], lanes: 0 })
+    if (method === 'git/refs') return Promise.resolve({ ok: true, repo: '/tmp/ws', current: ['main'], local: [{ segments: ['main'], data: 'main' }, { segments: ['feature'], data: 'feature' }, { segments: ['stable'], data: 'stable' }], remote: [] })
+    if (method === 'git/authors') return Promise.resolve({
+      ok: true, repo: '/tmp/ws',
+      authors: [
+        { name: 'mays', email: 'mays@example.com', count: 12 },
+        { name: 'jiangzx', email: 'jiangzx@example.com', count: 30 },
+      ],
+    })
+    /* the graph echoes the ref it was asked for, so the scope is visible in the
+       reply as well as in the request the test records */
+    if (method === 'git/graph') return Promise.resolve({ ok: true, repo: '/tmp/ws', ref: (args && args.ref) || (args && args.allRefs === true ? '' : 'main'), currentBranch: 'main', commits: graphCommits, rows: [], lanes: 1 })
     if (method === 'git/watch') return Promise.resolve({ ok: true, repo: '/tmp/ws', sig: 'SIG' })
-    if (method === 'git/commit-detail') return Promise.resolve({ ok: true, hash: 'a', files: [], branches: [] })
+    if (method === 'git/commit-detail') return Promise.resolve({ ok: true, repo: '/tmp/ws', hash: (args && args.hash) || 'a', subject: 'detail subject', body: '', author: 'mays', date: '2026-09-16', files: [], branches: [] })
     if (method === 'git/flush') return Promise.resolve({ ok: true })
     if (method === 'git/config') return Promise.resolve({ ok: true, path: '/home/u/.dsh/dsh-git-idea.json', config: { initBranch: 'main', cherryPickRecord: false } })
     if (method === 'git/checkout') return Promise.resolve(checkoutReply)
     return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
   },
 }
+/* the history the mock hands back; a test may swap it to simulate a re-read */
+let graphCommits = [
+  { hash: 'aaa111', subject: 'tip commit', author: 'mays', date: '2026-09-16', committedAt: nowSec - 60, refs: ['HEAD -> dev'] },
+  { hash: 'bbb222', subject: 'second commit', author: 'mays', date: '2026-09-15', committedAt: nowSec - 3600, refs: [] },
+  { hash: 'ccc333', subject: 'third commit', author: 'jiangzx', date: '2026-09-14', committedAt: nowSec - 7200, refs: [] },
+]
 const registered = []
 const slots = { inject: (k, cb) => cb(), register: (o, c) => { registered.push({ options: o, component: c }); return () => {} } }
 const ctx = {
@@ -198,7 +247,7 @@ const ctx = {
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
 const styles = { insert: () => () => {} }
-new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
+new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
 const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
@@ -223,7 +272,6 @@ async function openSwitcher() {
 }
 
 const ok = (label, value) => console.log('  ' + (value ? '✓' : '✗') + ' ' + label + (value ? '' : '   ← 不符合预期'))
-
 /* ── 点击面板内部不能把面板关掉（这是一个真实回归） ── */
 
 console.log('== 点面板内部：必须留下 ==')

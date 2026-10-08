@@ -1,6 +1,7 @@
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
-const bridge = fs.readFileSync(new URL('./gp34-bridge-host.js', import.meta.url).pathname, 'utf8')
+const bridge = fs.readFileSync(fileURLToPath(new URL('./gp34-bridge-host.js', import.meta.url)), 'utf8')
 function runShell(spec) {
   return new Promise((res) => {
     /* DSH_HOME 不在这里改：桥就是靠它去找插件源码的。这个套件读的配置因此是真机上那份，

@@ -7,7 +7,17 @@
 export function apply(ctx, config) {
   ctx.inject(['webServer'], function (scope) {
     scope.effect(function () {
-      return scope.webServer.register({ kind: 'exact', path: RPC_PATH, handler: rpcRoute })
+      /* The route answers for itself (rpcRoute), and what it asks the platform
+         is the connection Service: its `requestRejection` is the Host/Origin
+         fence plus the browser session, the same gate every shipped route owner
+         uses. Read at request time rather than captured here, so a composition
+         that brings the carrier up late still gates the route the moment it
+         exists — and a composition without one falls back to the fence alone. */
+      return scope.webServer.register({
+        kind: 'exact',
+        path: RPC_PATH,
+        handler: function (request, response) { return rpcRoute(request, response, ctx.get('connection')) },
+      })
     }, 'dsh-git-idea rpc route')
   })
   return plugin.apply(ctx, config)

@@ -203,7 +203,7 @@ console.log('=== 轮询的监听者按「注册」记，不按「回调函数」
    面板不再认为这是仓库时必然如此；只是关掉面板时，谁先谁后取决于浏览器里两个 slot
    root 的清理顺序，所以在真实使用里是「有时候」——面板反应过来了，对话框上的图标
    一直不动。两个 root 的清理顺序在 mock-React 里复现不出来，所以这条守源码。 */
-const CLIENT_SRC = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const CLIENT_SRC = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 ok('每个注册有自己的键（token），注销只注销自己那一个',
   CLIENT_SRC.indexOf('entry.listeners.set(token, listener)') >= 0
   && CLIENT_SRC.indexOf('entry.listeners.delete(token)') >= 0

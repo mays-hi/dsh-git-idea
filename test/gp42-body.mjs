@@ -241,7 +241,7 @@ ok('刷新键重新读一次同一个文件', diffCalls.length - beforeRefresh =
    完全一样：少了路径，视图会把上一个文件的 patch 留在新文件的名字下面 —— 那是
    最坏的一种错，因为它看起来是对的。现在从列表进差异必然先卸载再挂载，所以这条
    还是预防性的；将来要是把列表和差异摆在一起，它就是承重的。 */
-const sourceText = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const sourceText = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 const shapeSource = sourceText.slice(sourceText.indexOf('function diffShape'), sourceText.indexOf('function hunkHeader'))
 console.log('')
 console.log('== 源码规矩 ==')
@@ -710,7 +710,7 @@ ok('视图开关住在面板头部（最右端），不再自己占一行',
   && textOf(byClass(tree, 'dsh-git-clist')[0]).indexOf('扁平') < 0)
 /* 布局是 CSS 的事，量不到（这一套没有真的排版引擎）：钉住那两条规则本身 ——
    一行把开关推到最右端，另一行让目录压暗、和名字隔开 8px。 */
-const panelCss = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const panelCss = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 ok('样式把开关推到头部那一行的最右端（margin-left:auto）',
   /\.dsh-git-cviews\{[^}]*margin-left:auto/.test(panelCss))
 ok('扁平的目录格是压暗的小字、和名字隔开（.dsh-git-tpath 的二级色 + margin-left）',

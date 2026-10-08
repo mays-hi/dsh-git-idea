@@ -183,10 +183,32 @@
         h('div', { className: 'dsh-git-set-row' },
           h('span', { className: 'dsh-git-set-label' }, ''),
           h('span', { className: found === true ? 'dsh-git-set-hint' : 'dsh-git-set-hint dsh-git-warn' }, verdict)),
+        shellRow(tool),
         h('div', { className: 'dsh-git-set-row' },
           h('span', { className: 'dsh-git-set-label' }, ''),
           h('button', { type: 'button', className: 'dsh-git-btn', onClick: probe }, '再检查一次'),
           h('span', { className: 'dsh-git-set-hint' }, '面板读、写、初始化用的都是这一个')))
+    }
+
+    /* ── 这些命令由谁读 ──
+
+       Linux/macOS 上没什么可说的：shell 自己就是 bash，脚本原样交给它。Windows 上 DSH
+       的 shell 是 pwsh，而插件的每一条命令都是 POSIX 脚本 —— 它们要由一个真的 POSIX
+       shell 读（Git for Windows 的 sh.exe）。找不到它时面板一行都读不出来，屏幕上那句
+       「目录不存在」看不出是这个原因，所以这一行必须说。 */
+    function shellRow(tool) {
+      if (tool == null || tool.shell == null) return null
+      const shell = tool.shell
+      if (shell.kind === 'native') return null
+      const none = shell.kind !== 'git-sh'
+      return h('div', { className: 'dsh-git-set-row' },
+        h('span', { className: 'dsh-git-set-label' }, '读命令的 shell'),
+        h('span', { className: none ? 'dsh-git-set-hint dsh-git-warn' : 'dsh-git-set-hint' },
+          none
+            ? 'Windows 上这个插件的命令要由 POSIX shell 读，而没找到 Git for Windows 的 sh.exe：'
+              + '找过 Git 的三个默认安装点，也找过 PATH 上每个 git.exe 旁边的 usr\\bin。'
+              + '装上 Git for Windows（或把它的 cmd 目录放进 PATH），面板才能读到仓库。'
+            : shell.path + '（Git for Windows）'))
     }
 
     function GitSettingsSection(props) {

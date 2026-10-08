@@ -4,10 +4,11 @@
    不带参数时用几个本机真实仓库。每个仓库先 flush 一次，逐个量第一条（冷）
    与第二条（热）的耗时 —— 冷的那条就是切工作区时用户看到的那一段。 */
 
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 
-const body = fs.readFileSync(new URL('../host.js', import.meta.url).pathname, 'utf8')
+const body = fs.readFileSync(fileURLToPath(new URL('../host.js', import.meta.url)), 'utf8')
 
 function runShell(spec) {
   return new Promise((res) => {

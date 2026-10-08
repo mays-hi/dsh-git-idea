@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 
 /* ── the miniature React again (the restart emptied /tmp) ── */
@@ -70,13 +71,6 @@ function textOf(node) {
   if (Array.isArray(node)) return node.map(textOf).join('')
   if (node.props === undefined) return ''
   return textOf(node.props.children)
-}
-function walk(node, visit) {
-  if (node === null || node === undefined || typeof node !== 'object') return
-  if (Array.isArray(node)) { node.forEach((c) => walk(c, visit)); return }
-  visit(node)
-  const kids = node.props !== undefined && Array.isArray(node.props.children) ? node.props.children : []
-  kids.forEach((c) => walk(c, visit))
 }
 function collect(node, out = []) {
   if (node == null || typeof node !== 'object') return out
@@ -189,7 +183,7 @@ const ctx = {
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
 const styles = { insert: () => () => {} }
-new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
+new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
 const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component

@@ -9,11 +9,12 @@
    \`harness\` shim and \`host.call\`. Edit src/, then run this, then run
    build.mjs; both artifacts must stay current. */
 
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
-import { TARGETS } from './build.mjs'
+import { TARGETS, normalize } from './build.mjs'
 
-const ROOT = path.dirname(new URL(import.meta.url).pathname)
+const ROOT = path.dirname(fileURLToPath(import.meta.url))
 
 function partsOf(out) {
   const target = TARGETS.find(function (row) { return row.out === out })
@@ -41,7 +42,7 @@ export const PACKAGE_TARGETS = [
 function read(rel) {
   const file = path.join(ROOT, rel)
   if (!fs.existsSync(file)) throw new Error('missing source fragment: ' + rel)
-  return fs.readFileSync(file, 'utf8')
+  return normalize(fs.readFileSync(file, 'utf8'))
 }
 
 export function render(target) {
@@ -57,7 +58,7 @@ export function buildAll(write) {
   for (const target of PACKAGE_TARGETS) {
     const next = render(target)
     const file = path.join(ROOT, target.out)
-    const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
+    const current = fs.existsSync(file) ? normalize(fs.readFileSync(file, 'utf8')) : null
     const stale = current !== next
     if (write && stale) {
       fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -68,7 +69,7 @@ export function buildAll(write) {
   return report
 }
 
-const invokedDirectly = process.argv[1] !== undefined && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)
+const invokedDirectly = process.argv[1] !== undefined && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
 if (invokedDirectly) {
   const check = process.argv.indexOf('--check') >= 0
   const report = buildAll(check !== true)

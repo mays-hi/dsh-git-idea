@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 
 /* ── the miniature React again (the restart emptied /tmp) ── */
@@ -104,13 +105,6 @@ function textOf(node) {
   if (node.props === undefined) return ''
   return textOf(node.props.children)
 }
-function walk(node, visit) {
-  if (node === null || node === undefined || typeof node !== 'object') return
-  if (Array.isArray(node)) { node.forEach((c) => walk(c, visit)); return }
-  visit(node)
-  const kids = node.props !== undefined && Array.isArray(node.props.children) ? node.props.children : []
-  kids.forEach((c) => walk(c, visit))
-}
 function collect(node, out = []) {
   if (node == null || typeof node !== 'object') return out
   if (Array.isArray(node)) { node.forEach((c) => collect(c, out)); return out }
@@ -128,7 +122,12 @@ const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexO
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
 const groups = (t) => byClass(t, 'dsh-git-bs-group')
 
+/* 这两行是给 gp35 的「这次读是哪棵树发的」用的：harness 把最近一次 render 的 label
+   记在每条 RPC 上，套件据此把「面板的重读」和「芯片自己那次状态读」分开。别的套件
+   不看这个字段。 */
+let currentLabel = ''
 function renderRoot(element, label) {
+  currentLabel = label
   const pending = []
   const render = (node, path) => {
     if (node === null || node === undefined) return null
@@ -206,7 +205,7 @@ const branchesReply = {
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
   call(method, args) {
-    calls.push({ method, args })
+    calls.push({ method, args, tree: currentLabel })
     if (method === 'git/panel') return Promise.resolve(OK_PANEL)
     if (method === 'git/branches') return Promise.resolve(branchesReply)
     if (method === 'git/refs') return Promise.resolve({ ok: true, repo: '/tmp/ws', current: ['main'], local: [{ segments: ['main'], data: 'main' }, { segments: ['feature'], data: 'feature' }, { segments: ['stable'], data: 'stable' }], remote: [] })
@@ -248,7 +247,7 @@ const ctx = {
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
 const styles = { insert: () => () => {} }
-new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
+new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
 const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
@@ -478,7 +477,7 @@ console.log('=== 轮询的监听者按「注册」记，不按「回调函数」
    面板不再认为这是仓库时必然如此；只是关掉面板时，谁先谁后取决于浏览器里两个 slot
    root 的清理顺序，所以在真实使用里是「有时候」——面板反应过来了，对话框上的图标
    一直不动。两个 root 的清理顺序在 mock-React 里复现不出来，所以这条守源码。 */
-const CLIENT_SRC = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const CLIENT_SRC = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 ok('每个注册有自己的键（token），注销只注销自己那一个',
   CLIENT_SRC.indexOf('entry.listeners.set(token, listener)') >= 0
   && CLIENT_SRC.indexOf('entry.listeners.delete(token)') >= 0

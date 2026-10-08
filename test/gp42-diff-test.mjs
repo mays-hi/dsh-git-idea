@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 
 /* ── the miniature React again (the restart emptied /tmp) ── */
@@ -104,13 +105,6 @@ function textOf(node) {
   if (node.props === undefined) return ''
   return textOf(node.props.children)
 }
-function walk(node, visit) {
-  if (node === null || node === undefined || typeof node !== 'object') return
-  if (Array.isArray(node)) { node.forEach((c) => walk(c, visit)); return }
-  visit(node)
-  const kids = node.props !== undefined && Array.isArray(node.props.children) ? node.props.children : []
-  kids.forEach((c) => walk(c, visit))
-}
 function collect(node, out = []) {
   if (node == null || typeof node !== 'object') return out
   if (Array.isArray(node)) { node.forEach((c) => collect(c, out)); return out }
@@ -128,7 +122,12 @@ const branchRows = (t) => rows(t).filter((r) => String(r.props.className).indexO
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
 const groups = (t) => byClass(t, 'dsh-git-bs-group')
 
+/* 这两行是给 gp35 的「这次读是哪棵树发的」用的：harness 把最近一次 render 的 label
+   记在每条 RPC 上，套件据此把「面板的重读」和「芯片自己那次状态读」分开。别的套件
+   不看这个字段。 */
+let currentLabel = ''
 function renderRoot(element, label) {
+  currentLabel = label
   const pending = []
   const render = (node, path) => {
     if (node === null || node === undefined) return null
@@ -206,7 +205,7 @@ const branchesReply = {
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
   call(method, args) {
-    calls.push({ method, args })
+    calls.push({ method, args, tree: currentLabel })
     if (method === 'git/panel') return Promise.resolve(OK_PANEL)
     if (method === 'git/branches') return Promise.resolve(branchesReply)
     if (method === 'git/refs') return Promise.resolve({ ok: true, repo: '/tmp/ws', current: ['main'], local: [{ segments: ['main'], data: 'main' }, { segments: ['feature'], data: 'feature' }, { segments: ['stable'], data: 'stable' }], remote: [] })
@@ -248,7 +247,7 @@ const ctx = {
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
 }
 const styles = { insert: () => () => {} }
-new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8'))(
+new Function('ctx', 'React', 'host', 'styles', 'console', fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8'))(
   ctx, React, host, styles, console).apply(ctx)
 
 const chip = registered.find((r) => r.options.id === 'dsh-git-idea-chip').component
@@ -516,7 +515,7 @@ ok('刷新键重新读一次同一个文件', diffCalls.length - beforeRefresh =
    完全一样：少了路径，视图会把上一个文件的 patch 留在新文件的名字下面 —— 那是
    最坏的一种错，因为它看起来是对的。现在从列表进差异必然先卸载再挂载，所以这条
    还是预防性的；将来要是把列表和差异摆在一起，它就是承重的。 */
-const sourceText = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const sourceText = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 const shapeSource = sourceText.slice(sourceText.indexOf('function diffShape'), sourceText.indexOf('function hunkHeader'))
 console.log('')
 console.log('== 源码规矩 ==')
@@ -985,7 +984,7 @@ ok('视图开关住在面板头部（最右端），不再自己占一行',
   && textOf(byClass(tree, 'dsh-git-clist')[0]).indexOf('扁平') < 0)
 /* 布局是 CSS 的事，量不到（这一套没有真的排版引擎）：钉住那两条规则本身 ——
    一行把开关推到最右端，另一行让目录压暗、和名字隔开 8px。 */
-const panelCss = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const panelCss = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 ok('样式把开关推到头部那一行的最右端（margin-left:auto）',
   /\.dsh-git-cviews\{[^}]*margin-left:auto/.test(panelCss))
 ok('扁平的目录格是压暗的小字、和名字隔开（.dsh-git-tpath 的二级色 + margin-left）',

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* The six gp3x suites are one shared harness plus a body, and the benchmarks are
+/* The gp3x suites are one shared harness plus a body, and the benchmarks are
    the same shape. This glues them, with the newline the earlier by-hand
    concatenation happened to get away with not having.
 
@@ -9,12 +9,16 @@
    body edited without re-gluing would otherwise leave the suite asserting what
    the body said last time, and nothing inside a suite can see that. */
 
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
+import { normalize } from '../build.mjs'
 
-const HERE = path.dirname(new URL(import.meta.url).pathname)
+const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 export const SUITES = [
+  ['gp35-body.mjs', 'gp35-panel-test.mjs'],
+  ['gp36-body.mjs', 'gp36-click-test.mjs'],
   ['gp37-body.mjs', 'gp37-logpanel-test.mjs'],
   ['gp38-body.mjs', 'gp38-flyout-test.mjs'],
   ['gp39-body.mjs', 'gp39-session-test.mjs'],
@@ -28,8 +32,8 @@ export const SUITES = [
 ]
 
 export function render(body) {
-  const harness = fs.readFileSync(path.join(HERE, 'gp37-harness.part'), 'utf8')
-  return harness + '\n' + fs.readFileSync(path.join(HERE, body), 'utf8')
+  const harness = normalize(fs.readFileSync(path.join(HERE, 'gp37-harness.part'), 'utf8'))
+  return harness + '\n' + normalize(fs.readFileSync(path.join(HERE, body), 'utf8'))
 }
 
 export function buildAll(write) {
@@ -37,7 +41,7 @@ export function buildAll(write) {
   for (const [body, out] of SUITES) {
     const next = render(body)
     const file = path.join(HERE, out)
-    const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
+    const current = fs.existsSync(file) ? normalize(fs.readFileSync(file, 'utf8')) : null
     const stale = current !== next
     if (write && stale) fs.writeFileSync(file, next)
     report.push({ out: out, stale: stale, bytes: Buffer.byteLength(next) })
@@ -45,7 +49,7 @@ export function buildAll(write) {
   return report
 }
 
-const invokedDirectly = process.argv[1] !== undefined && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)
+const invokedDirectly = process.argv[1] !== undefined && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
 if (invokedDirectly) {
   const check = process.argv.indexOf('--check') >= 0
   const report = buildAll(check !== true)

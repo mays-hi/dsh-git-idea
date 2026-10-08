@@ -1,4 +1,5 @@
 /* 新旧签名在真仓库上的代价对比：多读一个 HEAD 文件应该等于零成本 */
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 
@@ -22,7 +23,7 @@ function load(file) {
 
 const repo = process.argv[2] || '/mnt/d/work/idea_work/holox_cloud'
 const N = 9
-for (const [label, file] of [['旧（只 stat）', '/tmp/gp-before-host.js'], ['新（读 HEAD 内容）', new URL('../host.js', import.meta.url).pathname]]) {
+for (const [label, file] of [['旧（只 stat）', '/tmp/gp-before-host.js'], ['新（读 HEAD 内容）', fileURLToPath(new URL('../host.js', import.meta.url))]]) {
   const watch = load(file)
   await watch(repo) /* 预热 */
   const times = []

@@ -6,11 +6,12 @@
    glued from. Both are failures this layout can produce and no assertion inside
    a suite can see. */
 
+import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
 
-const HERE = path.dirname(new URL(import.meta.url).pathname)
+const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.dirname(HERE)
 
 /* Suites that count ✓ / ✗ in their output. */
@@ -26,9 +27,19 @@ const COUNTING = [
   'gp42-diff-test.mjs',
   'gp43-settings-test.mjs',
   'gp44-shared-test.mjs',
+  'gp45-rpc-gate-test.mjs',
+  'gp46-windows-shell-test.mjs',
+  'gp47-posix-path-test.mjs',
 ]
 /* Suites that report by exit code and print their own lines. */
 const PROSE = ['gp34a-host-test.mjs', 'gp34d-config-test.mjs', 'gp34e-bridge-test.mjs']
+/* The three prose suites drive real git through `sh -c` inside /tmp: they are
+   the Host half's integration tests and they are Unix-shaped. On Windows they do
+   not fail an assertion, they fail to start (`spawn sh ENOENT`, no /tmp), so they
+   are reported as skipped rather than counted as broken — a green summary that
+   hid three unrunnable suites would be worse than one that names them. */
+const UNIX_ONLY = process.platform !== 'win32'
+const SKIPPED = UNIX_ONLY ? [] : PROSE.slice()
 
 function run(file) {
   const started = Date.now()
@@ -81,7 +92,7 @@ if (gap !== null) {
 let passed = 0
 let failed = 0
 let broken = 0
-for (const file of COUNTING.concat(PROSE)) {
+for (const file of COUNTING.concat(UNIX_ONLY ? PROSE : [])) {
   const row = run(file)
   passed += row.passed
   failed += row.failed
@@ -93,8 +104,12 @@ for (const file of COUNTING.concat(PROSE)) {
     console.log(row.out.split('\n').filter((line) => line.indexOf('✗') >= 0 || line.indexOf('Error') >= 0).slice(0, 20).join('\n'))
   }
 }
+for (const file of SKIPPED) {
+  console.log('  ' + file.padEnd(24) + 'skipped'.padEnd(14) + 'needs `sh` and /tmp (Unix-only)')
+}
 console.log('')
-console.log('assertions: ' + passed + ' ✓  ' + failed + ' ✗      suites with a problem: ' + broken)
-const summary = JSON.stringify({ passed: passed, failed: failed, broken: broken, at: new Date().toISOString() })
+console.log('assertions: ' + passed + ' ✓  ' + failed + ' ✗      suites with a problem: ' + broken
+  + (SKIPPED.length > 0 ? '      skipped on this platform: ' + SKIPPED.length : ''))
+const summary = JSON.stringify({ passed: passed, failed: failed, broken: broken, skipped: SKIPPED.slice(), at: new Date().toISOString() })
 fs.writeFileSync(path.join(HERE, '.last-run.json'), summary + '\n')
 process.exit(failed > 0 || broken > 0 ? 1 : 0)

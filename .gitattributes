@@ -1,0 +1,6 @@
+# Check every text file out as LF. On Windows the default core.autocrlf=true
+# hands the src/ fragments back as CRLF while the committed artifacts are LF,
+# which is why build.mjs has to normalize() both sides before comparing. That
+# normalization stays as a second safety net; this file removes the source of
+# the mismatch.
+* text=auto eol=lf

@@ -2,7 +2,7 @@
 /* ── 左侧分支树：单击只选中，双击才联动中间的历史 ── */
 
 /* 样式由 styles.insert 注入，测试里拿不到，预算要用的数字直接从源文件读 */
-const sourceCss = fs.readFileSync(process.env.GP_SRC || new URL('../client.js', import.meta.url).pathname, 'utf8')
+const sourceCss = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 
 const treeRows = (t) => collect(t).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf('dsh-git-trow') >= 0)
 const trowWith = (t, label) => treeRows(t).find((n) => textOf(n) === label)

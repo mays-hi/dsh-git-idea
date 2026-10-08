@@ -9,7 +9,7 @@
 
 | | |
 |---|---|
-| 当前版本 | **0.2.6** |
+| 当前版本 | **0.2.7** |
 | 下载 / 安装 | `dsh plugin --profile web add dsh-git-idea`（npm）· `github:mays-hi/dsh-git-idea`（GitHub）· 本地目录 |
 | 依赖 | DSH `>=0.1.5-rc.1`（`engines.dsh`，只声明最低版本）；`@deepseek-ai/cordis ^4.0.2`（peer） |
 | 仓库 | <https://github.com/mays-hi/dsh-git-idea> |
@@ -29,6 +29,30 @@ dsh plugin --profile web add /path/to/dsh-git-idea            # 本地
 装完**重启 `dsh web`**。报 `ERR_PNPM_ADDING_TO_ROOT` 就在包名前加 `-w`。
 
 > 已经跑着旧版动态插件（`<DSH_HOME>/dsh-git-idea` 那个桥）就先停掉 —— 两个都装着就是两份 chip、两个面板抢同一个 slot。
+
+---
+
+## 跑在哪儿
+
+### DSH 桌面端（`dsh-app://app`）
+
+面板的每一次读都走 `POST /dsh-git-idea/rpc`。桌面端不是把这个地址服务给浏览器，而是由 Electron 主进程把它代理给 Host：它删掉 `origin`（和 `sec-fetch-site`），改用 Host 自己那张 cookie 重新认证，再转过去。
+
+所以判据不能是「带没带 Origin」。现在问的是平台自己那道门 —— `connection.requestRejection`，也就是 `/api` 走的同一条：Host/Origin 围栏（authority 必须是 loopback，或这份部署信任的）加浏览器会话。装在没有这个 Service 的组合里时退回到围栏本身（跨站标记被拒、Origin 必须与 authority 一致、**没有 Origin 是正常的**）。
+
+> 旧版在这里要求「Origin 必须存在且等于 Host」，于是桌面端的每一条请求都被判 403，`git/panel` 一行都回不来 —— 点开 chip 看到的就是一个空面板。
+
+### Windows：脚本由谁来读
+
+这个插件的每一条命令都是一个 POSIX `sh` 脚本（`[ -d … ]`、`printf`、`command -v`）。DSH 的 shell 抽象在 Linux/macOS 上由 bash 实现，在 Windows 上由 pwsh 实现 —— 同一个字符串交给 PowerShell 就是一个解析错误，于是每一次读都会变成「这个目录不存在」/「这台机器上找不到 git」。
+
+Windows 上 DSH 的 `shell` 默认由 pwsh 实现，而插件的每一条命令都是 POSIX `sh` 脚本 —— 同一个字符串交给 PowerShell 就是一个解析错误。但那是**这个部署的选择**，不是平台的：`shell` 是「抽象 bash 执行服务」，同一个 Windows 上也可以装配 bash 那一半。所以先问一句这个 shell 是什么语言（`$PSVersionTable`）：它自己就读得懂 POSIX 时，脚本原样交给它，和别的平台走同一条路。
+
+读出是 PowerShell 时，脚本交给一个真的 POSIX shell：Git for Windows 自带的 `usr/bin/sh.exe`。它在三个默认安装点里找，也在**这台机器 PATH 上每个 `git.exe` 旁边**的 `usr\bin` 里找（装在 Scoop / Chocolatey / IDE 自带 / 自定义目录的 Git 靠这一条）；故意不拿 PATH 上那个 `bash` —— 它是 WSL 的，看不到 `D:\` 这样的路径。脚本走 stdin，命令行走的还是同一条 shell 通道，工作目录、超时、输出上限、沙箱策略一样都不少。
+
+找不到 `sh.exe` 时照旧把脚本原样交出去（与加这段之前完全一致，不换一种坏法），而设置页的「读命令的 shell」那一行会直说这件事 —— 否则屏幕上只有「目录不存在」，指不到真正的原因。
+
+别的平台上这一整段不生效：`shell` 本来就是 bash。
 
 ---
 
@@ -231,13 +255,17 @@ Settings → **dsh-git-idea配置**。
 ```sh
 node build-package.mjs          # 正式包：lib/index.js + client/client.js
 node build.mjs                  # 动态桥：host.js + client.js
-node test/run-all.mjs           # 全部断言（829 条）
+node test/run-all.mjs           # 全部断言（跑得了的都跑，Unix 形状的按平台跳过）
 node build.mjs --check && node build-package.mjs --check   # 产物是否最新
 node test/bench.mjs             # 基准：200 条提交的历史列表
 node test/bench-branch.mjs      # 基准：300 个分支的切换器
 ```
 
 `test/run-all.mjs` 跑断言前先检查三样东西是否落后于源码：动态桥产物、正式包产物、每个套件文件。
+
+有三条套件要分清跑在哪：gp45 用真的 HTTP 请求问那道门（桌面端转过来的那种不带 origin 的请求必须进得来），gp47 把 process.platform 站到 POSIX 上、用一个真的 POSIX shell（Windows 借 Git 的 sh.exe，Linux/macOS 用 /bin/sh），断言插件交给它的还是**原样那段脚本** —— 这两条到处都跑；gp46 只在 Windows 上跑（用真的 PowerShell 驱动真的 git，证明封装之后读得出来），别处一句话退出。
+
+gp34a/gp34d/gp34e 靠 sh -c 和 /tmp 驱动真 git，是 Unix 形状的：Windows 上 run-all 把它们报成 skipped 而不是算成失败；Linux/macOS 上它们照常跑，所以那边的断言总数比 Windows 多。
 
 ![验证快照：829 条断言全绿，以及性能对照](docs/panel-verify.png)
 

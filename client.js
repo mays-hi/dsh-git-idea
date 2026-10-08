@@ -1175,8 +1175,14 @@ return {
 .dsh-git-detail-foot{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:11px}
 /* IDEA's log toolbar: a bordered search box, then the filters as inline
    "name: value" triggers that each clear themselves. Nothing else is a box, and
-   there is no second filter row, so the graph keeps that height. */
-.dsh-git-logsearch{display:inline-flex;align-items:center;gap:4px;flex:1 1 120px;min-width:80px;max-width:240px;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base)}
+   there is no second filter row, so the graph keeps that height.
+
+   Every part of this strip is fixed-width except the search box and the filters,
+   and the four commit actions at the end are the last thing that should ever
+   move: when a branch name makes the row too long, the things that can give way
+   do — the search shrinks and the filter chips clip — rather than the actions
+   dropping onto a second line under the filters they belong beside. */
+.dsh-git-logsearch{display:inline-flex;align-items:center;gap:4px;flex:0 1 170px;min-width:80px;max-width:240px;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base)}
 .dsh-git-logsearch:focus-within{border-color:var(--dsw-alias-brand-primary)}
 .dsh-git-logsearch-ico{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
 .dsh-git-logsearch-input{flex:1 1 auto;width:auto;min-width:0;border:0;background:transparent;outline:none;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);padding:2px 0}
@@ -1296,12 +1302,6 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
 .dsh-git-danger{color:var(--dsw-alias-state-error-primary)}
 .dsh-git-tools{position:relative;flex:none;display:flex;align-items:center;gap:3px;flex-wrap:nowrap;padding:5px 52px 5px 7px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
-/* Every part of this strip is fixed-width except the search box and the filters,
-   and the four commit actions at the end are the last thing that should ever
-   move: when a branch name makes the row too long, the things that can give way
-   do — the search shrinks and the filter chips clip — rather than the actions
-   dropping onto a second line under the filters they belong beside. */
-.dsh-git-logsearch{flex:0 1 170px}
 .dsh-git-tool{display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:0 0;color:var(--dsw-alias-label-primary);border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit;cursor:pointer;flex:none;line-height:16px}
 .dsh-git-tool:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-tool:disabled{opacity:.4;cursor:default}
@@ -1329,7 +1329,6 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-grip-ne{right:0;top:0;width:12px;height:12px;cursor:nesw-resize}
 .dsh-git-grip:hover{background:var(--dsw-alias-brand-primary);opacity:.3}
 .dsh-git-sync{display:flex;align-items:center;gap:2px;flex:none}
-.dsh-git-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px}
 .dsh-git-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .dsh-git-ab{flex:none;font-size:10px;font-weight:600}
 /* IDEA's key, and now its colours: a branch with commits waiting on the remote
@@ -5195,10 +5194,32 @@ textarea.dsh-git-input{resize:vertical}
         h('div', { className: 'dsh-git-set-row' },
           h('span', { className: 'dsh-git-set-label' }, ''),
           h('span', { className: found === true ? 'dsh-git-set-hint' : 'dsh-git-set-hint dsh-git-warn' }, verdict)),
+        shellRow(tool),
         h('div', { className: 'dsh-git-set-row' },
           h('span', { className: 'dsh-git-set-label' }, ''),
           h('button', { type: 'button', className: 'dsh-git-btn', onClick: probe }, '再检查一次'),
           h('span', { className: 'dsh-git-set-hint' }, '面板读、写、初始化用的都是这一个')))
+    }
+
+    /* ── 这些命令由谁读 ──
+
+       Linux/macOS 上没什么可说的：shell 自己就是 bash，脚本原样交给它。Windows 上 DSH
+       的 shell 是 pwsh，而插件的每一条命令都是 POSIX 脚本 —— 它们要由一个真的 POSIX
+       shell 读（Git for Windows 的 sh.exe）。找不到它时面板一行都读不出来，屏幕上那句
+       「目录不存在」看不出是这个原因，所以这一行必须说。 */
+    function shellRow(tool) {
+      if (tool == null || tool.shell == null) return null
+      const shell = tool.shell
+      if (shell.kind === 'native') return null
+      const none = shell.kind !== 'git-sh'
+      return h('div', { className: 'dsh-git-set-row' },
+        h('span', { className: 'dsh-git-set-label' }, '读命令的 shell'),
+        h('span', { className: none ? 'dsh-git-set-hint dsh-git-warn' : 'dsh-git-set-hint' },
+          none
+            ? 'Windows 上这个插件的命令要由 POSIX shell 读，而没找到 Git for Windows 的 sh.exe：'
+              + '找过 Git 的三个默认安装点，也找过 PATH 上每个 git.exe 旁边的 usr\\bin。'
+              + '装上 Git for Windows（或把它的 cmd 目录放进 PATH），面板才能读到仓库。'
+            : shell.path + '（Git for Windows）'))
     }
 
     function GitSettingsSection(props) {

@@ -77,5 +77,8 @@ async function toolchainSnapshot() {
     found: resolved.length > 0,
     reason: reason,
     platform: probe.exitCode === 0 ? 'ok' : 'probe-failed',
+    /* 这些命令由谁读。Linux/macOS 上就是 shell 自己（bash）；Windows 上是 Git 的
+       sh.exe，找不到时面板一行都读不出来 —— 设置页拿这一行说清为什么。 */
+    shell: posixShellSnapshot(),
   }
 }

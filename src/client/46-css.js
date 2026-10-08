@@ -29,8 +29,14 @@
 .dsh-git-detail-foot{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:11px}
 /* IDEA's log toolbar: a bordered search box, then the filters as inline
    "name: value" triggers that each clear themselves. Nothing else is a box, and
-   there is no second filter row, so the graph keeps that height. */
-.dsh-git-logsearch{display:inline-flex;align-items:center;gap:4px;flex:1 1 120px;min-width:80px;max-width:240px;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base)}
+   there is no second filter row, so the graph keeps that height.
+
+   Every part of this strip is fixed-width except the search box and the filters,
+   and the four commit actions at the end are the last thing that should ever
+   move: when a branch name makes the row too long, the things that can give way
+   do — the search shrinks and the filter chips clip — rather than the actions
+   dropping onto a second line under the filters they belong beside. */
+.dsh-git-logsearch{display:inline-flex;align-items:center;gap:4px;flex:0 1 170px;min-width:80px;max-width:240px;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base)}
 .dsh-git-logsearch:focus-within{border-color:var(--dsw-alias-brand-primary)}
 .dsh-git-logsearch-ico{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
 .dsh-git-logsearch-input{flex:1 1 auto;width:auto;min-width:0;border:0;background:transparent;outline:none;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);padding:2px 0}
@@ -150,12 +156,6 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
 .dsh-git-danger{color:var(--dsw-alias-state-error-primary)}
 .dsh-git-tools{position:relative;flex:none;display:flex;align-items:center;gap:3px;flex-wrap:nowrap;padding:5px 52px 5px 7px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
-/* Every part of this strip is fixed-width except the search box and the filters,
-   and the four commit actions at the end are the last thing that should ever
-   move: when a branch name makes the row too long, the things that can give way
-   do — the search shrinks and the filter chips clip — rather than the actions
-   dropping onto a second line under the filters they belong beside. */
-.dsh-git-logsearch{flex:0 1 170px}
 .dsh-git-tool{display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:0 0;color:var(--dsw-alias-label-primary);border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit;cursor:pointer;flex:none;line-height:16px}
 .dsh-git-tool:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-tool:disabled{opacity:.4;cursor:default}
@@ -183,7 +183,6 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-grip-ne{right:0;top:0;width:12px;height:12px;cursor:nesw-resize}
 .dsh-git-grip:hover{background:var(--dsw-alias-brand-primary);opacity:.3}
 .dsh-git-sync{display:flex;align-items:center;gap:2px;flex:none}
-.dsh-git-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px}
 .dsh-git-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .dsh-git-ab{flex:none;font-size:10px;font-weight:600}
 /* IDEA's key, and now its colours: a branch with commits waiting on the remote
