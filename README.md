@@ -4,12 +4,13 @@
 
 **不向 DSH 注册任何模型工具**（模型要跑 git 本来就有 `bash`，见[不注册工具](#不注册工具)）。
 **面板属于会话，不属于窗口**：同一页面里的每个会话各看各的工作区。
+**看得见 DSH 的工作树**：模型用官方的 `create_worktree` 把会话搬进一棵链接工作树之后，chip 和面板跟着搬过去（分支、改动、历史都是那一棵的），头上多一颗工作树身份，另有一个「工作树」页签列出这个仓库的全部树。插件**不建树、不删树、不搬会话**，只把已经发生的事说清楚 —— 见[工作树](#工作树)。
 
-> Git integration for DeepSeek Harness, modelled on IDEA's VCS — a git icon beside the permission mode in the composer (branch + pending count), a branch switcher on hover, an IDEA-style VCS panel on click, and a settings page. Registers no model tools with DSH.
+> Git integration for DeepSeek Harness, modelled on IDEA's VCS — a git icon beside the permission mode in the composer (branch + pending count), a branch switcher on hover, an IDEA-style VCS panel on click, and a settings page. Registers no model tools with DSH, and follows a session into the worktree DSH's `create_worktree` moved it to.
 
 | | |
 |---|---|
-| 当前版本 | **0.2.7** |
+| 当前版本 | **0.2.8** |
 | 下载 / 安装 | `dsh plugin --profile web add dsh-git-idea`（npm）· `github:mays-hi/dsh-git-idea`（GitHub）· 本地目录 |
 | 依赖 | DSH `>=0.1.5-rc.1`（`engines.dsh`，只声明最低版本）；`@deepseek-ai/cordis ^4.0.2`（peer） |
 | 仓库 | <https://github.com/mays-hi/dsh-git-idea> |
@@ -18,7 +19,11 @@
 
 ## 安装
 
-要求 DSH `>=0.1.5-rc.1`（只声明最低版本；peer：`@deepseek-ai/cordis ^4.0.2`）。DSH 0.1.7 把执行器的一次性 `run(spec)` 换成了 `execute(spec)` 加 `result()`，Host 那一半两种形状都认 —— 0.1.5/0.1.6 和 0.1.7+ 装的是同一份包。0.1.7 的 `sessions.get` 也只回答活着的会话，解析会话工作区时会退到 `sessionPersistence` 读会话头，刚选中、还在恢复的会话因此也能读到。
+要求 DSH `>=0.1.5-rc.1`（只声明最低版本；peer：`@deepseek-ai/cordis ^4.0.2`）。同一份包在 0.1.5 到 0.2 上都能跑，靠的是三处各自探测：
+
+* **执行器**：0.1.7 把一次性 `run(spec)` 换成了 `execute(spec)` 加 `result()` —— 两种形状都认；
+* **会话工作区**：0.1.7 的 `sessions.get` 只回答活着的会话 —— 解析不到时退到 `sessionPersistence` 读会话头，刚选中、还在恢复的会话因此也能读到；
+* **生效目录与工作树**：0.2 起会话的目录可以移动（`SessionHeader.cwd` 保留原始项目，`workingDirectory` 投影说现在在哪），官方还给了 `create_worktree` —— 插件优先读那个投影，没有它时退回监听 `session/event` 上的 `working-directory/change`，再退回会话头。工作树清单要 `git worktree list`，与 DSH 版本无关。
 
 ```sh
 dsh plugin --profile web add dsh-git-idea                    # npm
@@ -62,14 +67,14 @@ Windows 上 DSH 的 `shell` 默认由 pwsh 实现，而插件的每一条命令�
 
 | 操作 | 结果 |
 |---|---|
-| 看 | 当前分支 + 未提交文件数（`工作区干净` / `3 个改动`） |
+| 看 | 当前分支 + 未提交文件数（干净时只有一个分支名，有改动时是 `3` 那个徽标）。不在仓库里时**直接写出原因**：`不是仓库` / `没有 git` / `目录不存在` / `不是目录` / `选择目录` / `读取失败`。还没量完、或者正在切分支时，**最前面那一格变成一个转圈的圆环**，忙完换回该出现的那一颗（在工作树里就是工作树字形）—— 状态用"在动"说，不在后面加字（加字会把分支名往左挤） |
 | 悬停 | 分支切换卡片，点一下切过去（可在设置里关） |
 | 点击 | 开 / 收面板 |
 
 ### 面板
 
 ```
-变更 3 │ 历史    ⟳ ⇣ ↓ ↑    feature-risk ↑2 ↓1    树 扁平
+变更 3 │ 历史   ⟳刷新 ⇣获取 ↓拉取 ↑推送   feature-risk ↑2 ↓1   树 扁平
 ─────────────┬──────────────────────┬──────────────────────
 分支树        │ 变更树 / 提交列表      │ 差异 / 提交详情 /
 HEAD 本地 远程 │                      │ 提交信息与提交按钮
@@ -77,10 +82,24 @@ HEAD 本地 远程 │                      │ 提交信息与提交按钮
 
 | 区域 | 内容 |
 |---|---|
-| 顶栏 | `变更`（带数量）/ `历史` 页签；`⟳` 重读、`⇣` fetch、`↓` pull、`↑` push（带领先/落后角标）；中间是当前分支，点开切换器；右端「树 / 扁平」切换变更页视图 |
+| 顶栏 | `变更`（带数量）/ `历史` / `工作树`（超过一棵时带数量）页签；`⟳刷新` 重读、`⇣获取` fetch、`↓拉取` pull、`↑推送` push（带领先/落后角标）；中间是当前分支，点开切换器；右端「树 / 扁平」切换变更页视图 |
 | 左栏 | 分支树：`HEAD` / `本地` / `远程`，带搜索、收藏、排序；行尾 `›` 是该分支的动作（检出、从此分支新建分支、合并到当前分支、删除） |
 | 中栏 | `变更` 页是工作区，`历史` 页是提交列表 + 提交图 |
 | 右栏 | 差异 patch / 提交详情 / 提交信息与提交按钮 |
+
+### 分支切换卡片
+
+悬停输入框那颗 chip，或点面板顶栏的分支名，弹出同一张卡片：
+
+| 部分 | 内容 |
+|---|---|
+| 顶部 | 搜索框；仓库级动作 `⇣ 获取` / `↓ 拉取` / `↑ 推送` / `+ 新建分支` / `☆ 收藏`（收藏的是列表里高亮那一行）；右端排序按钮，写着自己当前的模式（`名称` / `时间`） |
+| 分组 | `HEAD 当前分支` / `本地` / `远端`。第一组读的是 Host 清单里带 `current` 那一条 —— **不记得你最近用过什么**，当前分支换了它就是新的那一行 |
+| 行 | 分支名、上游（或远端）、领先/落后（`↑2` / `↓3`，蓝色是需要拉、绿色是需要推）；行尾 `›` 是这个分支能做的事（检出、从此分支新建分支、合并到当前分支、删除 —— 删除要按两下，被 git 拒绝会多出一个「强制删除」） |
+
+### 悬浮提示：一个都没有
+
+浏览器自己的那个 `title` 提示框在这个插件里全部去掉了。每个控件的名字要么**写在屏幕上**（`⟳刷新`、`⇣获取`、`↓拉取`、`↑推送`，卡片上是 `⇣ 获取` / `+ 新建分支` / `☆ 收藏`，提交操作是 `拣选` / `还原` / `标签` / `分支`），要么只说给读屏（`aria-label`：折叠三角、清空 `×`、`↑2`/`↓3` 的含义、行尾 `›` 的说明、拖动手柄）。还有一件事用**动**说而不是用字说：输入框那颗 chip 最前面那一格变成转圈的圆环 = 还在切分支，或者改动读数还没核对出来（读屏拿到的是同一句话）。测试里有一条约束守着这件事：chip、面板、分支卡片、设置页各渲染一次，整棵元素树上不允许出现 `title`。
 
 ![历史页：分支树、提交列表、提交详情](docs/panel-history.png)
 
@@ -114,7 +133,7 @@ HEAD 本地 远程 │                      │ 提交信息与提交按钮
 | 新建分支 | 切换器底部「新建分支」，可从某个提交或分支起 |
 | 合并 / 拣选 / 还原 | 分支行 `›` → 合并到当前分支；提交详情右上角图标 → 拣选 / 还原 |
 | 打标签 | 提交详情 → 标签图标 → 填名字 |
-| 拉取 / 推送 | 顶栏 `⇣ ↓ ↑`；没有上游时右栏给出「设置上游并推送」 |
+| 拉取 / 推送 | 顶栏 `⇣获取` / `↓拉取` / `↑推送`；没有上游时右栏给出「设置上游并推送」 |
 | 冲突 | 顶栏横幅「正在合并：N 个文件冲突」+ 继续 / 跳过 / 中止；解决并暂存后点继续 |
 | 搜索历史 | 默认字面匹配，`.*` 切正则，`Cc` 区分大小写；`分支:` `作者:` 时间 路径 各是一个筛选 |
 | 更早的提交 | 列表底部「加载更多」，一次 200 条 |
@@ -138,6 +157,25 @@ git config --global user.email "你的邮箱"
 
 只看**会话工作区那一个目录**，且 `<dir>/.git` 必须存在 —— 不向上找父目录，也不往里看子目录。
 引导页可以改成别的目录：「打开这个目录」进那个路径；那里还不是仓库时旁边有「在此初始化仓库」（`git init`，默认分支见设置）。
+
+### 工作树
+
+DSH 0.2 起官方支持 Git 工作树：模型的 `create_worktree`（服务 `ctx.worktrees`）从源仓库的某个提交新建一条分支和一份检出，**然后把会话的工作目录搬过去** —— 默认建在**源仓库里面**的 `.agents/worktrees/<分支名>`。之后模型跑的命令都在那棵树里。
+
+这个插件对这件事只做展示：
+
+| 位置 | 看到什么 |
+|---|---|
+| chip | **最前面那颗 Git 图标自己换成工作树字形**（分支图标 → 工作树图标），不是在分支名后面再挂一颗 —— 一个 chip 从头到尾只有一个按钮。是工作树的哪一棵由字形 + 分支名说（DSH 默认拿分支名给工作树命名），源仓库是另一份检出 |
+| 面板顶栏 | 那颗分支 chip **也换字形**（同一颗按钮、同一个位置，不再并排第二颗"工作树"按钮）；工作树列表走页签 |
+| 面板 → 工作树页签 | 这个仓库的每一棵：路径、分支（游离 HEAD 会写出来）、HEAD 短号与主题、`主` / `当前` / `锁定` / `可清理` —— 锁的原因和「为什么可以清理」写在那一行的灰字上；页签标题下面写着池在哪、那条 `.agents/` 改动是什么、想让它消失该做什么 |
+| 变更页 | 源仓库那条 `.agents/` 未跟踪改动带一个「工作树池」注解 |
+
+**点一行只切换这个面板看哪一棵**（读的是那棵树的改动、分支、历史），**不会移动会话** —— 会话在哪里干活是 DSH 和模型的事。插件不建树、不删树、不 prune、不 lock：这里没有那些 RPC。
+
+**那条 `.agents/` 改动是正常的**：工作树池就在仓库里面，所以源仓库的 `git status` 会把它报成一条未跟踪改动。插件给它加注解，**但不隐藏它** —— git 会把整棵未跟踪目录折叠成一条（池里只有工作树时，报出来的是 `.agents/`，而不是 `.agents/worktrees/w1/`），而 `.agents/` 里完全可能还放着读者自己的文件；藏掉那条就等于连那个文件一起藏。要让它不再出现，把池目录加进 `.gitignore`（插件不替你改仓库里的任何文件）。
+
+**跟着会话走**：模型建完树、会话目录一变，chip 和面板就重读那一棵。这个信号来自 DSH 的 `workingDirectory` 投影（Host 算、Client 收、随会话推送），不是轮询 —— 换目录动的是会话，不是仓库，靠「仓库动过了」那个信号是等不到的。
 
 ### 读不动时
 
@@ -188,7 +226,7 @@ Settings → **dsh-git-idea配置**。
 | 悬停弹出分支切换卡片 | 开 | |
 | 面板尺寸 | 跟随输入框宽度 / 74vh | 可恢复默认 |
 | 变更页视图 | 树 | 或平铺列表 |
-| 切换器记忆 | — | 可清除最近使用与收藏 |
+| 切换器记忆 | — | 可清除收藏与排序（「最近用过」那份记忆没有了：当前分支直接读 Host 的清单） |
 
 ### 一次「仓库动过了」之后，插件要花多久才排空
 
@@ -224,7 +262,7 @@ Settings → **dsh-git-idea配置**。
 * 整棵树有**自己的时钟**，间隔按上一次实测的代价来定：`max(30 秒, 8 × 上次耗时)`，
   上限 5 分钟。快盘上照旧 30 秒一次；读者那台机器上一次 8 秒，于是 64 秒一次 ——
   不再每 30 秒把整条通道冻 8 秒。⟳ 按钮永远立刻整棵树重读一次；
-* 还没核对出来的时候 chip 说的是「**正在核对改动…**」，不谎称「工作区干净」。
+* 还没核对出来的时候 chip **最前面那一格是那个转圈的圆环**，不谎称「工作区干净」（核对完换回分支图标，安静地只剩分支名和数字）。
 
 代价说清楚：**「本来干净、刚刚被改」的那个文件**（以及干净目录里新出现的文件）任何
 路径读都看不见，只有整棵树读能看见 —— 它由上面那个时钟兜着，所以最坏情况下要等一个
@@ -234,7 +272,7 @@ Settings → **dsh-git-idea配置**。
 
 ## 不注册工具
 
-插件给 DSH 的只有 UI 和它自己的 RPC 通道：27 条 `host.call('git/…')`（面板、chip、设置页走的就是它们）。模型要跑 git 本来就有 `bash`，所以不注册工具。
+插件给 DSH 的只有 UI 和它自己的 RPC 通道：28 条 `host.call('git/…')`（面板、chip、设置页走的就是它们）。模型要跑 git 本来就有 `bash`，所以不注册工具。
 
 撤掉那 8 个工具（`git`、`git_status`、`git_log`、`git_diff`、`git_commit`、`git_branch`、`git_stash`、`git_sync`）时量到的：
 
@@ -263,21 +301,21 @@ node test/bench-branch.mjs      # 基准：300 个分支的切换器
 
 `test/run-all.mjs` 跑断言前先检查三样东西是否落后于源码：动态桥产物、正式包产物、每个套件文件。
 
-有三条套件要分清跑在哪：gp45 用真的 HTTP 请求问那道门（桌面端转过来的那种不带 origin 的请求必须进得来），gp47 把 process.platform 站到 POSIX 上、用一个真的 POSIX shell（Windows 借 Git 的 sh.exe，Linux/macOS 用 /bin/sh），断言插件交给它的还是**原样那段脚本** —— 这两条到处都跑；gp46 只在 Windows 上跑（用真的 PowerShell 驱动真的 git，证明封装之后读得出来），别处一句话退出。
+有四条套件要分清跑在哪：gp45 用真的 HTTP 请求问那道门（桌面端转过来的那种不带 origin 的请求必须进得来），gp47 把 process.platform 站到 POSIX 上、用一个真的 POSIX shell（Windows 借 Git 的 sh.exe，Linux/macOS 用 /bin/sh），断言插件交给它的还是**原样那段脚本** —— 这两条到处都跑；gp46 只在 Windows 上跑（用真的 PowerShell 驱动真的 git，证明封装之后读得出来），别处一句话退出；gp48 是工作树那一页，用真的仓库和真的链接工作树驱动 Host 那半。
 
 gp34a/gp34d/gp34e 靠 sh -c 和 /tmp 驱动真 git，是 Unix 形状的：Windows 上 run-all 把它们报成 skipped 而不是算成失败；Linux/macOS 上它们照常跑，所以那边的断言总数比 Windows 多。
 
-![验证快照：829 条断言全绿，以及性能对照](docs/panel-verify.png)
+![验证快照：断言全绿，以及性能对照](docs/panel-verify.png)
 
-*开发时的验证记录：`test/run-all.mjs` 829 条断言、0 失败，以及「一次仓库动过之后要排空多久」的对照。*
+*开发时的验证记录：`test/run-all.mjs` 全绿、0 失败，以及「一次仓库动过之后要排空多久」的对照。*
 
 ```
 package.json          npm / DSH manifest（dsh.bundle patch + dsh.client web）
 cordis.patch.yml      bundle 层插入的插件行
 lib/index.js          构建产物：Host 半侧（ESM，插件对象 + 同源 RPC 路由）
 client/client.js      构建产物：Client 半侧（__ModuleLoader__ bundle）
-src/host/*.js         Host 源码片段（12 个）
-src/client/*.js       Client 源码片段（23 个）
+src/host/*.js         Host 源码片段（13 个）
+src/client/*.js       Client 源码片段（24 个）
 src/pkg/*.js          正式包的 prelude / postlude
 build-package.mjs     正式包构建
 build.mjs             动态桥构建
@@ -293,3 +331,6 @@ Host 与 Client 的片段各自共享一个作用域：一个片段可以用它�
 ## 许可
 
 MIT
+
+**图标**：工作树那一颗取自 VS Code 的 [codicons](https://github.com/microsoft/vscode-codicons)（`worktree`，作者 Microsoft，[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)）。选它是因为 **git 官方没有工作树图标** —— git 项目只发行过自己的 logo，而 `git gui` / `gitk` 都早于 `git worktree`；codicons 里这一个是目前最接近事实标准的（VS Code 自己就用它表示 worktree）。其余图标都是这个插件自己画的描边字形。
+

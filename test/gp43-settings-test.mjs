@@ -359,6 +359,15 @@ ok('这一行是警告色', byClass(st, 'dsh-git-warn').length > 0)
 ok('读的时候只给 session id（路径由 Host 从会话解出来，和面板同一条路）',
   identityCalls.length >= 1 && identityCalls[0].repo === undefined && identityCalls[0].sessionId === undefined)
 
+/* 两半都缺：Host 一直把 `emailMissing` 一起带回来，页面却只读了名字那一半 —— 于是
+   名字和邮箱都没配的人先被告知「还缺：名字」，填完、保存、再被告知「还缺：邮箱」，
+   一件一趟就能说清的事走了两趟。 */
+identityReply = Object.assign({}, identityReply, { needsIdentity: true, nameMissing: true, emailMissing: true })
+st = await sectionTree('gp43-ident-missing-both')
+console.log('  两半都缺:', JSON.stringify(warnText(st)))
+ok('两半都缺时一句话说清两半',
+  warnText(st).indexOf('还缺：名字和邮箱') >= 0 && warnText(st).indexOf('提交会被 git 拒绝') >= 0)
+
 /* ── 2. 有身份时：值 + 来源、预填、写入 ── */
 
 console.log('')
@@ -568,7 +577,10 @@ const setPushSetting = async function (on) {
    就是这么错的）。所以整段都留在 `openPanel` 用的那个 label 上。 */
 const clickPush = async function () {
   const t = await openPanel()
-  const btn = buttons(t).filter(function (b) { return String(b.props.title).indexOf('push：推送当前分支') === 0 })[0]
+  /* 同步组的按钮现在是「记号 + 词」，完整那句在 aria-label 上 */
+  const bar = byClass(t, 'dsh-git-sync')[0]
+  const btn = buttons(bar === undefined ? t : bar)
+    .filter(function (b) { return String(b.props['aria-label']).indexOf('push：推送当前分支') === 0 })[0]
   if (btn !== undefined) btn.props.onClick()
   await wait(30)
   return await settle('pop')

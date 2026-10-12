@@ -9,6 +9,86 @@
    spawned. A probe must never run with the inspected path as its workdir — when
    that directory does not exist the spawn itself fails before git is ever reached
    and the caller sees a rejected promise instead of the diagnosis it asked for. */
+/* ── the session's EFFECTIVE working directory ──
+
+   DSH 0.2 made a session's directory movable: `SessionHeader.cwd` keeps the
+   original project (immutable) while `WorkingDirectoryService.set` — what the
+   model reaches through `cd` and through `create_worktree` — publishes a
+   `working-directory/change` event and a `workingDirectory` projection. This
+   plugin reads git, so it has to read the directory git would run in: with the
+   model in a fresh worktree and the chip still naming the source repository's
+   branch, one screen carries two facts.
+
+   Three places to ask, most authoritative first:
+   1. the `workingDirectory` service (its projection, folded from the log);
+   2. `working-directory/change` heard on `session/event` in this process;
+   3. today's storage fallback, `stat(id).header.cwd` — the original project.
+
+   Only the moving half is tracked here, and only by event *name*: this plugin
+   does not depend on `dsh-working-directory`, so on a machine without that
+   service the listener still hears the change and the fallback still answers. */
+const effectiveCwds = new Map()
+const EFFECTIVE_CWD_MAX = 200
+
+function rememberEffectiveCwd(sessionId, cwd) {
+  if (!isStr(sessionId) || sessionId.length === 0) return
+  if (!isStr(cwd) || cwd.length === 0) return
+  if (effectiveCwds.has(sessionId)) effectiveCwds.delete(sessionId)
+  effectiveCwds.set(sessionId, cwd)
+  while (effectiveCwds.size > EFFECTIVE_CWD_MAX) effectiveCwds.delete(effectiveCwds.keys().next().value)
+}
+
+function liveSessionOf(sessionId) {
+  const sessions = ctx.get('sessions')
+  if (sessions === undefined) return null
+  try {
+    const session = sessions.get(sessionId)
+    return session === undefined ? null : session
+  } catch (error) {
+    console.error('dsh-git-idea: could not read the live session working directory', String(error))
+    return null
+  }
+}
+
+/* One session's current directory, from every source that may answer. Returns
+   `undefined` only when nothing knows — which the callers already handle as
+   "this request names no workspace".
+
+   Only the service is asked, not `sessionProjections.stateOf` under it: the
+   `workingDirectory` projection unit is registered *by* `dsh-working-directory`
+   (that is what seeds it from `header.cwd` and folds the change events), so a
+   deployment where the service is missing has no such unit to read either — the
+   second fallback could never answer. */
+function effectiveCwdOf(sessionId, session) {
+  if (session != null) {
+    const service = ctx.get('workingDirectory')
+    if (service !== undefined && typeof service.get === 'function') {
+      try {
+        const cwd = service.get(session)
+        if (isStr(cwd) && cwd.length > 0) return cwd
+      } catch (error) {
+        console.error('dsh-git-idea: could not read the working-directory projection', String(error))
+      }
+    }
+  }
+  const remembered = effectiveCwds.get(sessionId)
+  if (isStr(remembered) && remembered.length > 0) return remembered
+  const header = session != null ? session.header : undefined
+  const cwd = header != null ? header.cwd : undefined
+  return isStr(cwd) && cwd.length > 0 ? cwd : undefined
+}
+
+/* One listener for the whole plugin, owned by its fiber. Cordis hands the
+   disposer back, and unloading the plugin takes the listener with it. */
+if (typeof ctx.on === 'function') {
+  ctx.on('session/event', function (session, event) {
+    if (session == null || event == null || event.type !== 'working-directory/change') return
+    const header = session.header
+    const data = event.data
+    rememberEffectiveCwd(header != null ? header.id : undefined, data != null ? data.cwd : undefined)
+  })
+}
+
 function sessionWorkdir(input) {
   /* The async resolution that runs before every handler already went to storage
      for a session that is not live (see `withSessionRepo`), and hands the answer
@@ -16,17 +96,7 @@ function sessionWorkdir(input) {
      probe whose own target does not exist — sees the session's directory. */
   if (input != null && isStr(input.sessionCwd) && input.sessionCwd.length > 0) return input.sessionCwd
   if (input == null || !isStr(input.sessionId)) return undefined
-  const sessions = ctx.get('sessions')
-  if (sessions === undefined) return undefined
-  try {
-    const session = sessions.get(input.sessionId)
-    const header = session != null ? session.header : undefined
-    const cwd = header != null ? header.cwd : undefined
-    if (isStr(cwd) && cwd.length > 0) return cwd
-  } catch (error) {
-    console.error('dsh-git-idea: could not resolve the session working directory', String(error))
-  }
-  return undefined
+  return effectiveCwdOf(input.sessionId, liveSessionOf(input.sessionId))
 }
 
 /* ── the session's own workspace, resolved before the handler runs ──
@@ -40,23 +110,27 @@ function sessionWorkdir(input) {
    a moment later, named the branch.
 
    So the workspace is resolved once here, before the handler: the live session
-   first, its stored header second (sessionPersistence.stat reads the generation
-   header without the event log, and never takes ownership). The answer travels
+   first (its *effective* directory — see `effectiveCwdOf`), the last transition
+   this process heard for it second, its stored header third
+   (sessionPersistence.stat reads the generation header without the event log, and
+   never takes ownership). The answer travels
    on the input as sessionCwd — the SESSION's directory, deliberately not the
    requested one, so the probe in 62-panel.js that must not spawn inside a target
    that does not exist keeps the right workdir. */
 function sessionCwdOf(input) {
   if (input == null || !isStr(input.sessionId) || input.sessionId.length === 0) return Promise.resolve(undefined)
-  const sessions = ctx.get('sessions')
-  if (sessions !== undefined) {
-    try {
-      const live = sessions.get(input.sessionId)
-      const header = live != null ? live.header : undefined
-      const cwd = header != null ? header.cwd : undefined
-      if (isStr(cwd) && cwd.length > 0) return Promise.resolve(cwd)
-    } catch (error) {
-      console.error('dsh-git-idea: could not read the live session working directory', String(error))
-    }
+  const live = liveSessionOf(input.sessionId)
+  if (live !== null) {
+    /* The live session answers with its EFFECTIVE directory, not its header: a
+       model that ran `create_worktree` or `cd` is somewhere else now, and this
+       is the read that has to follow it (see `effectiveCwdOf`). */
+    const cwd = effectiveCwdOf(input.sessionId, live)
+    if (cwd !== undefined) return Promise.resolve(cwd)
+  } else {
+    /* Not live: the last transition this process heard is still this session's
+       own fact, and newer than the stored header by construction. */
+    const remembered = effectiveCwds.get(input.sessionId)
+    if (isStr(remembered) && remembered.length > 0) return Promise.resolve(remembered)
   }
   const store = ctx.get('sessionPersistence')
   if (store === undefined) return Promise.resolve(undefined)

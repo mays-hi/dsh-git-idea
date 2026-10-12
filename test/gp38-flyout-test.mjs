@@ -531,7 +531,9 @@ const spinningChip = await chipTree()
 const spinClass = (tree) => collect(tree).filter((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0)
 console.log('  切换中 chip 上的 svg 类:', JSON.stringify(spinClass(spinningChip).map((n) => n.props.className)))
 ok('切换在飞的时候，输入框上的分支图标在转', spinClass(spinningChip).length >= 1)
-ok('chip 的 tooltip 说明了正在切到哪个分支', String(spinningChip.props.title).indexOf('正在切到 solo') >= 0)
+/* 状态由那颗转动的图标说，不在后面加字（上面那条已经在看它转不转） */
+ok('切的过程中 chip 上不多一个字（也不再靠提示框）',
+  byClass(spinningChip, 'dsh-git-chip-note').length === 0 && spinningChip.props.title === undefined)
 const spinningPanel = byClass(during, 'dsh-git-branch-chip')
 ok('面板头部那个分支 chip 也在转',
   spinningPanel.length === 1 && collect(spinningPanel[0]).some((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0))
@@ -689,8 +691,11 @@ const unbornCardText = textOf(unbornCard)
 console.log('  还没有提交时卡片里:', JSON.stringify(unbornCardText.slice(0, 110)))
 ok('说得出当前分支叫什么', unbornCardText.indexOf('当前在 main，还没有第一个提交') >= 0)
 ok('不说成「这个仓库还没有本地分支」', unbornCardText.indexOf('这个仓库还没有本地分支') < 0)
+ok('本地那一组只说「还没有分支」（当前分支归 HEAD 组说）',
+  unbornCardText.indexOf('还没有分支') >= 0)
 ok('不留「先暂存再切」那一行（这里 git stash 一定失败）',
   byClass(unbornCard, 'dsh-git-bs-check').length === 0)
+
 
 /* 负对照：普通仓库里那行还得在 —— 在那里 stash 是能用的，撤回它就是把能救人的路
    一起撤了。 */
@@ -698,3 +703,50 @@ const normalCard = await switcherWith(branchesReply, dirtyPanel)
 console.log('  普通仓库里同一行:', JSON.stringify(textOf(byClass(normalCard, 'dsh-git-bs-check')[0]).slice(0, 60)))
 ok('（对照）普通仓库里「先暂存再切」还在', byClass(normalCard, 'dsh-git-bs-check').length === 1)
 ok('（对照）普通仓库也不会冒出 unborn 那句', textOf(normalCard).indexOf('还没有第一个提交') < 0)
+
+/* ── 切过去了，但改动恢复时冲突 ──
+
+   这是 stash 那条路唯一的坏结局，也是这条路上唯一一条"操作成功了、事情没完"的消息：
+   Host 为此把 git 的两条流都带回来（哪条流带话并不固定），而客户端曾经一条都没读 ——
+   只说了「冲突了」，不说哪个文件没合上。这条断言就是钉住那件事。 */
+console.log('')
+console.log('== 切过去了但改动恢复冲突：git 自己说的话要露面 ==')
+host.call = function (method, args) {
+  if (method === 'git/checkout') {
+    calls.push({ method, args })
+    return Promise.resolve({
+      ok: true, repo: '/tmp/ws', stashed: true, dirty: 1, popConflict: true,
+      popStdout: "Auto-merging f.txt\nCONFLICT (content): Merge conflict in f.txt",
+      popStderr: 'error: could not apply 3f1a2b9... probe',
+      stdout: '', stderr: '', exitCode: 0,
+    })
+  }
+  return plainCheckout.call(host, method, args)
+}
+let conflictTree = await chipTree()
+if (conflictTree.props.className.indexOf('dsh-git-chip-open') >= 0) { conflictTree.props.onClick(); await wait(10) }
+conflictTree = await chipTree()
+conflictTree.props.onPointerEnter()
+fireTimers()
+await wait(15)
+conflictTree = await settle('pop')
+const conflictRows = byClass(conflictTree, 'dsh-git-bs-row').filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
+const conflictTarget = conflictRows.find((r) => textOf(r).indexOf('zeta') >= 0) || conflictRows[conflictRows.length - 1]
+conflictTarget.props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
+fireTimers()
+await wait(15)
+conflictTree = await settle('pop')
+const conflictFly = flyPanel(conflictTree)
+let conflictCard = null
+if (conflictFly !== undefined) {
+  buttons(conflictFly).find((b) => textOf(b) === '检出').props.onClick({ stopPropagation() {} })
+  await wait(20)
+  conflictCard = await settle('pop')
+}
+const conflictText = textOf(conflictCard === null ? conflictTree : conflictCard)
+console.log('  冲突之后卡片里:', JSON.stringify(conflictText.slice(0, 150)))
+ok('说清工作区没被弄丢（stash 条目还在）',
+  conflictText.indexOf('stash 条目还留着') >= 0)
+ok('git 自己说的话也露面（哪个文件没合上）', conflictText.indexOf('Merge conflict in f.txt') >= 0)
+ok('两条流里取有内容的那条，不是固定读 stderr', conflictText.indexOf('could not apply') < 0)
+host.call = plainCheckout

@@ -42,42 +42,20 @@
       return detail.length > 0 ? why + '\n' + detail : why
     }
 
-    function branchRelative(seconds) {
-      if (!(seconds > 0)) return ''
-      const now = Math.floor(Date.now() / 1000)
-      if (!(now > 0) || now < seconds) return ''
-      const diff = now - seconds
-      if (diff < 60) return '刚刚'
-      if (diff < 3600) return String(Math.floor(diff / 60)) + ' 分钟前'
-      if (diff < 86400) return String(Math.floor(diff / 3600)) + ' 小时前'
-      if (diff < 2592000) return String(Math.floor(diff / 86400)) + ' 天前'
-      if (diff < 31536000) return String(Math.floor(diff / 2592000)) + ' 个月前'
-      return String(Math.floor(diff / 31536000)) + ' 年前'
-    }
-
-    /* What the ↙/↗ numbers beside a branch mean, spelled out for the tooltip. The
-       numbers themselves come from the Host, which pins git's locale so the
-       counts can be read out of %(upstream:track) at all. */
-    function trackTitle(ahead, behind) {
-      if (ahead > 0 && behind > 0) return '与上游分岔：领先 ' + String(ahead) + '，落后 ' + String(behind)
-      if (ahead > 0) return '领先上游 ' + String(ahead) + ' 个提交'
-      if (behind > 0) return '落后上游 ' + String(behind) + ' 个提交'
-      return '与上游一致'
-    }
-
     /* ── how this browser likes the branch list ──
 
-       Recently used, favourites and the order are all presentation, so they live
-       in the same browser-local storage as the rest of layer one — in their own
-       keys rather than inside the settings object, because they are written on
-       every switch rather than when someone opens the settings page. */
-    const MRU_KEY = 'dsh.git-idea.mru'
+       Favourites and the order are presentation, so they live in the same
+       browser-local storage as the rest of layer one — in their own keys rather
+       than inside the settings object, because they are written on every switch
+       rather than when someone opens the settings page.
+
+       「最近用过的分支」那份记忆在这里没有了：卡片上那一组换成了 HEAD（见
+       70-branchpicker.js），而它读的是 Host 清单里带 current 的那一行 —— 一份要
+       自己维护、还会过期的副本（切过、删过、在终端里切过）不如没有。 */
     const STARS_KEY = 'dsh.git-idea.stars'
     const SORT_KEY = 'dsh.git-idea.sort'
-    const MRU_MAX = 8
     const STARS_MAX = 40
 
-    let recentBranches = []
     let starredBranches = []
     let branchSort = 'recent'
     let branchPrefsLoaded = false
@@ -104,25 +82,13 @@
       localStore(doc)
       if (branchPrefsLoaded) return
       branchPrefsLoaded = true
-      recentBranches = stringList(readStoredJSON(MRU_KEY, null), MRU_MAX)
       starredBranches = stringList(readStoredJSON(STARS_KEY, null), STARS_MAX)
       const sort = readStored(SORT_KEY)
       if (sort === 'name' || sort === 'recent') branchSort = sort
     }
     function saveBranchPrefs() {
-      writeStoredJSON(MRU_KEY, recentBranches)
       writeStoredJSON(STARS_KEY, starredBranches)
       writeStored(SORT_KEY, branchSort)
-    }
-    function rememberBranch(name) {
-      if (name.length === 0) return
-      const next = [name]
-      for (let i = 0; i < recentBranches.length && next.length < MRU_MAX; i += 1) {
-        if (recentBranches[i] !== name) next.push(recentBranches[i])
-      }
-      recentBranches = next
-      saveBranchPrefs()
-      bumpBranchPrefs()
     }
     function toggleStar(name) {
       const at = starredBranches.indexOf(name)
@@ -137,7 +103,6 @@
       bumpBranchPrefs()
     }
     function clearBranchMemory() {
-      recentBranches = []
       starredBranches = []
       saveBranchPrefs()
       bumpBranchPrefs()

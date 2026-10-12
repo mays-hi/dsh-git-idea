@@ -108,8 +108,9 @@ host.call = function (method, args) {
 const changeRow = function (tree, label) {
   return byClass(tree, 'dsh-git-trow').find(function (r) { return textOf(r).indexOf(label) >= 0 })
 }
-const toolByTitle = function (tree, title) {
-  return collect(tree).filter(function (n) { return n.type === 'button' && n.props.title === title })[0]
+/* 图标按钮的名字现在在 aria-label 上（提示框全去掉了），还是按名字找 */
+const toolNamed = function (tree, label) {
+  return collect(tree).filter(function (n) { return n.type === 'button' && n.props['aria-label'] === label })[0]
 }
 const modes = function () { return diffCalls.map(function (c) { return c.mode + '@' + c.path }) }
 
@@ -124,7 +125,7 @@ tree = await settle()
 
 const appRow = changeRow(tree, 'app.js')
 ok('变更列表里有 src/app.js 这一行', appRow !== undefined)
-ok('文件行的提示写着可以点开', appRow !== undefined && String(appRow.props.title).indexOf('点开看差异') >= 0)
+ok('文件行上没有原生提示框（点开就是点开）', appRow !== undefined && appRow.props.title === undefined)
 
 appRow.props.onClick()
 await wait(10)
@@ -170,7 +171,7 @@ ok('差异页上的按钮撤下索引里的那个文件',
   calls.some(function (c) { return c.method === 'git/unstage' && c.args.paths[0] === 'src/app.js' }))
 ok('暂存之后补一次工作区读', calls.filter(function (c) { return c.method === 'git/panel' && c.args.quick !== true }).length >= 2)
 
-const back = toolByTitle(tree, '返回文件列表')
+const back = toolNamed(tree, '返回文件列表')
 ok('返回键在', back !== undefined)
 back.props.onClick()
 await wait(10)
@@ -202,7 +203,7 @@ ok('走的是 git/stage', calls.some(function (c) { return c.method === 'git/sta
 /* ── 5. 提交下的文件：读那一次提交，重命名的旧路径一起带上 ── */
 
 const commitCalls = diffCalls.length
-toolByTitle(tree, '返回文件列表').props.onClick()
+toolNamed(tree, '返回文件列表').props.onClick()
 await wait(10)
 tree = await settle()
 buttons(tree).find(function (b) { return textOf(b).indexOf('历史') >= 0 }).props.onClick()
@@ -231,7 +232,7 @@ ok('提交里的文件不给暂存按钮', buttons(tree).every(function (b) { re
 
 /* 刷新键：同一个文件重新读一次，请求原样 */
 const beforeRefresh = diffCalls.length
-toolByTitle(tree, '重新读取这个文件的差异').props.onClick()
+toolNamed(tree, '重新读取这个文件的差异').props.onClick()
 await wait(10)
 await settle()
 ok('刷新键重新读一次同一个文件', diffCalls.length - beforeRefresh === 1 && diffCalls[diffCalls.length - 1].path === 'new.txt')
@@ -259,7 +260,7 @@ ok('那两行确实进了依赖表（shape 在 useEffect 的依赖里）',
 console.log('')
 console.log('== 勾选框那一列 ==')
 /* 上一节停在历史页的提交差异里：先退出来，再回到变更页 */
-toolByTitle(tree, '返回文件列表').props.onClick()
+toolNamed(tree, '返回文件列表').props.onClick()
 await wait(10)
 tree = await settle()
 buttons(tree).find(function (b) { return textOf(b).indexOf('变更') >= 0 }).props.onClick()
@@ -323,7 +324,7 @@ const childAsk = diffCalls[diffCalls.length - 1]
 ok('点开目录里的文件就是它的差异', diffCalls.length - beforeChildDiff === 1
   && childAsk.mode === 'untracked' && childAsk.path === 'newdir/a.txt')
 
-toolByTitle(tree, '返回文件列表').props.onClick()
+toolNamed(tree, '返回文件列表').props.onClick()
 await wait(10)
 tree = await settle()
 const deepRow = changeRow(tree, 'b.txt')
@@ -426,7 +427,7 @@ host.call = function (method, args) {
   }
   return savedCall(method, args)
 }
-toolByTitle(tree, '重新读取仓库（忽略缓存）').props.onClick()
+toolNamed(tree, '重新读取仓库（忽略缓存）').props.onClick()
 await wait(10)
 tree = await settle()
 ok('刷新键发出的是一次整树读，它还没回来', releaseFull !== null)
@@ -563,7 +564,7 @@ await wait(10)
 tree = await settle()
 ok('文件行仍是「单击就看差异」（提交窗口里选中即预览的那个手势）',
   diffCalls.length - beforeFileClick === 1 && diffCalls[diffCalls.length - 1].path === 'notes.md')
-toolByTitle(tree, '返回文件列表').props.onClick()
+toolNamed(tree, '返回文件列表').props.onClick()
 await wait(10)
 tree = await settle()
 ok('返回后还是那棵树，目录的展开状态也还在',
@@ -776,7 +777,7 @@ ok('偏好跟着改回 tree', JSON.parse(store['dsh.git-idea.settings']).changes
 console.log('')
 console.log('== 分组标题守同一条手势 ==')
 const unvTitle = groupTitleRow(tree, '新增的文件')
-ok('分组标题给了「双击」提示', unvTitle !== undefined && String(unvTitle.props.title).indexOf('双击') > 0)
+ok('分组标题行上没有原生提示框', unvTitle !== undefined && unvTitle.props.title === undefined)
 press(unvTitle, 'onClick')
 await wait(10)
 tree = await settle()

@@ -86,13 +86,15 @@ const byClass = (t, s) => collect(t).filter((n) => typeof n.props.className === 
 const rows = (t) => byClass(t, 'dsh-git-bs-row')
 /* 仓库级操作已改成列表上方的 chip 条，.dsh-git-bs-row 现在只剩分支行 */
 const branchRows = (t) => rows(t)
-const chips = (t) => byClass(t, 'dsh-git-bs-chip')
+/* 排序按钮现在也是同一个 chip 画法，但它不是仓库动作，从这一排里摘出去 */
+const chips = (t) => byClass(t, 'dsh-git-bs-chip').filter((c) => String(c.props.className).indexOf('dsh-git-bs-sort') < 0)
 /* 收藏按钮也在同一排里，但它不是「仓库动作」，筛选动不了它 */
 const actionChips = (t) => chips(t).filter((c) => String(c.props.className).indexOf('dsh-git-bs-fav') < 0)
 const head = (t) => byClass(t, 'dsh-git-bs-head')[0]
 const headActs = (t) => byClass(t, 'dsh-git-bs-head-acts')[0]
-/* 记号按钮没有文字了，按 title 找（title 就是原来那行说明） */
-const chipWith = (t, label) => chips(t).find((c) => textOf(c).indexOf(label) >= 0 || String(c.props.title).indexOf(label) >= 0)
+/* 记号按钮现在把词写在记号旁边，按文字找 */
+const chipWith = (t, label) => chips(t).find((c) => textOf(c).indexOf(label) >= 0)
+const ariaOf = (node) => String(node === undefined ? '' : (node.props['aria-label'] || ''))
 const sortBtn = (t) => byClass(t, 'dsh-git-bs-sort')[0]
 const rowWith = (t, label) => branchRows(t).find((r) => textOf(r).indexOf(label) >= 0)
 const groups = (t) => byClass(t, 'dsh-git-bs-group')
@@ -242,24 +244,25 @@ let tree = await openSwitcher()
 ok('切换器出现', byClass(tree, 'dsh-git-switch').length === 1)
 ok('搜索框 placeholder 是「搜索分支」', byClass(tree, 'dsh-git-bs-search')[0].props.placeholder === '搜索分支')
 ok('搜索框前面有放大镜', byClass(tree, 'dsh-git-bs-mag').length === 1)
-ok('右侧有排序图标按钮', byClass(tree, 'dsh-git-bs-icon').length === 1)
+ok('右侧有排序按钮，按钮上写着自己的模式', byClass(tree, 'dsh-git-bs-sort').length === 1
+  && textOf(sortBtn(tree)).length > 0)
 
 console.log('')
 console.log('== 操作区（IDEA 的 Update/Commit/Push 那一栏，chip 化）==')
 const strip = chips(tree)
 console.log('  操作 chip:', JSON.stringify(strip.map(textOf)))
-console.log('  chip title:', JSON.stringify(strip.map((c) => c.props.title)))
 const stripText = strip.map(textOf).join('|')
 console.log('  strip 文本:', JSON.stringify(stripText))
-ok('chip 只有记号，没有文字（角标是数字，留着）',
-  strip.length === 5 && stripText.indexOf('⇣') === 0 && stripText.search(/[\u4e00-\u9fa5]/) < 0
-  && ['☆', '★'].indexOf(textOf(strip[4])) >= 0)
+ok('chip 是「记号 + 短词」，不再是只有记号的按钮',
+  strip.length === 5 && stripText.indexOf('⇣') === 0
+  && ['获取', '拉取', '推送', '新建分支'].every((w) => stripText.indexOf(w) > 0))
+ok('收藏 chip 的记号还在（角标是数字，留着）', ['☆', '★'].indexOf(textOf(strip[4]).charAt(0)) >= 0)
 ok('有 获取/拉取/推送 三个 chip', ['获取', '拉取', '推送'].every((l) => chipWith(tree, l) !== undefined))
 ok('「回到上一个分支」的 chip 已经去掉了', chipWith(tree, '回到') === undefined && chipWith(tree, '上一个分支') === undefined)
 ok('有「新建分支」chip', chipWith(tree, '新建分支') !== undefined)
 ok('chip 是可点的 button', strip.every((c) => c.type === 'button' && typeof c.props.onClick === 'function'))
-ok('chip 的 title 保留完整说明', chipWith(tree, '获取').props.title.indexOf('获取远端最新') === 0
-  && chipWith(tree, '推送').props.title.indexOf('推送当前分支') === 0)
+ok('chip 上没有一个原生提示框（话都写在屏幕上）',
+  strip.every((c) => c.props.title === undefined))
 ok('chip 搬进了搜索框那一行（不再有自己的第二排）', headActs(tree) !== undefined
   && byClass(headActs(tree), 'dsh-git-bs-chip').length === strip.length
   && byClass(tree, 'dsh-git-bs-acts-bar').length === 0)
@@ -271,23 +274,24 @@ const iconNameOf = (t) => {
   const svg = collect(sortBtn(t)).find((n) => n.type === 'svg')
   return svg === undefined ? '' : String(svg.props.children.map((c) => c.props.d).join('|'))
 }
-const sortState = (t) => ({ icon: iconNameOf(t), title: String(sortBtn(t).props.title) })
+const sortState = (t) => ({ icon: iconNameOf(t), word: textOf(sortBtn(t)), aria: ariaOf(sortBtn(t)) })
 const s0 = sortState(tree)
-console.log('  现在的图标:', JSON.stringify(s0.icon.slice(0, 24)), ' title:', JSON.stringify(s0.title))
+console.log('  现在的图标:', JSON.stringify(s0.icon.slice(0, 24)), ' 词:', JSON.stringify(s0.word))
 ok('排序按钮有一个图标', s0.icon.length > 0)
 sortBtn(tree).props.onClick()
 await wait(10)
 tree = await settle('pop')
 const s1 = sortState(tree)
-console.log('  切换后的图标:', JSON.stringify(s1.icon.slice(0, 24)), ' title:', JSON.stringify(s1.title))
+console.log('  切换后的图标:', JSON.stringify(s1.icon.slice(0, 24)), ' 词:', JSON.stringify(s1.word))
 ok('换模式就换图标', s1.icon !== s0.icon && s1.icon.length > 0)
 /* A→Z 的图标带那两笔 A，时钟的图标带两段圆弧 —— 两者必须互斥 */
 const aOf = (st) => st.icon.indexOf('M2.4 12.2') >= 0
 const clockOf = (st) => st.icon.indexOf('M8 2.8 A5.2') >= 0
 ok('一个是 A→Z，另一个是时钟，不会同时出现', aOf(s0) !== aOf(s1) && clockOf(s0) !== clockOf(s1))
-const nameModeOf = (st) => st.title.indexOf('当前按名称') === 0
+const nameModeOf = (st) => st.word.indexOf('名称') >= 0
 ok('按名称的模式配 A→Z 图标', nameModeOf(s0) === aOf(s0) && nameModeOf(s1) === aOf(s1))
-ok('title 说的是当前模式而不是动作', s0.title.indexOf('当前按') === 0 && s1.title.indexOf('当前按') === 0)
+ok('按钮上写的是当前模式，完整说法给读屏', nameModeOf(s1) === true
+  && s0.aria.indexOf('当前按') === 0 && s1.aria.indexOf('当前按') === 0)
 sortBtn(tree).props.onClick()
 await wait(10)
 tree = await settle('pop')
@@ -301,7 +305,10 @@ console.log('')
 console.log('== 分组 ==')
 console.log('  分组:', JSON.stringify(groups(tree).map(textOf)))
 ok('有「本地」和「远端」', groups(tree).some((g) => textOf(g).indexOf('本地') >= 0) && groups(tree).some((g) => textOf(g).indexOf('远端') >= 0))
-ok('「最近」此时为空（还没切过）', groups(tree).every((g) => textOf(g).indexOf('最近') < 0))
+ok('第一组是「HEAD 当前分支」', textOf(groups(tree)[0]).indexOf('HEAD 当前分支') >= 0)
+ok('「最近」那一组没有了', groups(tree).every((g) => textOf(g).indexOf('最近') < 0) && store['dsh.git-idea.mru'] === undefined)
+ok('HEAD 组里就是当前分支那一行', rowWith(tree, 'main') !== undefined
+  && groups(tree)[0].props !== undefined)
 ok('当前分支也在列表里（用铅笔标记）', rowWith(tree, 'main') !== undefined)
 ok('本地分组计数是 4', groups(tree).some((g) => textOf(g).indexOf('本地') >= 0 && textOf(g).indexOf('4') >= 0))
 ok('远端行显示 remote-only', rowWith(tree, 'remote-only') !== undefined)
@@ -314,13 +321,15 @@ console.log('  main 行:', JSON.stringify(textOf(mainRow)))
 ok('main 显示 ↑2 ↓1（IDEA 的绿上/蓝下箭头）', textOf(mainRow).indexOf('↑2') >= 0 && textOf(mainRow).indexOf('↓1') >= 0)
 ok('main 显示上游 origin/main', textOf(mainRow).indexOf('origin/main') >= 0)
 ok('feature/one 显示 ↑1', textOf(rowWith(tree, 'feature/one')).indexOf('↑1') >= 0)
-ok('tooltip 里解释数字', String(mainRow.props.title).indexOf('与上游分岔：领先 2，落后 1') >= 0)
-ok('tooltip 里带提交主题与时间', String(mainRow.props.title).indexOf('tip main') >= 0)
+const rowAria = (r) => collect(r).map((n) => String(n.props['aria-label'] || '')).join('|')
+ok('↑/↓ 的含义说给读屏，不再靠提示框', rowAria(mainRow).indexOf('领先上游 2 个提交') >= 0
+  && rowAria(mainRow).indexOf('落后上游 1 个提交') >= 0)
+ok('行上没有原生提示框', mainRow.props.title === undefined && rowWith(tree, 'solo').props.title === undefined)
 
 console.log('')
 console.log('== 排序：按最近提交 ↔ 按名称 ==')
 const beforeSort = branchRows(tree).map(textOf)
-byClass(tree, 'dsh-git-bs-icon')[0].props.onClick()
+sortBtn(tree).props.onClick()
 await wait(10)
 tree = await settle('pop')
 const afterSort = branchRows(tree).map(textOf)
@@ -328,7 +337,7 @@ console.log('  排序前:', JSON.stringify(beforeSort.slice(0, 5)))
 console.log('  排序后:', JSON.stringify(afterSort.slice(0, 5)))
 ok('落盘了排序偏好', store['dsh.git-idea.sort'] === 'name')
 ok('按名称时 feature/one 排在 zeta 前', afterSort.findIndex((x) => x.indexOf('feature/one') >= 0) < afterSort.findIndex((x) => x.indexOf('zeta') >= 0))
-byClass(tree, 'dsh-git-bs-icon')[0].props.onClick()
+sortBtn(tree).props.onClick()
 await wait(10)
 tree = await settle('pop')
 ok('能切回按最近提交', store['dsh.git-idea.sort'] === 'recent')
@@ -343,14 +352,15 @@ const favBtn = (t) => {
 rowWith(tree, 'solo').props.onMouseEnter({ currentTarget: { offsetTop: 60 }, button: 0 })
 await wait(10)
 tree = await settle('pop')
-ok('收藏按钮此时说的是 solo', String(favBtn(tree).props.title).indexOf('solo') > 0)
+ok('收藏按钮此时可用，写的是「收藏」', favBtn(tree).props.disabled !== true
+  && textOf(favBtn(tree)).indexOf('收藏') >= 0)
 favBtn(tree).props.onClick({ stopPropagation() {} })
 await wait(10)
 tree = await settle('pop')
 ok('写进了 dsh.gitops.stars', (store['dsh.git-idea.stars'] || '').indexOf('solo') >= 0)
-const localRows = groups(tree).find((g) => textOf(g).indexOf('本地') >= 0)
 const localsOnly = branchRows(tree).filter((r) => textOf(r).indexOf('remote-only') < 0)
-ok('收藏后排在本地分组第一', textOf(localsOnly[0]).indexOf('solo') >= 0)
+const placeOf = (name) => localsOnly.findIndex((r) => textOf(r).indexOf(name) >= 0)
+ok('收藏后排在本地分组第一', placeOf('solo') >= 0 && placeOf('solo') < placeOf('zeta') && placeOf('solo') < placeOf('feature/one'))
 
 console.log('')
 console.log('== 折叠分组 ==')
@@ -371,12 +381,12 @@ let box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'push' } })
 await wait(10)
 tree = await settle('pop')
-ok('输入 push 只剩推送 chip', actionChips(tree).length === 1 && String(actionChips(tree)[0].props.title).indexOf('push') >= 0)
+ok('输入 push 只剩推送 chip', actionChips(tree).length === 1 && textOf(actionChips(tree)[0]).indexOf('推送') >= 0)
 box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: '拉取' } })
 await wait(10)
 tree = await settle('pop')
-ok('输入「拉取」命中拉取 chip（中文短标签也能搜）', actionChips(tree).length === 1 && String(actionChips(tree)[0].props.title).indexOf('拉取') >= 0)
+ok('输入「拉取」命中拉取 chip（中文短标签也能搜）', actionChips(tree).length === 1 && textOf(actionChips(tree)[0]).indexOf('拉取') >= 0)
 box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'feat' } })
 await wait(10)
@@ -467,7 +477,7 @@ host.call = realCall
 console.log('')
 console.log('== 新建分支（内联输入）==')
 let t3 = await settle('pop')
-const newAction = chips(t3).find((r) => String(r.props.title).indexOf('新建分支') >= 0)
+const newAction = chips(t3).find((r) => textOf(r).indexOf('新建分支') >= 0)
 newAction.props.onClick({ stopPropagation() {} })
 await wait(10)
 t3 = await settle('pop')
@@ -497,7 +507,7 @@ console.log('== 从某个分支上新建 ==')
 let t4 = await openSwitcher()
 console.log('  切换器开着:', byClass(t4, 'dsh-git-switch').length === 1, ' 上下文行:', JSON.stringify(branchRows(t4).map(textOf).slice(0, 3)))
 const opened4 = await openActs(t4, 'solo')
-console.log('  展开的行:', buttons(opened4.acts).map(textOf).join('/'), ' title:', String(buttons(opened4.acts)[1].props.title || ''))
+console.log('  展开的行:', buttons(opened4.acts).map(textOf).join('/'))
 t4 = opened4.tree
 buttons(opened4.acts).find((b) => textOf(b).indexOf('从此分支新建分支') >= 0).props.onClick({ stopPropagation() {} })
 await wait(10)
@@ -512,19 +522,19 @@ await wait(15)
 ok('带上了起点 at=solo', calls.some((c) => c.method === 'git/branch-create' && c.args.at === 'solo' && c.args.name === 'from-solo'))
 
 console.log('')
-console.log('== 切换：记录最近使用 + 关闭 ==')
+console.log('== 切换：切完自动收起 ==')
 let t5 = await openSwitcher()
 calls.length = 0
 checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: 'Switched to branch', exitCode: 0 }
 rowWith(t5, 'zeta').props.onClick()
 await wait(15)
 ok('调用 git/checkout 切 zeta', calls.some((c) => c.method === 'git/checkout' && c.args.name === 'zeta'))
-ok('记进最近使用', (store['dsh.git-idea.mru'] || '').indexOf('zeta') >= 0)
+ok('没有再记一份「最近用过」的记忆', store['dsh.git-idea.mru'] === undefined)
 t5 = await settle('pop')
 ok('切完自动收起', byClass(t5, 'dsh-git-switch').length === 0)
 t5 = await openSwitcher()
-ok('重开后出现「最近」分组', groups(t5).some((g) => textOf(g).indexOf('最近') >= 0))
-ok('最近里有 zeta', groups(t5).find((g) => textOf(g).indexOf('最近') >= 0) !== undefined)
+ok('重开后 HEAD 组还在（它读的是当前分支，不是记忆）',
+  groups(t5).some((g) => textOf(g).indexOf('HEAD 当前分支') >= 0))
 
 console.log('')
 console.log('== 有改动时的暂存保护仍在 ==')
@@ -581,8 +591,8 @@ const clear = buttons(settings).find((b) => textOf(b).indexOf('清除') >= 0)
 ok('有清除按钮', clear !== undefined)
 clear.props.onClick()
 await wait(10)
-ok('最近使用被清空', store['dsh.git-idea.mru'] === '[]')
 ok('收藏被清空', store['dsh.git-idea.stars'] === '[]')
+ok('「最近用过」那份记忆不存在了（清空记忆也不写它）', store['dsh.git-idea.mru'] === undefined)
 
 console.log('')
 console.log('== 设置页的文本框也有快捷清除 ==')
@@ -606,3 +616,21 @@ const panelTree = await openPanel()
 ok('面板仍然渲染出三栏', byClass(panelTree, 'dsh-git-left').length === 1 && byClass(panelTree, 'dsh-git-main').length === 1)
 ok('工具栏还在', byClass(panelTree, 'dsh-git-tools').length === 1)
 ok('头部同步按钮还在', byClass(panelTree, 'dsh-git-sync').length === 1)
+
+console.log('')
+console.log('== 整个界面里没有一个原生提示框 ==')
+/* 这是这一版的设计约束，不是某一处控件的细节：鼠标停在哪儿都不该弹出浏览器自己
+   那个 title 框。四块地方各渲染一次，然后整棵树走一遍 —— 节点上不允许出现 title，
+   要说话就用 aria-label（读屏听得到，屏幕上不弹）。 */
+const tooltipNodes = (tree) => collect(tree).filter((n) => n.props != null && n.props.title !== undefined)
+const invChip = await chipTree('chip-inv')
+const invPanel = await openPanel()
+const invCard = await openSwitcher()
+const invSettings = await renderUntilStable(makeElement(section, { close: () => {} }), 'settings-inv')
+const surfaces = [['输入框 chip', invChip], ['面板', invPanel], ['分支卡片', invCard], ['设置页', invSettings]]
+for (const pair of surfaces) {
+  const bad = tooltipNodes(pair[1])
+  console.log('  ' + pair[0] + ' 上带 title 的节点:', bad.length,
+    bad.length === 0 ? '' : JSON.stringify(bad.slice(0, 3).map((n) => String(n.type))))
+  ok(pair[0] + ' 上没有原生提示框', bad.length === 0)
+}

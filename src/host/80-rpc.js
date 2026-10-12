@@ -76,6 +76,10 @@ onRpc('git/refs', function (input) { return refsSnapshot(input) })
 
 onRpc('git/branches', function (input) { return branchesSnapshot(input) })
 
+/* 只读的工作树清单：DSH 自己会建树（`create_worktree`），这个插件只把它建出来
+   的东西说清楚 —— 树上有什么、当前在哪一棵、源仓库的哪条改动是工作树池。 */
+onRpc('git/worktrees', function (input) { return worktreesSnapshot(input) })
+
 onRpc('git/commit-detail', function (input) { return commitDetailSnapshot(input) })
 
 /* The one read the panel asks for by path rather than by repository: the patch

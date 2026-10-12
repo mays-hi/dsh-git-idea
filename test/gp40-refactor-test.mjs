@@ -446,15 +446,16 @@ const favIn = (t) => {
   return acts === undefined ? undefined : buttons(acts).find((b) => String(b.props.className).indexOf('dsh-git-bs-fav') >= 0)
 }
 const favBefore = favIn(hoverB)
-console.log('  收藏按钮 title:', JSON.stringify(favBefore.props.title))
-ok('收藏按钮说的是高亮那一行', String(favBefore.props.title).indexOf('zeta') > 0 && favBefore.props.disabled !== true)
+console.log('  收藏按钮:', JSON.stringify(textOf(favBefore)))
+ok('收藏按钮此时可用，写的是「收藏」',
+  textOf(favBefore).indexOf('收藏') >= 0 && favBefore.disabled !== true && favBefore.props.title === undefined)
 favBefore.props.onClick({ stopPropagation() {}, preventDefault() {} })
 await wait(20)
 const starred = await settle()
 const favAfter = favIn(starred)
 ok('点一下就收藏了那一行（按钮自己变成已收藏）', String(favAfter.props.className).indexOf('dsh-git-bs-fav-on') >= 0)
 ok('收藏之后高亮还在同一个分支上（按钮的主语没有跟着排序跑）',
-  String(favAfter.props.title).indexOf('zeta') > 0 && byClass(starred, 'dsh-git-bs-row-on').length === 1
+  textOf(favAfter).indexOf('取消收藏') >= 0 && byClass(starred, 'dsh-git-bs-row-on').length === 1
   && textOf(byClass(starred, 'dsh-git-bs-row-on')[0]).indexOf('zeta') >= 0)
 
 /* ── 弹层里的记号要和面板左栏同一套 ──
@@ -469,8 +470,13 @@ ok('弹层里也有一列专门放「当前分支」的记号', byClass(starred,
 const curRow = branchRows(starred).find((r) => String(r.props.className).indexOf('dsh-git-bs-row-cur') >= 0)
 console.log('  当前分支行:', textOf(byClass(curRow, 'dsh-git-bs-name')[0]), JSON.stringify(textOf(byClass(curRow, 'dsh-git-bs-cur')[0])))
 ok('当前分支用面板那个 ★，不是铅笔', textOf(byClass(curRow, 'dsh-git-bs-cur')[0]) === '★')
+/* 当前分支现在有两行：HEAD 那一组一行，本地那一组一行 —— 两行的记号都是 ★ */
+const curMarked = branchRows(starred).filter((r) => textOf(byClass(r, 'dsh-git-bs-cur')[0]) === '★')
+ok('当前分支在 HEAD 与本地两组各一行，两行都是 ★',
+  curMarked.length === 2
+  && textOf(byClass(curMarked[0], 'dsh-git-bs-name')[0]) === textOf(byClass(curMarked[1], 'dsh-git-bs-name')[0]))
 ok('别的行那一列是空的（只是占位，和面板的 twisty 槽一样宽）',
-  branchRows(starred).filter((r) => textOf(byClass(r, 'dsh-git-bs-cur')[0]) === '').length === branchRows(starred).length - 1)
+  branchRows(starred).filter((r) => textOf(byClass(r, 'dsh-git-bs-cur')[0]) === '').length === branchRows(starred).length - 2)
 ok('每一行画的分支标记都一样（同一套，没有例外）',
   branchRows(starred).every((r) => byClass(r, 'dsh-git-bs-ico').length === 1))
 
@@ -482,10 +488,12 @@ ok('分组头里不再有自画的 SVG 箭头', group !== undefined && collect(g
 const chipsRow = byClass(starred, 'dsh-git-bs-head-acts')[0]
 const chipTexts = (chipsRow === undefined ? [] : buttons(chipsRow)).map((b) => textOf(b))
 console.log('  动作 chip:', JSON.stringify(chipTexts))
-ok('动作 chip 只有记号，没有文字（文字在 title 里；角标是数字，留着）',
-  chipTexts.length === 5 && chipTexts[0] === '⇣' && chipTexts[1].indexOf('↓') === 0 && chipTexts[2].indexOf('↑') === 0
-  && chipTexts[3] === '+' && ['☆', '★'].indexOf(chipTexts[4]) >= 0
-  && chipTexts.join('').search(/[\u4e00-\u9fa5]/) < 0)
+ok('动作 chip 是「记号 + 短词」（角标是数字，留着）',
+  chipTexts.length === 5 && chipTexts[0].indexOf('⇣') === 0 && chipTexts[0].indexOf('获取') > 0
+  && chipTexts[1].indexOf('↓') === 0 && chipTexts[2].indexOf('↑') === 0
+  && chipTexts[3].indexOf('+') === 0 && ['☆', '★'].indexOf(chipTexts[4].charAt(0)) >= 0)
+ok('chip 上没有原生提示框（词就在屏幕上）',
+  buttons(chipsRow).every((b) => b.props.title === undefined))
 ok('动作 chip 用的是面板那几个字符，不是另画一套 SVG',
   chipsRow !== undefined && collect(chipsRow).filter((n) => n.type === 'svg').length === 0)
 ok('收藏按钮就在这排动作里', favIn(starred) !== undefined)
@@ -593,7 +601,7 @@ ok('清除后分支又都回来了', pick(cleared, 'dsh-git-tname').map(textOf).
 const bar = byClass(cleared, 'dsh-git-tools')[0]
 const nodes = collect(bar)
 const indexOfClass = (cls) => nodes.findIndex((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf(cls) >= 0)
-ok('搜索框在最前，提交操作最后（IDEA 的顺序）', indexOfClass('dsh-git-logsearch') < indexOfClass('dsh-git-lf') && indexOfClass('dsh-git-lf') < indexOfClass('dsh-git-tool-ico'))
+ok('搜索框在最前，提交操作最后（IDEA 的顺序）', indexOfClass('dsh-git-logsearch') < indexOfClass('dsh-git-lf') && indexOfClass('dsh-git-lf') < indexOfClass('dsh-git-tool'))
 const flags = pick(bar, 'dsh-git-lf-flag')
 const flagOn = (b) => String(b.props.className).indexOf('dsh-git-lf-on') >= 0
 ok('搜索框旁边是 .* 和 Cc 两个开关', flags.length === 2 && textOf(flags[0]) === '.*' && textOf(flags[1]) === 'Cc')
@@ -780,9 +788,11 @@ const headRow = rowNamed('main')
 ok('当前分支加粗（IDEA 的写法）',
   /dsh-git-trow-head/.test(String(headRow.props.className))
   && /dsh-git-trow-head/.test(String(rowNamed('feature').props.className)) === false)
-ok('tooltip 说明了箭头与未提交的含义',
-  String(rowNamed('feature').props.title).indexOf('落后上游 3 个提交') >= 0
-  && String(rowNamed('main').props.title).indexOf('未提交改动') >= 0)
+const ariaIn = (r) => collect(r).map((n) => String(n.props['aria-label'] || '')).join('|')
+ok('箭头的含义说给读屏，行上没有提示框',
+  ariaIn(rowNamed('feature')).indexOf('落后上游 3 个提交') >= 0
+  && ariaIn(rowNamed('main')).indexOf('3 个未提交改动') >= 0
+  && rowNamed('feature').props.title === undefined)
 
 host.call = beforeRefs
 fibers.clear()

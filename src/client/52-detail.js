@@ -28,7 +28,6 @@
             className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
             key: node.id,
             style: { paddingLeft: (6 + node.depth * 12) + 'px' },
-            title: text(file.path) + '（点开看差异）',
             onClick: function () {
               props.onSelect(node.id)
               if (typeof props.onOpenDiff === 'function') props.onOpenDiff(file)

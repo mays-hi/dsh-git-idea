@@ -1,27 +1,27 @@
     const SETUP_REASONS = {
-      'no-path': { title: '无法确定要查看的仓库路径', hint: '会话工作区未知，请在下面手动填写一个目录。' },
-      'missing': { title: '目录不存在', hint: '填写的路径在当前文件系统上找不到。改成一个存在的目录。' },
-      'file': { title: '这不是一个目录', hint: '该路径指向一个文件，而 Git 仓库必须是一个目录。' },
+      'no-path': { heading: '无法确定要查看的仓库路径', hint: '会话工作区未知，请在下面手动填写一个目录。' },
+      'missing': { heading: '目录不存在', hint: '填写的路径在当前文件系统上找不到。改成一个存在的目录。' },
+      'file': { heading: '这不是一个目录', hint: '该路径指向一个文件，而 Git 仓库必须是一个目录。' },
       /* 路径已经确定，只是这里没有仓库：没有要解释的规则，也没有要填的东西。
          不劝人换目录，也不让人把已经显示在上面的路径再抄一遍。 */
-      'not-a-repo': { title: '这个目录不是 Git 仓库', hint: '', editable: false },
+      'not-a-repo': { heading: '这个目录不是 Git 仓库', hint: '', editable: false },
       /* 目录是对的，机器上少了东西：这个页面不能改路径，也不能初始化 —— 两件事
          都救不了这个状态，而 `git init` 只会再失败一次。留一个「打开这个目录」
          当作装好 git 之后的重试。 */
       'no-git': {
-        title: '这台机器上找不到 git',
+        heading: '这台机器上找不到 git',
         hint: '上面这个目录本身是仓库，但面板读它、改它都要调用 git。'
           + '装上 git，或让它出现在 dsh 进程的 PATH 里，再点一次「打开这个目录」。',
         editable: false,
         init: false,
       },
-      'git-error': { title: 'git 命令执行失败', hint: '目录存在，但 git 没能读取它。下方是 git 的原话。' },
+      'git-error': { heading: 'git 命令执行失败', hint: '目录存在，但 git 没能读取它。下方是 git 的原话。' },
     }
 
     function setupReason(id) {
       const found = SETUP_REASONS[id]
       if (found !== undefined) return found
-      return { title: '这里还不是 Git 仓库', hint: '' }
+      return { heading: '这里还不是 Git 仓库', hint: '' }
     }
 
     function RepoSetup(props) {
@@ -63,7 +63,7 @@
       }
 
       return h('div', { className: 'dsh-git-setup' },
-        h('div', { className: 'dsh-git-setup-h' }, info.title),
+        h('div', { className: 'dsh-git-setup-h' }, info.heading),
         h('div', { className: 'dsh-git-setup-path' }, props.initial.length > 0 ? props.initial : '（没能确定路径）'),
         info.hint.length > 0 ? h('div', { className: 'dsh-git-hint' }, info.hint) : null,
         props.stderr.length > 0 ? h('div', { className: 'dsh-git-hint dsh-git-error dsh-git-mono' }, props.stderr) : null,
@@ -101,4 +101,3 @@
           '将在 ' + target + ' 下执行 git init' + (plugin.initBranch.length > 0 ? ' -b ' + plugin.initBranch : '') + ' —— 这会创建一个 .git 目录并写入文件，无法通过界面撤销。') : null,
         problem !== null ? h('div', { className: 'dsh-git-hint dsh-git-error' }, problem) : null)
     }
-

@@ -127,6 +127,17 @@ function parseDag(stdout) {
   return commits
 }
 
+/* ── 提交记录的字段顺序：格式串和解析住在同一个文件里 ──
+
+   0-6 这七个字段是**一份契约的两个端点**，而有三个读者：历史列表、提交详情、提交图。
+   原来格式串写在 64-history.js 和 68-detail.js 里、解析写在 50-graph.js 里 —— 改字段
+   顺序时漏掉第三个，就是屏幕上有一列数据错位，而三份代码各自都"看起来对"。现在格式
+   串和解析挨着，两边各自只在后面接自己的尾巴（列表接 `%D%x1f%P`，详情接 `%b`）。
+
+   %x1e 分隔记录、%x1f 分隔字段 —— 用 git 自己的转义而不是制表符和换行：这两个字节
+   不可能出现在提交信息里，而制表符和换行都能。 */
+const COMMIT_FIELDS = '%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s'
+
 function parseCommitRecords(stdout) {
   const commits = []
   const records = stdout.split('\u001e')

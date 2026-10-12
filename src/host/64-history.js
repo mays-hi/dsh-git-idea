@@ -67,27 +67,48 @@ function missingPanel(target, reason) {
   return {
     ok: false, repo: target, error: 'not-a-repository', reason: reason,
     stderr: '', exitCode: null, staged: [], unstaged: [], untracked: [], unmerged: [],
+    /* 读不到仓库时也有一个明确的"不是链接工作树"，好过让这个键时有时无。 */
+    worktree: null,
   }
+}
+
+/* ── 一次面板读的输出头 ──
+
+   身份读和完整读跑的是同一个 shell 骨架（见 62-panel.js 的 `pathShell`），所以
+   "这个路径是文件、目录还是不在了"、"这台机器上有没有 git"、"git 的退出码是多少"、
+   "有没有半途而废的操作"—— 这四件事**必须**两边答得一样。写一次，它们就不再可能
+   各答各的；两个读者只剩自己正文的解析。 */
+function readProbeOutput(stdout) {
+  const lines = stdout.split('\n')
+  const out = {
+    kind: lines.length > 0 ? lines[0] : '',
+    exitCode: null, sequencer: null, noGit: false, needsIdentity: false, body: [],
+  }
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line === PANEL_NO_GIT) { out.noGit = true; continue }
+    if (line === PANEL_NO_IDENT) { out.needsIdentity = true; continue }
+    if (line.indexOf('RC:') === 0) { out.exitCode = parseInt(line.slice(3), 10); continue }
+    if (line.indexOf('S:') === 0) { if (out.sequencer === null) out.sequencer = line.slice(2); continue }
+    out.body.push(line)
+  }
+  return out
 }
 
 async function readPanelIdentity(input, target) {
   const probe = await probeShell(input, panelIdentityCommand(target))
-  const lines = probe.stdout.split('\n')
-  const kind = lines.length > 0 ? lines[0] : ''
-  if (kind === 'K:file') return missingPanel(target, 'file')
-  if (kind !== 'K:dir') return missingPanel(target, 'missing')
+  const probeOut = readProbeOutput(probe.stdout)
+  if (probeOut.kind === 'K:file') return missingPanel(target, 'file')
+  if (probeOut.kind !== 'K:dir') return missingPanel(target, 'missing')
 
-  let exitCode = null
-  let sequencer = null
   let branch = null
   let upstream = null
   let track = ''
-  let noGit = false
-  for (let i = 1; i < lines.length; i += 1) {
-    const line = lines[i]
-    if (line === PANEL_NO_GIT) { noGit = true; continue }
-    if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
-    if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
+  const marker = { linked: false, name: '' }
+  for (let i = 0; i < probeOut.body.length; i += 1) {
+    const line = probeOut.body[i]
+    if (line.indexOf('WN:') === 0) { marker.name = line.slice(3); continue }
+    if (line.indexOf('W:') === 0) { marker.linked = true; continue }
     if (line.indexOf('B:') === 0) { branch = line.slice(2); continue }
     /* The upstream and its standing arrive in one line, separated by the same
        \u001f the rest of the Host uses: one for-each-ref answers both. */
@@ -99,10 +120,10 @@ async function readPanelIdentity(input, target) {
   }
   /* Before the exit code, which the script never reached: "this machine has no
      git" is not a repository that failed to read, and the reader can act on it. */
-  if (noGit) return missingPanel(target, 'no-git')
-  if (exitCode !== 0) {
+  if (probeOut.noGit) return missingPanel(target, 'no-git')
+  if (probeOut.exitCode !== 0) {
     const failed = missingPanel(target, 'not-a-repo')
-    failed.exitCode = exitCode
+    failed.exitCode = probeOut.exitCode
     failed.stderr = ''
     return failed
   }
@@ -111,7 +132,10 @@ async function readPanelIdentity(input, target) {
     ok: true, repo: target, branch: branch, detached: branch === null,
     upstream: upstream !== null && upstream.length > 0 ? upstream : null,
     ahead: counts.ahead, behind: counts.behind,
-    sequencer: sequencer,
+    sequencer: probeOut.sequencer,
+    /* 这一份目录在不在 git 的工作树清单里（见 `worktreeShell`）：链接工作树才
+       有 `commondir`，才有名字。chip 靠它决定要不要画出那颗工作树标记。 */
+    worktree: marker.linked ? { linked: true, name: marker.name } : null,
     staged: [], unstaged: [], untracked: [], unmerged: [],
     /* Says outright that the working tree was not read, so nothing downstream
        can mistake "no changes" for "not asked". */
@@ -122,31 +146,16 @@ async function readPanelIdentity(input, target) {
 async function readPanel(input, target, paths) {
   const asked = paths == null ? [] : paths
   const probe = await probeShell(input, panelCommand(target, asked))
-  const lines = probe.stdout.split('\n')
-  const kind = lines.length > 0 ? lines[0] : ''
-  if (kind === 'K:file') return missingPanel(target, 'file')
-  if (kind !== 'K:dir') return missingPanel(target, 'missing')
+  const probeOut = readProbeOutput(probe.stdout)
+  if (probeOut.kind === 'K:file') return missingPanel(target, 'file')
+  if (probeOut.kind !== 'K:dir') return missingPanel(target, 'missing')
+  const output = probeOut.body.join('\n')
 
-  let exitCode = null
-  let sequencer = null
-  let noGit = false
-  let needsIdentity = false
-  const body = []
-  for (let i = 1; i < lines.length; i += 1) {
-    const line = lines[i]
-    if (line === PANEL_NO_GIT) { noGit = true; continue }
-    if (line === PANEL_NO_IDENT) { needsIdentity = true; continue }
-    if (line.indexOf('RC:') === 0) { exitCode = parseInt(line.slice(3), 10); continue }
-    if (line.indexOf('S:') === 0) { if (sequencer === null) sequencer = line.slice(2); continue }
-    body.push(line)
-  }
-  const output = body.join('\n')
-
-  if (noGit) return missingPanel(target, 'no-git')
-  if (exitCode !== 0) {
+  if (probeOut.noGit) return missingPanel(target, 'no-git')
+  if (probeOut.exitCode !== 0) {
     const outsideRepo = output.indexOf('not a git repository') >= 0
     const failed = missingPanel(target, outsideRepo ? 'not-a-repo' : 'git-error')
-    failed.exitCode = exitCode
+    failed.exitCode = probeOut.exitCode
     failed.stderr = outsideRepo ? '' : output
     return failed
   }
@@ -157,14 +166,14 @@ async function readPanel(input, target, paths) {
   const reply = {
     ok: true, repo: target, branch: parsed.detached ? null : parsed.branch, detached: parsed.detached,
     upstream: parsed.upstream, ahead: parsed.ahead, behind: parsed.behind,
-    sequencer: sequencer,
+    sequencer: probeOut.sequencer,
     staged: parsed.staged, unstaged: parsed.unstaged, untracked: untracked, unmerged: parsed.unmerged,
     /* Always a boolean, never left out and never `undefined`: the bridge validates
        every field of a reply for "can this become lossless JSON", and a key whose
        value is `undefined` rejects the *whole* reply — the client would get an
        error instead of a snapshot. (Found live, not in a suite: the suites call
        these handlers directly, with no validation in between.) */
-    needsIdentity: needsIdentity === true,
+    needsIdentity: probeOut.needsIdentity === true,
   }
   /* A pathspec answer is about those paths and nothing else. It says so, and it
      names them, so the client can fold it into the snapshot it already has
@@ -220,7 +229,7 @@ async function readGraph(input, repo) {
   /* One commit more than asked for: the extra row is not returned, it is how
      "there is more history" is answered without a second read. */
   const argv = ['-c', 'core.quotePath=false', 'log', '--max-count=' + String(maxCount + 1), '--date-order',
-    '--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x1f%P%x1e']
+    '--pretty=format:' + COMMIT_FIELDS + '%x1f%D%x1f%P%x1e']
   if ((search.length > 0 && regex !== true) || author.length > 0) argv.push('--fixed-strings')
   if (search.length > 0) {
     argv.push('--grep=' + search)

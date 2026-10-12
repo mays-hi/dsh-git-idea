@@ -101,11 +101,11 @@
       const indentPad = function (depth) {
         return h('span', { key: 'pad', className: 'dsh-git-tind', style: { width: (depth * INDENT_W) + 'px' } })
       }
-      const stageBox = function (key, state, title, onClick) {
+      const stageBox = function (key, state, label, onClick) {
         return h('span', {
           key: key,
           className: 'dsh-git-cbox' + (state === 'all' ? ' dsh-git-cbox-on' : (state === 'some' ? ' dsh-git-cbox-part' : '')),
-          title: title,
+          'aria-label': label,
           onClick: function (event) {
             event.stopPropagation()
             onClick()
@@ -140,6 +140,19 @@
         return h('span', { className: 'dsh-git-tname' },
           h('span', { key: 'b' }, parts.base),
           h('span', { key: 'd', className: 'dsh-git-tpath' }, parts.dir))
+      }
+      /* ── 工作树池那条改动 ──
+
+         DSH 把新工作树建在源仓库**里面**（默认 `.agents/worktrees/`），于是它会
+         作为一条未跟踪改动出现在这里。它不是读者改出来的东西，所以这里给它一个
+         标记和一整句解释 —— 只标记，不隐藏：git 会把整棵未跟踪目录折叠成一条，
+         `.agents/` 里完全可能还有读者自己的文件（实测过），藏掉它就是连那个文件
+         一起藏。设置页也没必要为它加一个开关：一条带解释的标记已经够了。 */
+      const worktreeBadge = function (path) {
+        if (props.worktrees == null) return null
+        const note = worktreeNote(props.worktrees, path)
+        if (note === null) return null
+        return h('span', { key: 'wt', className: 'dsh-git-wtnote' }, note)
       }
       /* ── what the boxes are, and how many of them there are ──
 
@@ -178,7 +191,6 @@
         return h('div', {
           className: rowClass(key),
           key: key,
-          title: text(entry.path) + '（点开看差异）',
           onClick: function () {
             props.onSelect(key)
             if (typeof props.onOpenDiff === 'function') props.onOpenDiff(entry)
@@ -190,6 +202,7 @@
           indentPad(depth),
           h('span', { className: 'dsh-git-tw' }),
           h('span', { className: 'dsh-git-st' + statusClass(entry.displayCode) }, statusLabel(entry.displayCode)),
+          worktreeBadge(text(entry.path)),
           nameCell(label, flat))
       }
 
@@ -204,7 +217,6 @@
         const rows = [h('div', {
           className: rowClass(key),
           key: key,
-          title: path + '（未跟踪的目录，双击展开）',
           onClick: function () { props.onSelect(key) },
           onDoubleClick: function () { props.onToggleUntracked(path) },
         },
@@ -214,6 +226,7 @@
           indentPad(depth),
           twisty({ collapsed: !open, onToggle: function () { props.onToggleUntracked(path) } }),
           h('span', { key: 'ico', className: 'dsh-git-tdir' }, h(Icon, { name: 'folder', size: 12 })),
+          worktreeBadge(path),
           nameCell(label, flat))]
         if (open) {
           const list = props.untrackedFiles[path]
@@ -232,7 +245,6 @@
               rows.push(h('div', {
                 className: rowClass(childKey),
                 key: childKey,
-                title: inside + '（点开看差异）',
                 onClick: function () {
                   props.onSelect(childKey)
                   props.onOpenDiff({ path: inside, workCode: '??', untracked: true, staged: false, displayCode: '?' })
@@ -270,7 +282,6 @@
             rows.push(h('div', {
               className: rowClass(node.id),
               key: node.id,
-              title: node.name + '（双击展开/折叠）',
               onClick: function () { props.onSelect(node.id) },
               onDoubleClick: function () { props.onToggle(node.path) },
             },
@@ -320,7 +331,7 @@
         return h('div', {
           className: rowClass(key + ':title', 'dsh-git-cgroup'),
           key: key + ':title',
-          title: label + '（' + hint + '；双击展开/折叠）',
+          'aria-label': label + '（' + hint + '；双击展开/折叠）',
           onClick: function () { props.onSelect(key + ':title') },
           onDoubleClick: function () { props.onToggle(key) },
         },
@@ -352,8 +363,8 @@
       const allKind = kindOf(changes)
       const canCommit = props.busy !== true && props.message.trim().length > 0 && totalChanges > 0
       /* The count and the button say 项 because that is what the boxes are; the
-         breakdown of files against directories is in the tooltip and on the group
-         titles, where each number belongs to the rows under it. */
+         breakdown of files against directories is on the group titles, where each
+         number belongs to the rows under it. */
       const kindsTitle = countText(allKind)
         + (allKind.dirs > 0 ? '；目录要展开才知道里面有多少文件' : '')
       const label = stagedCount > 0
@@ -376,7 +387,7 @@
           value: props.message,
           onChange: function (event) { props.onMessage(event.target.value) },
         }), props.message.length > 0, function () { props.onMessage('') }, 'dsh-git-clearable-area'),
-        h('div', { key: 'k', className: 'dsh-git-dim', title: kindsTitle },
+        h('div', { key: 'k', className: 'dsh-git-dim', 'aria-label': kindsTitle },
           '已暂存 ' + String(stagedCount) + ' / 共 ' + String(totalChanges) + ' 项'),
         h('button', {
           type: 'button',

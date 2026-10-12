@@ -96,6 +96,25 @@ function branchIdentityShell(target) {
   ].join('\n')
 }
 
+/* ── 这是一棵链接工作树吗 ──
+
+   DSH 0.2 的 `create_worktree` 造出来的那棵树，gitdir 不在树里面：它指向源
+   仓库的 `.git/worktrees/<name>`，而那个目录里有 git 自己写下的 `commondir`。
+   主工作树没有这个文件（它的 gitdir 就是 `.git` 本身），所以这是一次纯文件
+   存在性判断 —— 不起进程，也不去猜路径里有没有 "worktrees" 这个词。
+
+   只画在**身份那一次读**（`panelIdentityCommand`）里：chip 和面板都拿它当"哪个
+   仓库、哪个分支"的答案（面板的 `work` 就是这一次读），完整读那份答复没人问这
+   件事。两处各算一遍的结果是多一个可能对不上的答案，不是一个更全的答复。 */
+function worktreeShell() {
+  return [
+    '    if [ -f "$gd/commondir" ]; then',
+    "      printf 'W:linked\\n'",
+    "      printf 'WN:%s\\n' \"${gd##*/}\"",
+    '    fi',
+  ].join('\n')
+}
+
 /* The shape both reads share: the three answers about the path itself, the one
    gitdir both of them need, and the half-done-operation markers — with everything
    that is actually asked of the repository in the middle. Written once because
@@ -141,6 +160,7 @@ function panelIdentityCommand(target) {
     "    printf 'fatal: not a git repository\\n'",
     '  else',
     branchIdentityShell(target),
+    worktreeShell(),
     sequencerShell(),
     "    printf 'RC:0\\n'",
     '  fi',

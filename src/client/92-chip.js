@@ -10,9 +10,31 @@
     /* 全树读压后多久：屏幕上先有这一帧的反馈，再让那条 8–10s 的读去占通道。 */
     const COUNT_FULL_DELAY_MS = 2000
 
+    /* ── 没有仓库时，chip 上写哪两个字 ──
+
+       这一段以前只活在悬浮提示里（"目录不存在：/x/y —— 点击修改路径"），而那是浏览
+       器自己弹的框：鼠标不经过就什么都看不到，页面上只剩一颗带加号的 Git 图标。现在
+       词就在图标旁边，说清是哪一种，点开就是对应的那一页。 */
+    const CHIP_WORDS = {
+      'missing': '目录不存在',
+      'file': '不是目录',
+      'no-git': '没有 git',
+      'no-path': '选择目录',
+      'not-a-repo': '不是仓库',
+      'git-error': '读取失败',
+    }
+    function chipWord(reason) {
+      if (reason === undefined || reason === '') return 'Git'
+      return CHIP_WORDS[reason] !== undefined ? CHIP_WORDS[reason] : '读不动'
+    }
+
     function GitChip(props) {
       const isOpen = useOpen()
       const switching = useSwitchingTo()
+      /* 会话的生效目录（DSH 0.2 的 `workingDirectory` 投影）：模型把工作目录搬到
+         一棵工作树里之后，这个值就变了 —— 它就是"该重新读哪个仓库"的信号。见
+         `projectionCwd`。 */
+      const sessionDir = projectionCwd(props)
       const [info, setInfo] = React.useState(function () { return chipLabelFor(props.sessionId) })
       const reloadAt = useDataVersion()
       /* 谁写了那份读数都要重画：面板量完一次，chip 上的数字跟着变。 */
@@ -84,6 +106,10 @@
               pending: pending,
               repo: repo,
               reason: '',
+              /* 这一份目录是不是一棵链接工作树（Host 从 gitdir 里读出来的，见
+                 `worktreeShell`）：是就多一颗标记，让"这个分支在另一棵树上"这件事
+                 在圆角按钮上就看得见。 */
+              worktree: data.worktree == null ? null : data.worktree,
             }
           } else {
             chipInfos[sessionId] = { repo: data != null ? text(data.repo) : '', pending: 0 }
@@ -91,6 +117,7 @@
               phase: 'none', label: null, pending: 0,
               repo: data != null ? text(data.repo) : '',
               reason: data != null ? text(data.reason) : '',
+              worktree: null,
             }
           }
           setInfo(chipLabels[sessionId])
@@ -156,54 +183,57 @@
           if (alive === true) setInfo({ phase: 'none', label: null, pending: 0, repo: '', reason: '' })
         })
         return function () { alive = false; if (stopFull !== null) stopFull() }
-      }, [watched, repoVersion, isOpen, sessionId, reloadAt])
+        /* `sessionDir` 是唯一一个"会话本身动了"的信号：模型 `create_worktree` 或
+           `cd` 之后，仓库不会自己动，动了的是会话。少了这一条，chip 会一直指着
+           `create_worktree` 之前那个仓库，直到某个别的理由让它重读。 */
+      }, [watched, repoVersion, isOpen, sessionId, reloadAt, sessionDir])
 
       const isRepo = info.phase === 'repo'
-      const where = info.repo.length > 0 ? info.repo : '当前会话工作区'
-      /* 数字来自全局那一份读数，而不是这次快读 —— 快读根本不带工作区。还没量过就说
-         「正在核对」，不说「工作区干净」：没量出来和没改动是两件事。读数该完整重来
-         一遍时（due）也这么说，因为那一次全树读确实正在排。 */
-      const count = known !== true
-        ? '正在核对改动…'
-        : (pending > 0
-          ? String(pending) + ' 个改动' + (due === true ? '（正在核对）' : '')
-          : (due === true ? '正在核对改动…' : '工作区干净'))
-      let title = 'Git'
-      if (info.phase === 'loading') title = 'Git'
-      else if (isRepo) title = info.label + ' · ' + info.repo + ' · ' + count
-      else if (info.reason === 'missing') title = '目录不存在：' + where + ' —— 点击修改路径'
-      else if (info.reason === 'file') title = '这不是一个目录：' + where + ' —— 点击修改路径'
-      else if (info.reason === 'git-error') title = where + ' 读取失败 —— 点击查看原因'
-      else if (info.reason === 'no-git') title = where + '：这台机器上找不到 git —— 点击查看'
-      /* 路径还没定：这一页要人填一个目录，所以这里得说「填」，不能说「这个目录不是
-         仓库」—— 那时候连是哪个目录都还不知道。 */
-      else if (info.reason === 'no-path') title = '还没确定看哪个目录 —— 点击填写'
-      /* 「这个目录不是 Git 仓库」那一页没有路径框（路径不是问题，没什么可填的），
-         所以这里也不再承诺「点击选择路径」—— 承诺一个点不到的东西比不承诺更坏。 */
-      else if (info.reason === 'not-a-repo') title = where + ' 这个目录不是 Git 仓库 —— 点击查看'
-      else if (info.reason === '') title = 'Git —— 点击打开面板'
-      else title = where + ' 读不动这个目录 —— 点击查看'
+      /* 链接工作树：**前面那颗图标自己换**，不在后面再挂一颗。同一份改动在源仓库
+         和工作树里是两个不同的工作区，读者要能一眼看出屏幕上这份是哪一个；而第二
+         颗图标的代价不只是丑 —— 两个 flex 兄弟读起来像两个按钮，这个 chip 从头到
+         尾只有一个按钮（同 `BranchIcon` 里 `plus` 那段：一个字形读起来是一个按钮）。 */
+      const worktree = isRepo && info.worktree != null ? info.worktree : null
+      /* ── 「还在核对」这件事由**最前面那颗图标**说，不在后面加字 ──
 
-      const children = [h(BranchIcon, {
-        key: 'icon', size: 14, plus: !isRepo && info.phase === 'none',
-        spin: switching !== null,
-      })]
-      if (isRepo) children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, info.label))
+         还没量出来、或者这一份读数该完整重来一遍时（due —— 它含"那一次全树读
+         正在飞"），图标转圈；切分支时也转（同一个动作，读者不用分两种画法）。
+         于是屏幕上只剩下「分支名 + 数字」：转与不转，就是"还在核对"和"核对过了"
+         的区别。这比在后面长出一段「正在核对…」好 —— 后面那段字还会把分支名往
+         左边挤（见截图里那一条 chip）。
+
+         数字来自全局那一份读数，而不是这次快读 —— 快读根本不带工作区；没量出来
+         和没改动是两件事，所以没量出来时也不谎称「干净」，只是那颗图标在转。 */
+      const reading = isRepo === true && (known !== true || due === true)
+      const spinning = switching !== null || reading
+
+      /* 前面那一格：忙的时候是那个转圈的圆环，忙完换回该出现的那一颗 —— 在链接
+         工作树里是工作树字形（VS Code 的 codicon），否则是分支图标，以及它在"这个
+         目录还不是仓库"时才画的那一笔 plus。 */
+      const children = [spinning
+        ? h(SpinnerIcon, { key: 'icon', size: 14 })
+        : (worktree === null
+            ? h(BranchIcon, {
+                key: 'icon', size: 14, plus: !isRepo && info.phase === 'none',
+              })
+            : h(WorktreeIcon, { key: 'icon', size: 14 }))]
+      children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, isRepo ? info.label : chipWord(info.reason)))
       if (isRepo && known === true && pending > 0) {
         children.push(h('span', {
           className: 'dsh-git-badge' + (due === true ? ' dsh-git-badge-stale' : ''),
           key: 'badge',
         }, String(pending)))
       }
-
       return h('button', {
         type: 'button',
         className: 'dsh-git-chip'
           + (isRepo ? ' dsh-git-chip-repo' : ' dsh-git-chip-idle')
           + (isOpen ? ' dsh-git-chip-open' : ''),
-        title: switching !== null
-          ? '正在切到 ' + switching + '…'
-          : (isRepo ? title + ' · 悬停可直接切换分支' : title),
+        /* 一句话进 aria-label：读屏听得到，页面上不弹框 —— 图标转圈这件事也得说出来，
+           不然它只对看得见的人存在。 */
+        'aria-label': (isRepo ? info.label : chipWord(info.reason))
+          + (switching !== null ? '（正在切换分支）' : (reading === true ? '（正在核对改动）' : ''))
+          + ' —— 点击打开 Git 面板',
         ref: function (node) { chipNode = node },
         onClick: function () { clearHoverTimer(); setSwitchMode(null); setOpen(!isOpen) },
         /* Hover rather than right-click: the chip already names the branch, so

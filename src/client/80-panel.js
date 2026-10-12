@@ -2,6 +2,10 @@
       const plugin = usePluginConfig()
       const prefs = useGitSettings()
       const sessionId = props.sessionId
+      /* 会话的生效目录（DSH 0.2 的 `workingDirectory` 投影）。模型 `create_worktree`
+         或 `cd` 之后这个值就变了：仓库自己没动，动的是会话 —— 这是面板唯一的
+         "该重读哪个仓库"的信号（见 `projectionCwd`）。 */
+      const sessionDir = projectionCwd(props)
       const switcher = useSwitchMode()
       const switching = useSwitchingTo()
       const [tab, setTab] = React.useState('log')
@@ -15,6 +19,9 @@
          拿到的本来就是同一份答案（见 10-state.js 的 rememberedPanel）。先把它铺上，
          挂载时那次读照旧发出，用答复确认或纠正。 */
       const [remembered] = React.useState(function () { return rememberedPanel(sessionId) })
+      /* 这个仓库的工作树清单（只读）。按仓库记在客户端（见 76-worktrees.js），
+         所以切回一个读过的仓库时第一帧就有东西可画。 */
+      const [worktrees, setWorktrees] = React.useState(null)
       const [refs, setRefs] = React.useState(null)
       const [authors, setAuthors] = React.useState(null)
       const [graph, setGraph] = React.useState(null)
@@ -405,7 +412,25 @@
         }
         readChanges()
         return undefined
-      }, [appliedRepo, tab, freshAt, props.ready, sessionId])
+        /* `sessionDir` 也在里面：模型把工作目录搬进一棵工作树之后，仓库没有动，
+           是会话动了 —— 少了这条依赖，面板会一直指着搬走之前那个仓库。 */
+      }, [appliedRepo, tab, freshAt, props.ready, sessionId, sessionDir])
+
+      /* 工作树清单：便宜（两个进程），但要能跟上模型刚建出来的树，所以它不进
+         Host 的读缓存，也不跟着"仓库动过"那个信号走 —— 每次这个仓库的身份或
+         会话目录变了就问一次。 */
+      React.useEffect(function () {
+        if (props.ready !== true || repoOk !== true) return undefined
+        let alive = true
+        const request = base(appliedRepo)
+        callHost('git/worktrees', request).then(function (data) {
+          if (!alive) return
+          setWorktrees(data)
+        }).catch(function () {
+          if (alive) setWorktrees(null)
+        })
+        return function () { alive = false }
+      }, [appliedRepo, repoOk, props.ready, sessionId, freshAt, sessionDir])
 
       /* A read that came back “not a repository” while the session was still
          being resolved must not be the last word: closing and reopening the
@@ -652,6 +677,8 @@
       }
 
       const changes = status != null && status.ok === true ? mergeChanges(status) : []
+      /* 工作树页签的徽标和页签里那份清单要说的是同一个数，所以它只算一次。 */
+      const wtCount = worktreeCount(worktrees)
       let stagedCount = 0
       for (let i = 0; i < changes.length; i += 1) if (changes[i].staged === true) stagedCount += 1
 
@@ -689,20 +716,20 @@
       /* Short labels: this select now sits inside an inline "分支：…" trigger, so
          "当前分支（main）" would be the widest thing in the toolbar. */
       /* A native select cannot ellipsize — it cuts the glyph in half — so a long
-         branch name is shortened in the label itself, with the full name in the
-         option's title. */
+         branch name is shortened in the label itself. The full name is on the
+         header's own branch chip, one line above, which is where the eye goes. */
       const shortRef = function (name) { return name.length > 12 ? name.slice(0, 11) + '…' : name }
       const branchOptions = [
-        { value: '@current', label: '当前' + (currentBranch.length > 0 ? ' ' + shortRef(currentBranch) : ''), title: currentBranch },
-        { value: '@all', label: '所有分支', title: '所有分支' },
+        { value: '@current', label: '当前' + (currentBranch.length > 0 ? ' ' + shortRef(currentBranch) : '') },
+        { value: '@all', label: '所有分支' },
       ]
       if (refs != null && refs.ok === true) {
         for (let i = 0; i < refs.local.length; i += 1) {
-          branchOptions.push({ value: refs.local[i].data, label: shortRef(refs.local[i].data), title: refs.local[i].data })
+          branchOptions.push({ value: refs.local[i].data, label: shortRef(refs.local[i].data) })
         }
         for (let i = 0; i < refs.remote.length; i += 1) {
           for (let k = 0; k < refs.remote[i].refs.length; k += 1) {
-            branchOptions.push({ value: refs.remote[i].refs[k].data, label: shortRef(refs.remote[i].refs[k].data), title: refs.remote[i].refs[k].data })
+            branchOptions.push({ value: refs.remote[i].refs[k].data, label: shortRef(refs.remote[i].refs[k].data) })
           }
         }
       }
@@ -714,9 +741,7 @@
           const who = authors.authors[i]
           const value = who.email.length > 0 ? who.email : who.name
           authorLabels[value] = who.name
-          authorOptions.push(h('option', {
-            key: 'a' + i, value: value, title: who.name + ' · ' + String(who.count) + ' 个提交',
-          }, who.name))
+          authorOptions.push(h('option', { key: 'a' + i, value: value }, who.name))
         }
       }
 
@@ -734,20 +759,25 @@
       const sequencer = work != null && work.ok === true ? text(work.sequencer) : ''
       const conflicts = status != null && status.ok === true ? status.unmerged.length : 0
 
-      const tool = function (key, label, title, onClick, options) {
+      /* One button: the mark (a character or an icon), a short word, an optional
+         badge. The word on screen is what the button does; the full sentence is
+         the button's accessible name, where there is room for it. Neither of them
+         is a tooltip — nothing in this panel pops up the browser's own box. */
+      const tool = function (key, mark, aria, onClick, options) {
         const opts = options == null ? {} : options
         const classes = ['dsh-git-tool']
         if (opts.danger === true) classes.push('dsh-git-danger')
         if (opts.on === true) classes.push('dsh-git-tool-on')
-        /* An icon-only tool: same hit area as the labelled ones, no text. */
-        if (opts.ico === true) classes.push('dsh-git-tool-ico')
-        const parts = [label]
+        const parts = [mark]
+        if (typeof opts.text === 'string' && opts.text.length > 0) {
+          parts.push(h('span', { key: 't', className: 'dsh-git-tool-text' }, opts.text))
+        }
         if (typeof opts.badge === 'number' && opts.badge > 0) {
           parts.push(h('span', { key: 'b', className: 'dsh-git-tool-badge' }, String(opts.badge)))
         }
         return h('button', {
           key: key, type: 'button', className: classes.join(' '),
-          disabled: opts.disabled === true, title: title, onClick: onClick,
+          disabled: opts.disabled === true, 'aria-label': aria, onClick: onClick,
         }, parts)
       }
 
@@ -755,25 +785,37 @@
          beside the branch it acts on — not in the commit graph's own toolbar,
          which is about the selected commit. The middle toolbar keeps only what
          the selection scopes. */
+      /* 这四个以前只有记号（⟳ ⇣ ↓ ↑），名字在悬浮提示里。现在词就在按钮上，
+         和分支卡片上那排 chip 是同一套（⇣ 获取 / ↓ 拉取 / ↑ 推送）。 */
       const syncGroup = h('div', { className: 'dsh-git-sync' },
-        tool('refresh', '⟳', '重新读取仓库（忽略缓存）', refresh, { disabled: !repoOk || busy }),
-        tool('fetch', '⇣', 'fetch：从所有远端取回最新引用', function () { runOp('git/fetch') }, { disabled: !repoOk || busy }),
-        tool('pull', '↓', 'pull：拉取并合入当前分支', function () { runOp('git/pull') }, { disabled: !repoOk || busy, badge: behind }),
-        tool('push', '↑', 'push：推送当前分支', function () { runOp('git/push') }, { disabled: !repoOk || busy, badge: ahead }))
+        tool('refresh', '⟳', '重新读取仓库（忽略缓存）', refresh, { disabled: !repoOk || busy, text: '刷新' }),
+        tool('fetch', '⇣', 'fetch：从所有远端取回最新引用', function () { runOp('git/fetch') }, { disabled: !repoOk || busy, text: '获取' }),
+        tool('pull', '↓', 'pull：拉取并合入当前分支', function () { runOp('git/pull') }, { disabled: !repoOk || busy, badge: behind, text: '拉取' }),
+        tool('push', '↑', 'push：推送当前分支', function () { runOp('git/push') }, { disabled: !repoOk || busy, badge: ahead, text: '推送' }))
 
-      const branchTitle = (currentName.length > 0 ? currentName : 'HEAD')
-        + (ahead > 0 ? ' · 领先 ' + String(ahead) : '')
-        + (behind > 0 ? ' · 落后 ' + String(behind) : '')
-      /* The branch chip is the switcher's handle: the name is already the thing
+      /* ── 头上的那颗分支 chip ──
+
+         The branch chip is the switcher's handle: the name is already the thing
          the eye goes to, so making it the button saves a trip to the sidebar for
-         the most frequent branch operation there is. */
+         the most frequent branch operation there is.
+
+         它在链接工作树里**自己换字形**（分支 → 工作树），和输入框那颗 chip 同一个
+         做法。原来这里并排放两颗按钮 —— 一颗写分支名、一颗写工作树名，而 DSH 默认
+         拿分支名给工作树命名，于是屏幕上就是两个几乎一样的词顶着两颗分支样的图标，
+         谁也说不清哪颗是干什么的。一个 chip 只有一个按钮，一个位置只说一件事。 */
+      const hereWorktree = work != null && work.worktree != null ? work.worktree : null
       const branchChip = h('button', {
         key: 'chip', type: 'button',
         className: 'dsh-git-branch-chip' + (switcher === 'panel' ? ' dsh-git-branch-chip-on' : ''),
-        title: switching !== null ? '正在切到 ' + switching + '…' : branchTitle + ' · 点击切换分支',
         onClick: function () { setSwitchMode(switcher === 'panel' ? null : 'panel') },
       },
-        h(BranchIcon, { key: 'i', size: 13, spin: switching !== null }),
+        /* 切换在飞的时候前面那格是转圈的圆环，切完换回该出现的那一颗（工作树里
+           就是工作树字形）—— 和输入框那颗 chip 同一套。 */
+        switching !== null
+          ? h(SpinnerIcon, { key: 'i', size: 13 })
+          : (hereWorktree === null
+              ? h(BranchIcon, { key: 'i', size: 13 })
+              : h(WorktreeIcon, { key: 'i', size: 13 })),
         h('span', { key: 'n', className: 'dsh-git-branch-name' }, currentName.length > 0 ? currentName : 'HEAD'),
         ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-ab' }, '↑' + String(ahead)) : null,
         behind > 0 ? h('span', { key: 'b', className: 'dsh-git-ab' }, '↓' + String(behind)) : null)
@@ -820,7 +862,7 @@
       const lfWidth = function (label) { return { width: String(labelWidth(label)) + 'px' } }
       const lfClear = function (key, name, onClear) {
         return h('button', {
-          key: key, type: 'button', className: 'dsh-git-lf-x', title: '清除' + name + '筛选',
+          key: key, type: 'button', className: 'dsh-git-lf-x', 'aria-label': '清除' + name + '筛选',
           onClick: function (event) {
             stopEvent(event)
             /* The trigger is a <label> around a <select>: without preventDefault
@@ -834,7 +876,6 @@
 
       const searchBox = h('div', {
         key: 'search', className: 'dsh-git-logsearch',
-        title: '按提交信息筛选（字面量匹配），回车生效',
       },
         h('span', { key: 'i', className: 'dsh-git-logsearch-ico' }, h(Icon, { name: 'search', size: 13 })),
         h('input', {
@@ -847,7 +888,7 @@
         /* Shown as soon as there is anything to clear, applied or not: the box
            holds the draft, so an un-applied query is still one click from gone. */
         searchDraft.length > 0 || search.length > 0 ? h('button', {
-          key: 'x', type: 'button', className: 'dsh-git-logsearch-x', title: '清空搜索',
+          key: 'x', type: 'button', className: 'dsh-git-logsearch-x', 'aria-label': '清空搜索',
           onClick: function () { setSearchDraft(''); setSearch('') },
         }, '×') : null)
 
@@ -857,7 +898,7 @@
       }
       const branchScoped = allRefs || activeRef.length > 0
       const branchFilter = h('label', {
-        key: 'f:branch', className: 'dsh-git-lf dsh-git-lf-on', title: '分支范围：历史只显示这个分支能到达的提交',
+        key: 'f:branch', className: 'dsh-git-lf dsh-git-lf-on',
       },
         h('span', { key: 'k', className: 'dsh-git-lf-k' }, '分支：'),
         h('select', {
@@ -870,7 +911,7 @@
             else { setAllRefs(false); setActiveRef(next) }
           },
         }, branchOptions.map(function (option) {
-          return h('option', { key: option.value, value: option.value, title: option.title }, option.label)
+          return h('option', { key: option.value, value: option.value }, option.label)
         })),
         lfCaret,
         /* × returns the graph to its default scope — the current branch — rather
@@ -881,7 +922,7 @@
 
       const authorOn = author.length > 0
       const authorFilter = h('label', {
-        key: 'f:author', className: 'dsh-git-lf' + (authorOn ? ' dsh-git-lf-on' : ''), title: '作者',
+        key: 'f:author', className: 'dsh-git-lf' + (authorOn ? ' dsh-git-lf-on' : ''),
       },
         authorOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '作者：') : null,
         h('select', {
@@ -898,7 +939,7 @@
       }
       const dateOn = datePreset !== 'all'
       const dateFilter = h('label', {
-        key: 'f:date', className: 'dsh-git-lf' + (dateOn ? ' dsh-git-lf-on' : ''), title: '时间范围',
+        key: 'f:date', className: 'dsh-git-lf' + (dateOn ? ' dsh-git-lf-on' : ''),
       },
         dateOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '时间：') : null,
         h('select', {
@@ -914,7 +955,7 @@
 
       const pathOn = pathDraft.length > 0 || pathFilter.length > 0
       const pathFilterNode = h('label', {
-        key: 'f:path', className: 'dsh-git-lf' + (pathOn ? ' dsh-git-lf-on' : ''), title: '只看某个路径的历史，回车生效',
+        key: 'f:path', className: 'dsh-git-lf' + (pathOn ? ' dsh-git-lf-on' : ''),
       },
         pathOn ? h('span', { key: 'k', className: 'dsh-git-lf-k' }, '路径：') : null,
         h('input', {
@@ -937,12 +978,12 @@
         searchBox,
         h('button', {
           key: 're', type: 'button', className: 'dsh-git-lf-flag' + (regexSearch === true ? ' dsh-git-lf-on' : ''),
-          title: '正则表达式：把搜索词按正则解释（默认按字面匹配）',
+          'aria-label': '正则表达式：把搜索词按正则解释（默认按字面匹配）',
           onClick: function () { setRegexSearch(regexSearch !== true) },
         }, '.*'),
         h('button', {
           key: 'cs', type: 'button', className: 'dsh-git-lf-flag' + (caseSensitive === true ? ' dsh-git-lf-on' : ''),
-          title: '区分大小写（默认忽略大小写）',
+          'aria-label': '区分大小写（默认忽略大小写）',
           onClick: function () { setCaseSensitive(caseSensitive !== true) },
         }, 'Cc'),
         branchFilter,
@@ -950,7 +991,7 @@
         dateFilter,
         pathFilterNode,
         filterCount >= 2 ? h('button', {
-          key: 'clear', type: 'button', className: 'dsh-git-lclear', title: '清除全部筛选',
+          key: 'clear', type: 'button', className: 'dsh-git-lclear',
           onClick: function () { resetFilters() },
         }, '全部清除') : null,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
@@ -962,22 +1003,22 @@
               record: plugin.cherryPickRecord === true,
             })
           },
-          { disabled: !canAct, ico: true }),
+          { disabled: !canAct, text: '拣选' }),
         tool('revert', h(Icon, { name: 'revert', size: 15 }), '还原：revert，生成一个反向提交来撤销它',
           function () { runOp('git/sequence', { op: 'revert', action: 'start', target: selectedCommit }) },
-          { disabled: !canAct, ico: true }),
+          { disabled: !canAct, text: '还原' }),
         tool('tag', h(Icon, { name: 'tag', size: 15 }), '标签：在这个提交上打标签',
           function () { setArmed(''); setPrompt({ kind: 'tag', value: '' }) },
-          { disabled: !canAct, ico: true }),
+          { disabled: !canAct, text: '标签' }),
         tool('branch', h(BranchIcon, { size: 15 }), '分支：从这个提交新建分支并切过去',
           function () { setArmed(''); setPrompt({ kind: 'branch', value: '' }) },
-          { disabled: !canAct, ico: true }),
+          { disabled: !canAct, text: '分支' }),
         /* Pinned to the right end of the strip, and short: the room it reserves
            is room the filters cannot use, and "200 条" says as much as
            "200 条匹配" once the filters above it are visible. */
         h('span', {
           key: 'count', className: 'dsh-git-count dsh-git-dim',
-          title: String(commitCount) + (hasFilter ? ' 条匹配当前筛选' : ' 条提交'),
+          'aria-label': String(commitCount) + (hasFilter ? ' 条匹配当前筛选' : ' 条提交'),
         }, String(commitCount)))
 
       const promptRow = prompt === null ? null : h('div', { className: 'dsh-git-prompt' },
@@ -1049,7 +1090,7 @@
           key: id,
           type: 'button',
           className: 'dsh-git-cview' + (changesView === id ? ' dsh-git-cview-on' : ''),
-          title: hint,
+          'aria-label': hint,
           onClick: function () { saveSettings(Object.assign({}, prefs, { changesView: id })) },
         }, name)
       }
@@ -1068,14 +1109,24 @@
                  all: the panel opens on the history, and a tab that only says
                  "变更" gives no sign that anything is waiting behind it. */
               h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'changes' ? ' dsh-git-tab-on' : ''),
-                title: changes.length > 0
+                'aria-label': changes.length > 0
                   ? String(changes.length) + ' 个文件有未提交的改动，点开可以逐个看差异'
                   : '未提交的改动',
                 onClick: function () { setTab('changes'); setDiffTarget(null) } },
                 '变更',
                 changes.length > 0 ? h('span', { key: 'n', className: 'dsh-git-tool-badge' }, String(changes.length)) : null),
               h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'log' ? ' dsh-git-tab-on' : ''),
-                title: '提交历史', onClick: function () { setTab('log'); setDiffTarget(null) } }, '历史')),
+                'aria-label': '提交历史', onClick: function () { setTab('log'); setDiffTarget(null) } }, '历史'),
+              /* 工作树是 DSH 自己会造出来的东西，所以这个页签在多数仓库里是空
+                 的 —— 只有一棵树。它照样常驻：树出现的那一刻，读者要能在这个
+                 面板里找到它，而不是猜它去了哪。 */
+              h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'worktrees' ? ' dsh-git-tab-on' : ''),
+                'aria-label': wtCount > 1
+                  ? '这个仓库有 ' + String(wtCount) + ' 棵工作树（含当前这一份）—— 点开看它们在哪'
+                  : '工作树：DSH 的 create_worktree 建出的新树会出现在这里',
+                onClick: function () { setTab('worktrees'); setDiffTarget(null) } },
+                '工作树',
+                wtCount > 1 ? h('span', { key: 'n', className: 'dsh-git-tool-badge' }, String(wtCount)) : null)),
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
@@ -1132,9 +1183,20 @@
             ? function (staged) { setStaged([{ path: diffTarget.path }], staged) }
             : undefined,
         })
+      } else if (tab === 'worktrees') {
+        body = h(WorktreePane, {
+          key: 'worktrees',
+          data: worktrees,
+          /* 点别的树：只把这个面板切过去看。会话不动 —— 模型在哪棵树上干活是
+             DSH 和模型自己的事，这个插件不搬会话，也不注册任何工具。 */
+          onOpen: function (next) { applyRepo(next) },
+        })
       } else if (tab === 'changes') {
         body = h(ChangesPane, {
           work: status,
+          /* 工作树清单只用于**标记**改动列表里那条工作树池（见 76-worktrees.js）：
+             DSH 把新树建在源仓库里面，所以它会作为一条未跟踪改动出现。 */
+          worktrees: worktrees,
           collapsed: collapsed,
           busy: busy,
           message: message,
@@ -1208,11 +1270,11 @@
       if (size.h > 0) popProps.style = Object.assign({}, popProps.style, { height: size.h + 'px' })
 
       return h('div', popProps,
-        h('div', { key: 'gn', className: 'dsh-git-grip dsh-git-grip-n', title: '拖动调整高度', onPointerDown: startDrag('n') }),
-        h('div', { key: 'gw', className: 'dsh-git-grip dsh-git-grip-w', title: '拖动调整宽度', onPointerDown: startDrag('w') }),
-        h('div', { key: 'ge', className: 'dsh-git-grip dsh-git-grip-e', title: '拖动调整宽度', onPointerDown: startDrag('e') }),
-        h('div', { key: 'gnw', className: 'dsh-git-grip dsh-git-grip-nw', title: '拖动调整宽高', onPointerDown: startDrag('nw') }),
-        h('div', { key: 'gne', className: 'dsh-git-grip dsh-git-grip-ne', title: '拖动调整宽高', onPointerDown: startDrag('ne') }),
+        h('div', { key: 'gn', className: 'dsh-git-grip dsh-git-grip-n', 'aria-label': '拖动调整高度', onPointerDown: startDrag('n') }),
+        h('div', { key: 'gw', className: 'dsh-git-grip dsh-git-grip-w', 'aria-label': '拖动调整宽度', onPointerDown: startDrag('w') }),
+        h('div', { key: 'ge', className: 'dsh-git-grip dsh-git-grip-e', 'aria-label': '拖动调整宽度', onPointerDown: startDrag('e') }),
+        h('div', { key: 'gnw', className: 'dsh-git-grip dsh-git-grip-nw', 'aria-label': '拖动调整宽高', onPointerDown: startDrag('nw') }),
+        h('div', { key: 'gne', className: 'dsh-git-grip dsh-git-grip-ne', 'aria-label': '拖动调整宽高', onPointerDown: startDrag('ne') }),
         header,
         banner,
         /* pre-wrap：这条里出现换行的地方都是「那就是两条命令」，折成一行读起来是

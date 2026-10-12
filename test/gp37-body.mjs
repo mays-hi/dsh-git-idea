@@ -29,14 +29,20 @@ ok('未设置时只显示字段名（作者/时间/路径）', byClass(t, 'dsh-g
 ok('分支触发器用短标签（当前 main）', textOf(byClass(t, 'dsh-git-lf')[0]).indexOf('当前 main') > 0
   && textOf(byClass(t, 'dsh-git-lf')[0]).indexOf('当前分支（') < 0)
 ok('筛选用的是无边框 select/input', byClass(t, 'dsh-git-lf-select').length === 3 && byClass(t, 'dsh-git-lf-input').length === 1)
-/* 只看中间栏这条工具栏：面板头部那组同步按钮也是 .dsh-git-tool */
+/* 只看中间栏这条工具栏：面板头部那组同步按钮也是 .dsh-git-tool。
+   提交操作现在是「图标 + 词」（IDEA 也把词写出来），按词找。 */
 const toolBar = byClass(t, 'dsh-git-tools')[0]
-const iconTools = byClass(toolBar, 'dsh-git-tool-ico')
-console.log('  提交操作按钮:', JSON.stringify(iconTools.map((b) => b.props.title)))
-ok('提交操作变成四个图标按钮', iconTools.length === 4 && byClass(toolBar, 'dsh-git-tool').length === 4)
-ok('图标按钮各自带说明（拣选/还原/标签/分支）',
-  ['拣选', '还原', '标签', '分支'].every((l) => iconTools.some((b) => String(b.props.title).indexOf(l) === 0)))
-ok('图标按钮里画的是图标而不是文字', iconTools.every((b) => collect(b).some((n) => n.type === 'svg') && textOf(b) === ''))
+const TOOL_WORDS = ['拣选', '还原', '标签', '分支']
+const toolWith = (tree, word) => byClass(tree, 'dsh-git-tool').filter((b) => textOf(b).indexOf(word) >= 0)[0]
+const commitTools = (tree) => TOOL_WORDS.map((w) => toolWith(tree, w))
+const iconTools = commitTools(toolBar)
+console.log('  提交操作按钮:', JSON.stringify(byClass(toolBar, 'dsh-git-tool').map(textOf)))
+ok('提交操作就是这四个按钮，一个不多一个不少',
+  byClass(toolBar, 'dsh-git-tool').length === 4 && iconTools.every((b) => b !== undefined))
+ok('每个按钮都写着自己的词，完整说法进了 aria-label',
+  iconTools.map(textOf).join('|') === '拣选|还原|标签|分支'
+  && ['拣选', '还原', '标签', '分支'].every((w) => String(toolWith(toolBar, w).props['aria-label']).indexOf(w) === 0))
+ok('词旁边那个图标还在（不是一个纯文字按钮）', iconTools.every((b) => collect(b).some((n) => n.type === 'svg')))
 const iconPaths = (btn) => collect(btn).filter((n) => n.type === 'svg')
   .map((n) => n.props.children.map((c) => String(c.props.d || '')).join('|')).join('||')
 const shapes = iconTools.map(iconPaths)
@@ -118,7 +124,7 @@ console.log('  单击后新增的 git/graph:', JSON.stringify(afterClick.map((c)
 ok('单击没有重新读历史', afterClick.length === 0)
 ok('单击选中了那一行', String(trowWith(t, 'feature').props.className).indexOf('dsh-git-trow-sel') >= 0)
 ok('单击没有把它标成筛选范围', String(trowWith(t, 'feature').props.className).indexOf('dsh-git-trow-scope') < 0)
-ok('单击给了「双击」提示', String(trowWith(t, 'feature').props.title).indexOf('双击') > 0)
+ok('行上没有原生提示框（双击这个手势由行自己承担）', trowWith(t, 'feature').props.title === undefined)
 
 console.log('')
 console.log('== 双击分支：这才把历史切到它 ==')
@@ -139,7 +145,7 @@ const groupRow = (tree, label) => byClass(tree, 'dsh-git-trow').filter((r) => te
 const localTitle = groupRow(t, '本地')
 ok('本地分组有一行标题，带自己的三角',
   localTitle !== undefined && byClass(localTitle, 'dsh-git-tw').length === 1)
-ok('标题行也给了「双击」提示', String(localTitle.props.title).indexOf('双击') > 0)
+ok('标题行也没有原生提示框', localTitle.props.title === undefined)
 const beforeTitleClick = graphCalls().length
 localTitle.props.onClick()
 await wait(15)
@@ -253,7 +259,7 @@ ok('也没有那个「应用」按钮', buttons(panelTop).every((b) => textOf(b)
 console.log('')
 console.log('== 标签 / 分支 的内联输入：也能一键清空 ==')
 const promptInput = () => collect(byClass(t, 'dsh-git-prompt')[0]).find((n) => n.type === 'input')
-byClass(t, 'dsh-git-tool-ico')[2].props.onClick()
+toolWith(t, '标签').props.onClick()
 await wait(10)
 t = await settle('pop')
 ok('点标签图标后出现输入行', byClass(t, 'dsh-git-prompt').length === 1)
@@ -297,7 +303,7 @@ const crowSel = () => byClass(fresh, 'dsh-git-crow-sel')
 ok('打开后一行提交都没有被选中', crowSel().length === 0)
 ok('也没有替用户去读提交详情', calls.filter((c) => c.method === 'git/commit-detail').length === 0)
 ok('右栏是空态「选择一个提交」', textOf(byClass(fresh, 'dsh-git-detail')[0]).indexOf('选择一个提交') >= 0)
-ok('提交操作按钮此时是禁用的', byClass(fresh, 'dsh-git-tool-ico').every((b) => b.props.disabled === true))
+ok('提交操作按钮此时是禁用的', commitTools(fresh).every((b) => b.props.disabled === true))
 ok('列表本身有内容（不是没读到）', byClass(fresh, 'dsh-git-crow').length === 3)
 
 console.log('')
@@ -309,7 +315,7 @@ fresh = await settle('pop')
 ok('点的那一行被选中', crowSel().length === 1 && textOf(crowSel()[0]).indexOf('second commit') >= 0)
 ok('只为点的那一行读详情', calls.filter((c) => c.method === 'git/commit-detail').map((c) => c.args.hash).join(',') === 'bbb222')
 ok('右栏换成了那个提交', textOf(byClass(fresh, 'dsh-git-detail')[0]).indexOf('detail subject') >= 0)
-ok('选中后操作按钮解禁', byClass(fresh, 'dsh-git-tool-ico').every((b) => b.props.disabled !== true))
+ok('选中后操作按钮解禁', commitTools(fresh).every((b) => b.props.disabled !== true))
 
 console.log('')
 console.log('== 重新读历史：选中的还在就保留，不在了就清空 ==')
@@ -418,7 +424,7 @@ host.call = function (method, args) {
 /* 标签必须和别的段落一样是 'pop'：harness 把根路径也算进 fiber 的键，
    换个标签等于整棵树重新挂载，框里的草稿就没了。面板已经在读一个正常仓库，
    所以先按一下「重新读取」（它会忽略缓存重读，于是读到下面这个 stub）。 */
-const refreshBtn = byClass(t, 'dsh-git-tool').filter((b) => String(b.props.title).indexOf('重新读取仓库') === 0)[0]
+const refreshBtn = byClass(t, 'dsh-git-tool').filter((b) => String(b.props['aria-label']) === '重新读取仓库（忽略缓存）')[0]
 refreshBtn.props.onClick()
 await wait(15)
 const setupTree = await settle('pop')

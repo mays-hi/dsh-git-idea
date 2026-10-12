@@ -6,8 +6,10 @@
 .dsh-git-chip-repo{color:var(--dsw-alias-label-primary)}
 .dsh-git-chip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .dsh-git-chip-idle{opacity:.72}
-/* 切换分支的时候图标转起来：慢盘上一次切换好几秒，卡片早就收起来了，能看见的
-   只剩这个图标。只转，不改尺寸，所以没有任何布局位移。 */
+/* 忙的时候前面那一格是一个转圈的圆环（SpinnerIcon，42-tree.js），不是"让分支图标
+   自己转"：切换分支（慢盘上好几秒，卡片早收起来了，能看见的只剩它），或者这一份
+   改动读数还没量出来 / 该重来一遍。状态用"在动"说，不在后面加字 —— 加了字反而把
+   分支名往左挤。只转，不改尺寸，所以没有任何布局位移。 */
 @keyframes dsh-git-spin{to{transform:rotate(360deg)}}
 .dsh-git-spin{animation:dsh-git-spin .9s linear infinite;transform-origin:50% 50%}
 .dsh-git-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:#fff;font-size:10px;line-height:1;flex:none}
@@ -157,6 +159,7 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-danger{color:var(--dsw-alias-state-error-primary)}
 .dsh-git-tools{position:relative;flex:none;display:flex;align-items:center;gap:3px;flex-wrap:nowrap;padding:5px 52px 5px 7px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
 .dsh-git-tool{display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:0 0;color:var(--dsw-alias-label-primary);border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit;cursor:pointer;flex:none;line-height:16px}
+.dsh-git-tool-text{flex:none;white-space:nowrap}
 .dsh-git-tool:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-tool:disabled{opacity:.4;cursor:default}
 .dsh-git-tool-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l1)}
@@ -214,7 +217,7 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-branch-chip{display:inline-flex;align-items:center;gap:4px;max-width:220px;flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px;cursor:pointer;font-family:inherit}
 .dsh-git-branch-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-branch-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
-.dsh-git-switch{position:absolute;z-index:40;width:456px;display:flex;flex-direction:column;overflow:visible;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
+.dsh-git-switch{position:absolute;z-index:40;width:500px;display:flex;flex-direction:column;overflow:visible;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft);color:var(--dsw-alias-label-primary);font-size:12px}
 /* Hung off the header box, not off the chip: the header spans the whole panel, so
    the card starts at the panel's own left margin however the header wraps. It is
    also capped to that box, or a panel dragged to its 420px minimum would push the
@@ -228,14 +231,11 @@ textarea.dsh-git-input{resize:vertical}
    would compete with the list for attention. */
 .dsh-git-bs-search{flex:1 1 120px;width:auto;min-width:84px;border:0;background:transparent;outline:none;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);padding:2px 0}
 .dsh-git-bs-search::placeholder{color:var(--dsw-alias-label-secondary)}
-.dsh-git-bs-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
-.dsh-git-bs-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-/* The repository-wide actions are chips on the search line, not rows inside the
-   list: they cost no vertical space that way, and they stay reachable while the
-   branch tree is scrolled. */
 .dsh-git-bs-head-acts{display:flex;align-items:center;flex-wrap:wrap;gap:4px;flex:none}
-/* 图标按钮，不带文字：文字进了 title。宽度按图标定，几个按钮一排刚好和搜索框同高。 */
+/* 动作 chip：记号 + 短词，宽度跟着内容走，几个一排和搜索框同高。完整那句话说给
+   读屏（aria-label），屏幕上不弹浏览器自己的提示框 —— 这个卡片里一个都没有。 */
 .dsh-git-bs-chip{display:inline-flex;align-items:center;justify-content:center;gap:3px;height:22px;min-width:24px;padding:0 5px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap}
+.dsh-git-bs-chip-t{flex:none}
 .dsh-git-bs-chip:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l2)}
 .dsh-git-bs-chip-on{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-brand-primary)}
 .dsh-git-bs-chip:disabled{opacity:.45;cursor:default}
@@ -270,8 +270,11 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-bs-cur{flex:none;width:10px;font-size:9px;line-height:1;text-align:center;color:var(--dsw-alias-label-secondary)}
 .dsh-git-bs-count{flex:none;color:var(--dsw-alias-border-l2)}
 /* IDEA's branch submenu: hovering a row opens its actions to the right of the
-   tree. The card is only 420px wide, so the flyout hangs past its edge, the way
-   the real one hangs over the editor; the card therefore no longer clips. */
+   tree. The card is narrow (500px), so the flyout hangs past its edge, the way
+   the real one hangs over the editor; the card therefore no longer clips.
+   500 而不是 456：动作 chip 现在带词（⇣ 获取 / ↓ 拉取 / ↑ 推送 / + 新建分支 /
+   ☆ 收藏）再加一个排序 chip，456 刚好装不下 —— 词写出来之后卡片宽一点，比让这
+   一排折成两行好。 */
 .dsh-git-bs-fly{position:absolute;left:calc(100% - 6px);z-index:6;width:198px;padding:4px;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-soft)}
 .dsh-git-bs-fly-head{display:flex;align-items:center;gap:5px;padding:3px 8px 6px;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dsh-git-bs-fly-sep{height:1px;margin:3px 6px;background:var(--dsw-alias-border-l1)}
@@ -314,6 +317,34 @@ textarea.dsh-git-input{resize:vertical}
 .dsh-git-dl-hunk{color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}
 .dsh-git-dl-meta{color:var(--dsw-alias-label-secondary)}
 .dsh-git-dl-note{color:var(--dsw-alias-label-secondary)}
+/* ── 工作树 ──
+
+   DSH 0.2 自己会造工作树（模型的 create_worktree），而这个插件只把它说清楚：
+   **两处 chip（输入框上和面板头上）最前面那颗图标自己换成工作树字形**、一个页签列
+   全部树，以及改动列表里那条工作树池的注解。 */
+.dsh-git-wtpane{display:flex;flex-direction:column;gap:8px}
+.dsh-git-wt-head{display:flex;flex-direction:column;gap:2px}
+.dsh-git-wt-title{font-weight:600}
+.dsh-git-wt-rows{display:flex;flex-direction:column;gap:4px}
+.dsh-git-wt-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:0 0;color:inherit;font-family:inherit;font-size:12px;padding:6px 8px;cursor:pointer}
+.dsh-git-wt-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-git-wt-row-on{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2);cursor:default}
+.dsh-git-wt-ico{display:inline-flex;flex:none;color:var(--dsw-alias-brand-primary)}
+.dsh-git-wt-main{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.dsh-git-wt-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 路径是这一行里最长的东西，也是最能证明"这份检出在哪"的东西：整条留着，长了
+   就省略。不用 direction:rtl 那个"从左边省略"的技巧 —— 路径里的 / 在 rtl 下会被
+   重排，而这一行要的是可信，不是好看。 */
+.dsh-git-wt-path{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-git-wt-meta{font-size:11px;color:var(--dsw-alias-label-secondary);flex:none;max-width:34%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-git-wt-badges{display:flex;gap:4px;flex:none}
+.dsh-git-wt-badge{font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1)}
+.dsh-git-wt-badge-on{background:var(--dsw-alias-brand-primary);color:#fff;border-color:transparent}
+.dsh-git-wt-badge-warn{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}
+.dsh-git-wt-empty{font-size:11px}
+/* 改动列表里那条工作树池：只标记，不隐藏 —— 藏掉它就会把同目录下读者自己的文件
+   一起藏掉（git 把整棵未跟踪目录折叠成一条）。 */
+.dsh-git-wtnote{flex:none;font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border:1px dashed var(--dsw-alias-border-l1)}
 `)
     }, 'dsh-git-idea panel styles')
 

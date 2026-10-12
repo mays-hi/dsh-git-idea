@@ -5,7 +5,7 @@ async function readCommitDetail(input) {
   if (hash.length === 0) return { ok: false, error: 'hash is required' }
   const args = argsFor(input)
   const meta = await git(args, ['-c', 'core.quotePath=false', 'show', '-s',
-    '--format=%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b', hash], null, {})
+    '--format=' + COMMIT_FIELDS + '%x1f%b', hash], null, {})
   if (meta.exitCode !== 0) return { ok: false, error: 'commit-not-found', stderr: meta.stderr, noGit: gitMissing(meta) }
   const fields = meta.stdout.split('\u001f')
 

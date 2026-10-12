@@ -1,7 +1,7 @@
 {
   "name": "dsh-git-idea",
-  "version": "0.2.7",
-  "description": "A git plugin for DSH modelled on IDEA's VCS: a git icon beside the permission mode in the composer with the branch and pending-change count, a branch switcher on hover, an IDEA-style VCS panel on click, and a settings page. Registers no model tools.",
+  "version": "0.2.8",
+  "description": "A git plugin for DSH modelled on IDEA's VCS: a git icon beside the permission mode in the composer with the branch and pending-change count, a branch switcher on hover, an IDEA-style VCS panel on click, a worktree tab that follows the session into the worktree DSH's create_worktree moved it to, and a settings page. Registers no model tools and injects no prompt.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -56,7 +56,8 @@
     "idea",
     "vcs",
     "ui",
-    "commit-graph"
+    "commit-graph",
+    "worktree"
   ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"

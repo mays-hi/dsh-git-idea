@@ -13,7 +13,7 @@
      1. 「工作区有几个改动」全局只有一份读数，面板量的和 chip 用的必须是同一份；
      2. 一次 bump 之后只问屏上那些路径（0.2s），整棵树不在那条路上；
      3. 整棵树有自己的时钟，间隔按上一次实测的代价来定（慢挂载上不再每 30 秒冻 8 秒）；
-     4. 还没核对出来的时候，chip 说的是「正在核对」，不谎称「工作区干净」。
+     4. 还没核对出来的时候，chip 最前面那颗图标在转圈，不谎称「工作区干净」。
 
    时间在这里是可控的：`Date.now` 被换成一个由测试推的钟，所以「一次 8 秒的读」不用
    真的等 8 秒，「读数过期了」也不用真的等一分钟。读也一样 —— 组件重画才会跑 effect，
@@ -95,7 +95,8 @@ const isPaths = (s) => s.indexOf('路径') === 0
 const badgeOf = (tree) => byClass(tree, 'dsh-git-badge')
 const badgeText = (tree) => (badgeOf(tree)[0] === undefined ? '' : textOf(badgeOf(tree)[0]))
 const badgeClass = (tree) => (badgeOf(tree)[0] === undefined ? '' : String(badgeOf(tree)[0].props.className))
-const titleOf = (tree) => String(tree.props.title)
+/* 「还在核对」现在由 chip 最前面那颗图标说：它在转圈，而不是后面加一句话 */
+const spinning = (tree) => collect(tree).some((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0)
 const tabLabel = (tree) => {
   const tab = buttons(tree).find((b) => textOf(b).indexOf('变更') >= 0)
   return tab === undefined ? '' : textOf(tab)
@@ -173,7 +174,7 @@ console.log('  提交之后的读:', JSON.stringify(shapesSince(mark)))
 ok('提交的确认读是那些路径，不是整棵树',
   shapesSince(mark).indexOf('整树') < 0 && shapesSince(mark).filter(isPaths).length > 0)
 ok('提交之后 chip 上的数字跟着清零（它自己一次都没量）',
-  badgeText(seen.chip) === '' && titleOf(seen.chip).indexOf('工作区干净') >= 0)
+  badgeText(seen.chip) === '' && spinning(seen.chip) !== true && seen.chip.props.title === undefined)
 
 console.log('')
 console.log('=== 两次全树读之间的间隔按实测代价走 ===')
@@ -201,10 +202,11 @@ mark = calls.length
 holdAll = true
 await bump('SIG-3')
 const mid = await repaint()
-console.log('  中间态:', JSON.stringify(titleOf(mid.chip)))
+console.log('  中间态:', JSON.stringify({ spin: spinning(mid.chip) }))
 ok('干净的那份读数不能继续当「现在也干净」用：立刻整棵树重读',
   shapesSince(mark).indexOf('整树') >= 0)
-ok('还没量回来时说的是「正在核对」，不谎称干净', titleOf(mid.chip).indexOf('正在核对') >= 0)
+ok('还没量回来时那颗图标在转，不谎称干净',
+  spinning(mid.chip) === true && mid.chip.props.title === undefined)
 releaseAll()
 seen = await repaint()
 ok('量回来之后数字出现', badgeText(seen.chip) === '1')

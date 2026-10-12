@@ -24,9 +24,18 @@ const shellService = { resolve: r => r, run: runShell }
    service in for the length of one check and take it away again — the storage
    fallback below is exactly that. */
 const services = { shell: shellService }
+/* `ctx.on` 是 host 半在 apply 时订阅 `session/event` 的那条路（会话把工作目录搬到
+   工作树里时，唯一会告诉插件这件事的人）。这里给它一张监听表，测试可以直接"发生"
+   一次事件。 */
+const listeners = new Map()
 const ctx = {
   get: n => services[n],
+  on(name, fn) { listeners.set(name, fn); return () => { listeners.delete(name) } },
   effect(cb) { const d = cb(); return typeof d === 'function' ? d : () => {} },
+}
+const emitSession = (name, session, event) => {
+  const fn = listeners.get(name)
+  if (fn !== undefined) fn(session, event)
 }
 const TOOLS = new Map()
 const harness = { defineTool: d => { TOOLS.set(d.name, d); return d }, registerTool: () => () => {}, handle(n, f) { handlers.set(n, f); return () => {} } }
@@ -1194,6 +1203,115 @@ const viaStore = await H('git/branches')({ sessionId: 'session-not-live' })
 check('存储里那份工作区被解析出来了', viaStore != null && viaStore.ok === true && viaStore.repo === R)
 delete services.sessionPersistence
 delete services.sessions
+
+console.log('')
+console.log('=== DSH 0.2 的工作树：只读清单 ===')
+/* DSH 0.2 的模型工具 `create_worktree` 把新树建在**源仓库里面**的
+   `.agents/worktrees/<branch>`（服务的默认池），然后把会话的生效目录搬过去。这个
+   插件不建树、不删树，只把已经发生的事说清楚：这个仓库有几棵树、各自在哪、停在
+   哪个分支和提交上、有没有被锁住，以及当前这一份是哪一棵。这里用真 git 造出两种
+   工作树 —— 池里的一棵、仓库外面的一棵 —— 再读回来。 */
+const WT = '/tmp/gp34-wt'
+const WT_OUT = '/tmp/gp34-wt-out'
+await sh('rm -rf ' + WT + ' ' + WT_OUT, '/tmp')
+await sh('mkdir -p ' + WT + ' && cd ' + WT + ' && git init -q -b main && git config user.email t@t && git config user.name T && echo a > a.txt && git add -A && git commit -qm "probe base"', '/tmp')
+await sh('git worktree add -q .agents/worktrees/w1 -b w1 && git worktree add -q ' + WT_OUT + ' -b w2 && git worktree lock --reason "测试锁定" .agents/worktrees/w1', WT)
+const WT_MAIN = WT
+const WT_W1 = WT + '/.agents/worktrees/w1'
+const wtList = await H('git/worktrees')({ repo: WT_MAIN })
+console.log('  条目:', JSON.stringify((wtList.entries || []).map(e => e.name + '@' + e.rel + (e.main ? '(主)' : '') + (e.locked ? '(锁)' : ''))))
+check('读出三棵工作树（主 + 池里一棵 + 仓库外一棵）',
+  wtList.ok === true && Array.isArray(wtList.entries) && wtList.entries.length === 3)
+check('第一条是主工作树，并且标着 main', wtList.entries[0].main === true && wtList.entries[0].path === WT_MAIN)
+check('池里的那棵给出仓库内相对路径',
+  wtList.entries.some(e => e.name === 'w1' && e.rel === '.agents/worktrees/w1'))
+check('仓库外的那棵没有相对路径',
+  wtList.entries.some(e => e.name === 'w2' && e.rel === ''))
+check('每一棵都带着 HEAD 的短号与主题',
+  wtList.entries.every(e => e.short.length > 0 && e.subject === 'probe base'))
+check('锁住的那棵报出锁定与原因',
+  wtList.entries.some(e => e.name === 'w1' && e.locked === true && e.lockReason === '测试锁定'))
+check('池目录报的是 DSH 的默认值', wtList.pool === '.agents/worktrees')
+check('在主工作树里读：current 就是它自己',
+  wtList.current === WT_MAIN && wtList.entries[0].current === true)
+
+const wtFromLinked = await H('git/worktrees')({ repo: WT_W1 })
+check('从池里的工作树读：current 换成它',
+  wtFromLinked.current === WT_W1
+  && wtFromLinked.entries.some(e => e.name === 'w1' && e.current === true))
+check('清单第一条永远是源仓库那棵，无论从哪棵读',
+  wtFromLinked.entries[0].path === WT_MAIN && wtFromLinked.entries[0].main === true)
+/* 这份读只说自己是从哪棵树发出来的（current）和池在哪（pool）；"这个目录是不是
+   链接工作树"由身份读回答（下一个 section），两处各算一遍只会多一个对不上的答案。 */
+check('不再自己算一份 linked/main 出来', wtFromLinked.linked === undefined && wtFromLinked.main === undefined)
+
+console.log('')
+console.log('=== 链接工作树：便宜那一次读自带身份 ===')
+/* 面板和 chip 的第一段读是"哪个仓库哪个分支"（不碰工作区）。链接工作树这件事花的
+   是一次文件存在性判断（`$gd/commondir`），不额外起进程 —— 所以它跟着这一段一起
+   回来，屏幕上那颗工作树标记不需要第二次往返。 */
+const identLinked = await H('git/panel')({ repo: WT_W1, quick: true })
+const identMain = await H('git/panel')({ repo: WT_MAIN, quick: true })
+console.log('  工作树里:', JSON.stringify(identLinked.worktree), ' 主工作树里:', JSON.stringify(identMain.worktree))
+check('工作树里的快读报出 linked 与名字',
+  identLinked.ok === true && identLinked.worktree != null
+  && identLinked.worktree.linked === true && identLinked.worktree.name === 'w1')
+check('主工作树里报的是明确的 null，不是缺键', identMain.ok === true && identMain.worktree === null && 'worktree' in identMain)
+/* 完整读**不**带身份：它答的是工作区，chip 和面板要的那份身份来自上面那次便宜的
+   读（`work`）。同一个事实两个地方各算一遍，只会多一个可能对不上的答案。 */
+check('完整读不重复回答"这是不是链接工作树"',
+  (await H('git/panel')({ repo: WT_W1 })).worktree === undefined
+  && (await H('git/panel')({ repo: WT_MAIN })).worktree === undefined)
+/* git 会把整棵未跟踪目录折叠成一条：池里只有工作树时，源仓库的 status 报的是
+   `.agents/`。客户端拿 worktreeNote 给它加标记 —— 这里确认折叠确实发生，标记才有
+   对象。 */
+const mainStatus = await H('git/panel')({ repo: WT_MAIN })
+const poolEntry = (mainStatus.untracked || []).find(e => e.path === '.agents/')
+check('源仓库的 status 里确实有一条 .agents/ 未跟踪改动（客户端给它加标记）', poolEntry !== undefined)
+
+console.log('')
+console.log('=== 生效目录：会话搬到工作树里之后，插件读的必须是那一棵 ===')
+/* DSH 0.2 起 `SessionHeader.cwd` 保留**原始项目**且不可变，会话说自己现在在哪靠的是
+   `workingDirectory` 投影和 `working-directory/change` 事件。插件要是还读 header，
+   模型已经在新树里干活、chip 和面板却指着源仓库的分支和改动 —— 这就是这里守的
+   那件事。三处来源按可信度排队：服务 → 本进程听过的事件 → 存储里的 header。 */
+const liveSession = { header: { id: 'session-live', cwd: R } }
+services.sessions = { get: id => (id === 'session-live' ? liveSession : undefined) }
+await H('git/flush')({ repo: R })
+const headerOnly = await H('git/branches')({ sessionId: 'session-live' })
+check('（对照）没有投影也没有事件时，仍然按 header 读源仓库',
+  headerOnly.ok === true && headerOnly.repo === R)
+
+emitSession('session/event', liveSession, { type: 'working-directory/change', data: { cwd: WT_W1 } })
+await H('git/flush')({ repo: WT_W1 })
+const viaEvent = await H('git/branches')({ sessionId: 'session-live' })
+check('听过一次变更事件之后，读的是工作树那一棵',
+  viaEvent.ok === true && viaEvent.repo === WT_W1 && viaEvent.current === 'w1')
+
+services.workingDirectory = { get: () => WT_OUT }
+await H('git/flush')({ repo: WT_OUT })
+const viaService = await H('git/branches')({ sessionId: 'session-live' })
+check('投影服务在的时候以它为准（比记忆里那次更新）',
+  viaService.ok === true && viaService.repo === WT_OUT && viaService.current === 'w2')
+delete services.workingDirectory
+await H('git/flush')({ repo: WT_W1 })
+const backToEvent = await H('git/branches')({ sessionId: 'session-live' })
+check('服务不在时退回记忆里那一次', backToEvent.ok === true && backToEvent.repo === WT_W1)
+
+/* 不是活会话（面板刚挂上、会话还在恢复的那一瞬）：事件记下来的那一份仍然比存储里
+   的 header 新，而且不需要存储就能答。 */
+delete services.sessions
+emitSession('session/event', { header: { id: 'session-cold', cwd: R } }, { type: 'working-directory/change', data: { cwd: WT_W1 } })
+await H('git/flush')({ repo: WT_W1 })
+const coldReply = await H('git/branches')({ sessionId: 'session-cold' })
+check('非活会话也记得住搬去哪了（不用等它变成活会话）',
+  coldReply.ok === true && coldReply.repo === WT_W1)
+/* 别的键（别的会话、别的动作）不能被当成"搬了目录" */
+emitSession('session/event', liveSession, { type: 'turn/end', data: {} })
+emitSession('session/event', { header: { id: 'session-other', cwd: R } }, { type: 'working-directory/change', data: { cwd: WT_OUT } })
+await H('git/flush')({ repo: WT_W1 })
+const stillMine = await H('git/branches')({ sessionId: 'session-live' })
+check('别的会话搬目录不影响这一条', stillMine.ok === true && stillMine.repo === WT_W1)
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {

@@ -1,7 +1,9 @@
     function twisty(props) {
       return h('span', {
         className: 'dsh-git-tw',
-        title: props.collapsed === true ? '展开' : '折叠',
+        /* 折叠三角没有文字，所以它的名字只给读屏：title 会弹出浏览器自己的提示框，
+           这个插件里不再留一个（见 46-css.js 顶部那段）。 */
+        'aria-label': props.collapsed === true ? '展开' : '折叠',
         onClick: function (event) {
           event.stopPropagation()
           props.onToggle()
@@ -23,7 +25,7 @@
         className: 'dsh-git-trow' + (props.selectedKey === node.id ? ' dsh-git-trow-sel' : ''),
         key: node.id,
         style: { paddingLeft: (6 + node.depth * 12) + 'px' },
-        title: node.name + '（双击展开/折叠）',
+        'aria-label': node.name + '（双击展开/折叠）',
         onClick: function () { props.onSelect(node.id) },
         onDoubleClick: function () { props.onToggle(node.path) },
       },

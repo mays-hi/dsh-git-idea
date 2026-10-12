@@ -24,12 +24,16 @@ function field(split, index) {
   return value === undefined ? '' : value
 }
 
+/* The directory a command runs in when the caller named no path: the session's
+   *effective* one, so a probe follows the model into a worktree instead of
+   running beside the source repository. The header is the last resort, never the
+   first — see `effectiveCwdOf` in 60-reads.js. */
 function sessionCwd(exec) {
   if (exec == null || exec.agent == null) return undefined
   const session = exec.agent.session
-  const header = session != null ? session.header : undefined
-  const cwd = header != null ? header.cwd : undefined
-  return isStr(cwd) && cwd.length > 0 ? cwd : undefined
+  if (session == null) return undefined
+  const header = session.header
+  return effectiveCwdOf(header != null ? header.id : undefined, session)
 }
 
 function workdirFor(args, exec) {

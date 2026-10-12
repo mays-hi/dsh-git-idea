@@ -80,7 +80,6 @@
       }
       return h('div', {
         className: 'dsh-git-crow' + (props.selected === true ? ' dsh-git-crow-sel' : ''),
-        title: commit.hash + '\n' + commit.subject,
         onClick: function () { props.onPick(commit.hash) },
       },
         h('span', { className: 'dsh-git-subject' }, commit.subject),
@@ -194,8 +193,8 @@
            commits waiting on the remote, a green up arrow for the ones waiting
            to be pushed. The number stays because "three behind" is the question
            people actually have; IDEA answers it in the mouseover only. */
-        if (behind > 0) out.push(h('span', { key: 'b', className: 'dsh-git-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))))
-        if (ahead > 0) out.push(h('span', { key: 'a', className: 'dsh-git-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))))
+        if (behind > 0) out.push(h('span', { key: 'b', className: 'dsh-git-ab dsh-git-ab-in', 'aria-label': '落后上游 ' + String(behind) + ' 个提交，需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))))
+        if (ahead > 0) out.push(h('span', { key: 'a', className: 'dsh-git-ab dsh-git-ab-out', 'aria-label': '领先上游 ' + String(ahead) + ' 个提交，需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))))
         return out
       }
       const rows = []
@@ -211,7 +210,7 @@
           className: 'dsh-git-trow' + (props.selectedKey === key + ':title' ? ' dsh-git-trow-sel' : ''),
           key: key + ':title',
           style: { paddingLeft: '6px' },
-          title: label + '（双击展开/折叠）',
+          'aria-label': label + '（双击展开/折叠）',
           onClick: function () { props.onSelect(key + ':title') },
           onDoubleClick: function () { props.onToggle(key) },
         },
@@ -229,16 +228,6 @@
         } else {
           for (let i = 0; i < headNames.length; i += 1) {
             const name = headNames[i]
-            const headMeta = metaOf[name]
-            const headTip = [name + '（双击只看这个分支的历史）']
-            if (headMeta !== undefined) {
-              const ha = typeof headMeta.ahead === 'number' ? headMeta.ahead : 0
-              const hb = typeof headMeta.behind === 'number' ? headMeta.behind : 0
-              headTip.push(text(headMeta.upstream).length > 0
-                ? trackTitle(ha, hb) + ' · ' + text(headMeta.upstream)
-                : '没有上游分支')
-            }
-            if (props.dirty > 0) headTip.push('工作区有 ' + String(props.dirty) + ' 个未提交改动')
             rows.push(h('div', {
               className: 'dsh-git-trow dsh-git-trow-head'
                 + (props.selectedKey === name ? ' dsh-git-trow-sel' : '')
@@ -248,23 +237,22 @@
               /* Single click only moves the selection: the graph follows on a
                  double click, so browsing the tree never re-reads the history
                  out from under the commit you were reading. */
-              title: headTip.join('\n'),
               onClick: function () { props.onSelect(name) },
               onDoubleClick: function () { props.onSelect(name); props.onPick(name) },
             },
               h('span', { className: 'dsh-git-tw' }, '★'),
               h('span', { className: 'dsh-git-tname' }, name),
               props.dirty > 0
-                ? h('span', { key: 'd', className: 'dsh-git-tdirty', title: String(props.dirty) + ' 个未提交改动' }, '●' + String(props.dirty))
+                ? h('span', { key: 'd', className: 'dsh-git-tdirty', 'aria-label': String(props.dirty) + ' 个未提交改动' }, '●' + String(props.dirty))
                 : null,
               badgeOf(name)))
           }
         }
       }
 
-      const section = function (title, key, entries) {
+      const section = function (label, key, entries) {
         const shown = matching(entries)
-        rows.push(groupTitle(title, key, needle.length === 0 ? String(entries.length) : String(shown.length)))
+        rows.push(groupTitle(label, key, needle.length === 0 ? String(entries.length) : String(shown.length)))
         if (collapsed[key] === true) return
         const tree = buildTree(shown)
         const flat = flattenTree(tree, 2, key, collapsed, [], key)
@@ -273,26 +261,9 @@
           if (node.kind === 'dir') {
             rows.push(treeDirRow(node, props, String(node.count)))
           } else {
+            /* ↑2 / ↓3 就是这两个记号，名字给读屏；行本身不再挂浏览器自己的提示框。 */
             const branchName = text(node.data)
-            /* Looked up by name rather than carried on the leaf: the tree is
-               folded and rebuilt on the way to the screen, and only the name
-               survives that. */
-            const meta = metaOf[branchName] === undefined ? null : metaOf[branchName]
-            const ahead = meta != null && typeof meta.ahead === 'number' ? meta.ahead : 0
-            const behind = meta != null && typeof meta.behind === 'number' ? meta.behind : 0
-            const upstream = meta == null ? '' : text(meta.upstream)
-            const when = meta == null ? '' : branchRelative(meta.at)
-            /* What the branch is worth knowing at a glance: where it stands
-               against its upstream, and — for the branch that is checked out —
-               how much is sitting uncommitted in the working tree. Both are
-               spelled out in the tooltip, because ↑2 and a bare number are only
-               legible once you have been told what they mean. */
-            const tip = [branchName + '（双击只看这个分支的历史）']
-            if (upstream.length > 0) tip.push(trackTitle(ahead, behind) + ' · ' + upstream)
-            else tip.push('没有上游分支')
-            if (when.length > 0) tip.push('最后提交 ' + when)
             const onHead = props.headName === branchName
-            if (onHead && props.dirty > 0) tip.push('工作区有 ' + String(props.dirty) + ' 个未提交改动')
             rows.push(h('div', {
               className: 'dsh-git-trow'
                 + (onHead ? ' dsh-git-trow-head' : '')
@@ -300,14 +271,13 @@
                 + (props.activeRef === branchName ? ' dsh-git-trow-scope' : ''),
               key: node.id,
               style: { paddingLeft: (6 + node.depth * 12) + 'px' },
-              title: tip.join('\n'),
               onClick: function () { props.onSelect(branchName) },
               onDoubleClick: function () { props.onSelect(branchName); props.onPick(branchName) },
             },
               h('span', { className: 'dsh-git-tw' }),
               h('span', { className: 'dsh-git-tname' }, node.name),
               onHead && props.dirty > 0
-                ? h('span', { key: 'd', className: 'dsh-git-tdirty', title: String(props.dirty) + ' 个未提交改动' }, '●' + String(props.dirty))
+                ? h('span', { key: 'd', className: 'dsh-git-tdirty', 'aria-label': String(props.dirty) + ' 个未提交改动' }, '●' + String(props.dirty))
                 : null,
               badgeOf(branchName)))
           }
@@ -327,7 +297,7 @@
             onChange: function (event) { setQuery(event.target.value) },
           }),
           query.length > 0 ? h('button', {
-            key: 'x', type: 'button', className: 'dsh-git-sidehead-x', title: '清空搜索',
+            key: 'x', type: 'button', className: 'dsh-git-sidehead-x', 'aria-label': '清空搜索',
             onClick: function () { setQuery('') },
           }, '×') : null),
         h('div', { className: 'dsh-git-side' }, rows))

@@ -9,15 +9,9 @@
       const behind = typeof row.behind === 'number' ? row.behind : 0
       const upstream = text(row.upstream)
       const where = text(props.where)
-      const when = branchRelative(row.committedAt)
-      const tip = []
-      if (text(row.subject).length > 0) tip.push(text(row.subject))
-      if (when.length > 0) tip.push(when)
-      tip.push(trackTitle(ahead, behind))
       return h('div', {
         className: 'dsh-git-bs-row' + (props.active === true ? ' dsh-git-bs-row-on' : '') + (isCurrent ? ' dsh-git-bs-row-cur' : '')
           + (props.busy === true ? ' dsh-git-bs-busy' : '') + (props.flying === true ? ' dsh-git-bs-row-fly' : ''),
-        title: tip.join('\n'),
         onMouseEnter: function (event) { props.onEnter(props.rowKey, props.at, event) },
         onMouseLeave: function () { props.onLeave() },
         onClick: function (event) { props.onPick(name, isCurrent, props.rowKey, event) },
@@ -25,11 +19,11 @@
         /* 行首那一列和面板左栏表达同一件事、用的是同一个记号：当前分支是 ★
            （文本，面板的 HEAD 行就是这个），其余留空。每一行的分支图标都一
            个样，不再有「只有当前分支换个铅笔」那种例外。 */
-        h('span', { key: 'c', className: 'dsh-git-bs-cur', title: isCurrent ? '当前分支' : '' }, isCurrent ? '★' : ''),
+        h('span', { key: 'c', className: 'dsh-git-bs-cur', 'aria-label': isCurrent ? '当前分支' : undefined }, isCurrent ? '★' : ''),
         h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(BranchIcon, { size: 13 })),
         h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
-        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', title: '落后上游 ' + String(behind) + ' 个提交 —— 需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
-        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', title: '领先上游 ' + String(ahead) + ' 个提交 —— 需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
+        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', 'aria-label': '落后上游 ' + String(behind) + ' 个提交，需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
+        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', 'aria-label': '领先上游 ' + String(ahead) + ' 个提交，需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
         upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
           : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         /* 行尾只剩下「这个分支能做的事」。收藏挪到了上面那排动作里（一行一个
@@ -37,7 +31,7 @@
            挤在同一行里更容易读错）。 */
         h('button', {
           key: 'm', type: 'button', className: 'dsh-git-bs-more',
-          title: '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
+          'aria-label': '这个分支能做的事（鼠标停留即展开，点击可以钉住）',
           onClick: function (event) { props.onMenu(props.rowKey, event) },
         }, h(Icon, { name: 'right', size: 14 })))
     }
@@ -159,9 +153,16 @@
           setBusy(false)
           setSwitchingTo(null)
           bumpData()
-          rememberBranch(name)
           if (result.popConflict === true) {
-            setNote('已切到 ' + name + '，但你的改动恢复时发生冲突，stash 条目还留着（git stash list）。')
+            /* git 的两条流各说一半：stdout 是合并过程（`Auto-merging …` /
+               `CONFLICT … in <文件>`），stderr 是原因那一行。冲突时读者要先知道**哪个
+               文件没合上**，所以 stdout 优先、stderr 兜底；Host 两条都带回来是因为
+               git 往哪条流写并不稳定（见 66-refs.js）。 */
+            const spoken = text(result.popStdout).replace(/\s+$/, '').length > 0
+              ? text(result.popStdout).replace(/\s+$/, '')
+              : text(result.popStderr).replace(/\s+$/, '')
+            setNote('已切到 ' + name + '，但你的改动恢复时发生冲突，stash 条目还留着（git stash list）。'
+              + (spoken.length > 0 ? ' ' + spoken.slice(0, 400) : ''))
             return
           }
           props.onDone()
@@ -219,7 +220,6 @@
         rpc('git/branch-create', request(payload), '新建分支失败').then(function () {
           setBusy(false)
           bumpData()
-          rememberBranch(name)
           props.onDone()
         }, function (failure) {
           setBusy(false)
@@ -253,8 +253,10 @@
         })
       }
 
-      const all = data != null && data.ok === true ? data.branches : []
-      const remoteAll = data != null && data.ok === true && Array.isArray(data.remotes) ? data.remotes : []
+      /* 这一份清单到底回没回来：空组该不该开口说话，就看它。 */
+      const listReady = data != null && data.ok === true
+      const all = listReady ? data.branches : []
+      const remoteAll = listReady && Array.isArray(data.remotes) ? data.remotes : []
       const needle = query.trim().toLowerCase()
       const hit = function (label) { return needle.length === 0 || label.toLowerCase().indexOf(needle) >= 0 }
 
@@ -282,13 +284,13 @@
 
       const localRows = ordered(all)
       const remoteRows = ordered(remoteAll)
-      const recentRows = []
-      if (needle.length === 0) {
-        for (let i = 0; i < recentBranches.length && recentRows.length < MRU_MAX; i += 1) {
-          for (let k = 0; k < all.length; k += 1) {
-            if (text(all[k].name) === recentBranches[i] && recentRows.indexOf(all[k]) < 0) { recentRows.push(all[k]); break }
-          }
-        }
+      /* ── HEAD 那一组 ──
+         「最近用过的分支」换成了这一组：最近用过的是**我**的历史，而这里要说的是
+         一件事 —— 现在停在哪。它直接来自清单里带 current 标记的那一行，不需要谁把
+         它记住：切过去之后它就是当前分支。 */
+      const headRows = []
+      for (let i = 0; i < all.length; i += 1) {
+        if (all[i].current === true && hit(text(all[i].name))) headRows.push(all[i])
       }
 
       /* "push" and "pull" say how far the current branch has drifted from its
@@ -303,8 +305,8 @@
         }
       }
 
-      /* short is the chip text, label is the full sentence kept for the tooltip
-         and for what typing in the filter box can match. */
+      /* short is the word on the chip, label is the full sentence the chip's
+         accessible name and the filter box's matching both come from. */
       /* 记号跟面板一致：面板头部的同步组就是 ⇣ / ↓ / ↑ 这几个字符，这里不再
          另画一套 SVG。一个动作一种画法，两个地方看起来才是同一套。 */
       const actionDefs = [
@@ -316,10 +318,14 @@
       const actions = []
       for (let i = 0; i < actionDefs.length; i += 1) if (hit(actionDefs[i].label) || hit(actionDefs[i].short)) actions.push(actionDefs[i])
 
-      const groups = []
-      if (recentRows.length > 0) groups.push({ id: 'recent', label: '最近', rows: recentRows, remote: false })
-      groups.push({ id: 'local', label: '本地', rows: localRows, remote: false })
-      if (remoteRows.length > 0) groups.push({ id: 'remote', label: '远端', rows: remoteRows, remote: true })
+      /* 每一组带自己那份行 key 的前缀：同一个分支会同时出现在 HEAD 和本地两组
+         里（读者还是会在本地那一组里按名字找它），没有前缀的话两行的 key 一模一样，
+         高亮、键盘序号和工作树子菜单都会认错行。 */
+      const groups = [
+        { id: 'head', label: 'HEAD 当前分支', rows: headRows, remote: false, prefix: 'h:' },
+        { id: 'local', label: '本地', rows: localRows, remote: false, prefix: 'l:' },
+      ]
+      if (remoteRows.length > 0) groups.push({ id: 'remote', label: '远端', rows: remoteRows, remote: true, prefix: 'r:' })
 
       /* Keyboard order is the visual order: the action rows first, then every
          group's rows, skipping whatever is collapsed. */
@@ -333,14 +339,16 @@
       for (let g = 0; g < groups.length; g += 1) {
         if (collapsed[groups[g].id] === true) continue
         for (let i = 0; i < groups[g].rows.length; i += 1) {
-          navAt.set(groups[g].rows[i], nav.length)
-          const rowName = text(groups[g].rows[i].name)
+          /* navAt 按行 key 存，不按行对象：同一个分支的两行各有各的序号，指针停在
+             HEAD 那一行时亮起来的是那一行，不是本地组里同名的那一行。 */
+          const rowKey = groups[g].prefix + text(groups[g].rows[i].name)
+          navAt.set(rowKey, nav.length)
           nav.push({
             kind: 'row', row: groups[g].rows[i], remote: groups[g].remote, group: groups[g].id,
             /* The highlight is an index, the list is re-ordered by favourites and
                sort order, and a row that moves takes its index with it. The key is
                how the panel finds the same row again afterwards. */
-            key: (groups[g].remote === true ? 'r:' : 'l:') + rowName,
+            key: rowKey,
           })
         }
       }
@@ -392,20 +400,17 @@
         if (remote === true) {
           items.push(h('button', {
             key: 'sw', type: 'button', className: 'dsh-git-bs-fly-item',
-            title: 'git switch ' + name + ' —— 会在本地建一个跟踪分支',
             onClick: function (event) { stopEvent(event); choose(name, stash) },
           }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })), '检出为本地分支'))
         } else if (isCurrent !== true) {
           items.push(h('button', {
             key: 'sw', type: 'button', className: 'dsh-git-bs-fly-item',
-            title: 'git switch ' + name,
             onClick: function (event) { stopEvent(event); choose(name, stash) },
           }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'right', size: 12 })),
             stash === true ? '暂存并切换' : '检出'))
         }
         items.push(h('button', {
           key: 'nb', type: 'button', className: 'dsh-git-bs-fly-item',
-          title: '以 ' + name + ' 为起点新建分支并切过去',
           onClick: function (event) { stopEvent(event); setFly(null); setCreating({ at: name, value: '' }) },
         }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'plus', size: 12 })),
           '从此分支新建分支…'))
@@ -413,14 +418,12 @@
           items.push(h('div', { key: 's1', className: 'dsh-git-bs-fly-sep' }))
           items.push(h('button', {
             key: 'mg', type: 'button', className: 'dsh-git-bs-fly-item',
-            title: 'git merge ' + name + ' —— 合入当前分支',
             onClick: function (event) { stopEvent(event); setFly(null); act('git/sequence', { op: 'merge', action: 'start', target: name }, '合并 ' + name) },
           }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'pull', size: 12 })), '合并到当前分支'))
           items.push(h('div', { key: 's2', className: 'dsh-git-bs-fly-sep' }))
           if (armedDelete === name) {
             items.push(h('button', {
               key: 'dx', type: 'button', className: 'dsh-git-bs-fly-item dsh-git-bs-fly-danger',
-              title: 'git branch -D ' + name + ' —— 丢弃没合并的提交',
               onClick: function (event) { stopEvent(event); remove(name, true) },
             }, h('span', { key: 'i', className: 'dsh-git-bs-fly-ico' }, h(Icon, { name: 'undo', size: 12 })), '强制删除'))
           } else {
@@ -456,10 +459,12 @@
       for (let i = 0; i < actions.length; i += 1) {
         const def = actions[i]
         const on = nav[index] !== undefined && nav[index].kind === 'action' && nav[index].def === def
-        /* 只留记号（⇣/↓/↑/+），文字进了 title：面板头部那几个 tool 就是这么画
-           的，两处一致，也省下一整行宽度。 */
+        /* 记号 + 短词（⇣ 获取 / ↓ 拉取 / ↑ 推送 / + 新建分支）。文字以前只活在
+           悬浮提示里，而那是浏览器自己弹的框 —— 卡片上不再有它，那就把词写出来；
+           面板头部那几个 tool 也照这个画法改了，两处仍然是同一套。 */
         const parts = [
           h('span', { key: 'i', className: 'dsh-git-bs-glyph' }, def.glyph),
+          h('span', { key: 't', className: 'dsh-git-bs-chip-t' }, def.short),
         ]
         /* 面板那几个 tool 的角标就是一个数字药丸，这里也照那个样子：记号已经
            是 ⇣/↓/↑ 了，角标再带一个箭头就成了「↓拉取↓1」。 */
@@ -469,7 +474,6 @@
           className: 'dsh-git-bs-chip'
             + (on ? ' dsh-git-bs-chip-on' : '')
             + (def.id === 'new' ? ' dsh-git-bs-chip-new' : ''),
-          title: def.label,
           disabled: busy === true,
           onMouseEnter: function () { setIndex(i) },
           onClick: function (event) { stopEvent(event); def.run() },
@@ -478,9 +482,6 @@
       chips.push(h('button', {
         key: 'a:fav', type: 'button',
         className: 'dsh-git-bs-chip dsh-git-bs-fav' + (pickedStarred ? ' dsh-git-bs-fav-on' : ''),
-        title: pickedName.length === 0
-          ? '把鼠标停在一个分支上（或用键盘移过去），这里就是收藏它的按钮'
-          : (pickedStarred ? '取消收藏 ' : '收藏 ') + pickedName,
         disabled: pickedName.length === 0 || busy === true,
         onClick: function (event) {
           stopEvent(event)
@@ -488,7 +489,8 @@
           toggleStar(pickedName)
           setReveal(pickedKey)
         },
-      }, h('span', { key: 'i', className: 'dsh-git-bs-glyph dsh-git-bs-glyph-star' }, pickedStarred ? '★' : '☆')))
+      }, h('span', { key: 'i', className: 'dsh-git-bs-glyph dsh-git-bs-glyph-star' }, pickedStarred ? '★' : '☆'),
+        h('span', { key: 't', className: 'dsh-git-bs-chip-t' }, pickedStarred ? '取消收藏' : '收藏')))
       const items = []
 
       /* 分组头那一行的折叠：箭头和整行点哪都算。箭头本身是面板左栏那个 twisty，
@@ -513,23 +515,33 @@
           h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(group.rows.length))))
         if (shut) continue
         if (group.rows.length === 0) {
-          /* 一个本地分支都没有有两种：真的没有，和「当前这个分支还没有第一个提交」
-             —— 后者嘴里得说出它叫什么，不然 chip 上写着 main，卡片却说没有分支。 */
-          const empty = needle.length > 0
-            ? '没有匹配的分支'
-            : (data != null && data.unborn === true && text(data.current).length > 0
-                ? '当前在 ' + text(data.current) + '，还没有第一个提交'
-                : '这个仓库还没有本地分支')
-          items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' }, empty))
+          /* ── 空组各有各的说法 ──
+             HEAD 组空 = 游离 HEAD；还没有第一个提交时当前分支还不是一个 ref（Host
+             特意不把它列进清单），所以那句话归 HEAD 组说 —— 它讲的是「现在停在哪」，
+             本地组这时只说还没有分支。
+
+             清单还没回来（或者这次读失败了）时一个字都不说：行数是 0 是事实，但
+             「没有分支」和「游离 HEAD」都是关于仓库的断言，此刻还不知道 ——
+             下面那句「正在读取分支…」或者那条错误才是那一刻的实话。 */
+          const empty = listReady !== true
+            ? ''
+            : needle.length > 0
+              ? '没有匹配的分支'
+              : (data.unborn === true && text(data.current).length > 0
+                  ? (group.id === 'head' ? '当前在 ' + text(data.current) + '，还没有第一个提交' : '还没有分支')
+                  : (group.id === 'head' ? '游离 HEAD：不在任何分支上' : '这个仓库还没有本地分支'))
+          if (empty.length > 0) {
+            items.push(h('div', { key: 'g:' + group.id + ':none', className: 'dsh-git-bs-empty' }, empty))
+          }
           continue
         }
         for (let r = 0; r < group.rows.length; r += 1) {
           const row = group.rows[r]
           const name = text(row.name)
-          const rowKey = (group.remote === true ? 'r:' : 'l:') + name
-          const at = navAt.has(row) ? navAt.get(row) : -1
+          const rowKey = group.prefix + name
+          const at = navAt.has(rowKey) ? navAt.get(rowKey) : -1
           items.push(h(BranchRowMemo, {
-            key: 'r:' + (group.remote === true ? text(row.remote) + '/' : '') + name,
+            key: group.prefix + (group.remote === true ? text(row.remote) + '/' : '') + name,
             row: row,
             rowKey: rowKey,
             where: group.remote === true ? text(row.remote) : '',
@@ -561,7 +573,6 @@
       if (props.dirty > 0 && (data == null || data.unborn !== true)) {
         foot.push(h('label', {
           key: 'stash', className: 'dsh-git-bs-check',
-          title: '把本地改动 stash 起来，切过去之后再自动 pop 回来',
         },
           h('input', { key: 'c', type: 'checkbox', checked: stash === true, onChange: function (event) { setStash(event.target.checked) } }),
           h('span', { key: 't' }, '有 ' + String(props.dirty) + ' 个未提交改动 —— 先暂存再切（切完自动恢复）')))
@@ -590,7 +601,7 @@
         let foundRemote = false
         for (let g = 0; g < groups.length && foundRow === null; g += 1) {
           for (let r = 0; r < groups[g].rows.length; r += 1) {
-            const key = (groups[g].remote === true ? 'r:' : 'l:') + text(groups[g].rows[r].name)
+            const key = groups[g].prefix + text(groups[g].rows[r].name)
             if (key === fly.key) { foundRow = groups[g].rows[r]; foundRemote = groups[g].remote === true; break }
           }
         }
@@ -650,13 +661,17 @@
           /* The repository-wide actions share the header line with the search
              box instead of owning a row of their own below it. */
           chips.length > 0 ? h('div', { key: 'acts', className: 'dsh-git-bs-head-acts' }, chips) : null,
+          /* 排序按钮也说自己的模式：图标是 IDEA 那两个（名单 / 时钟），词是同一个
+             意思。以前它只有一个图标，模式靠悬浮提示说。 */
           h('button', {
-            key: 'sort', type: 'button', className: 'dsh-git-bs-icon dsh-git-bs-sort',
-            title: branchSort === 'name'
+            key: 'sort', type: 'button', className: 'dsh-git-bs-chip dsh-git-bs-sort',
+            'aria-label': branchSort === 'name'
               ? '当前按名称排序（A→Z），点击改为按最近提交'
               : '当前按最近提交排序，点击改为按名称（A→Z）',
             onClick: function () { setBranchSort(branchSort === 'name' ? 'recent' : 'name') },
-          }, h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 13 }))),
+          },
+            h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 13 }),
+            h('span', { key: 't', className: 'dsh-git-bs-chip-t' }, branchSort === 'name' ? '名称' : '时间'))),
         h('div', {
           key: 'l', className: 'dsh-git-bs-list',
           ref: function (node) { pickerList = node },

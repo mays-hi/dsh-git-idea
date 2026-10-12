@@ -408,6 +408,9 @@ host.call = function (method, args) {
 }
 const badgeOf = (tree) => byClass(tree, 'dsh-git-badge')
 const badgeText = (tree) => (badgeOf(tree)[0] === undefined ? '' : textOf(badgeOf(tree)[0]))
+/* 「还在核对」现在由**最前面那颗图标**说：它在转圈，而不是后面多出一句话。
+   （这一段最早看的是 title —— 那个框已经全去掉了。） */
+const spinning = (tree) => collect(tree).some((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0)
 const badgeClass = (tree) => (badgeOf(tree)[0] === undefined ? '' : String(badgeOf(tree)[0].props.className))
 
 const s2 = await renderUntilStable(makeElement(chip, { sessionId: 's-2' }), 'chip-s2')
@@ -421,8 +424,8 @@ await wait(40)
 const during = await renderUntilStable(makeElement(chip, { sessionId: 's-2' }), 'chip-s2')
 ok('便宜的第一次读回来后徽标还在，没有先掉到 0', badgeText(during) === '3')
 ok('但它被标成「还没核对」（半透明）', /dsh-git-badge-stale/.test(badgeClass(during)))
-ok('tooltip 说的是正在核对，不会谎称工作区干净',
-  String(during.props.title).indexOf('正在核对') >= 0)
+ok('还没量出来时那颗图标在转，不会谎称工作区干净',
+  spinning(during) === true && during.props.title === undefined)
 
 const release2 = fullGate
 fullGate = null
@@ -451,7 +454,9 @@ tick()
 await wait(60)
 const clean = await renderUntilStable(makeElement(chip, { sessionId: 's-3' }), 'chip-s3')
 ok('改动清零后徽标消失', badgeOf(clean).length === 0)
-ok('tooltip 这时才说工作区干净', String(clean.props.title).indexOf('工作区干净') >= 0)
+ok('干净之后图标停下来，chip 上只剩分支名',
+  badgeOf(clean).length === 0 && spinning(clean) !== true && textOf(clean) === 'main'
+  && clean.props.title === undefined)
 
 console.log('')
 console.log('=== 一个页面里的两个会话：各自轮询自己的工作区 ===')
@@ -509,8 +514,8 @@ const openHere = byClass(notRepo, 'dsh-git-btn').find((b) => textOf(b) === '打�
 /* chip 是面板之外唯一会说这句话的地方。同一个「读不动」的状态有两种原因，而它们
    在屏幕上必须分开：目录里没有仓库，和这台机器上没有 git（见 92-chip 的那一串
    理由）。中文只在这里验一遍 —— 面板那一页在 gp40。 */
-ok('（对照）reason 还是 not-a-repo 时，chip 说的是「这个目录不是 Git 仓库」',
-  String(forSetup.props.title).indexOf('不是 Git 仓库') >= 0)
+ok('（对照）reason 还是 not-a-repo 时，chip 上写着「不是仓库」',
+  labelOf(forSetup) === '不是仓库')
 SETUP_REPLY.reason = 'no-git'
 forSetup.props.onClick()
 await wait(30)
@@ -518,17 +523,14 @@ const chipNoGitClosed = await chipTree()
 chipNoGitClosed.props.onClick()
 await wait(30)
 const chipNoGit = await chipTree()
-console.log('  没有 git 时 chip 的 tooltip:', JSON.stringify(String(chipNoGit.props.title).slice(0, 90)))
-ok('机器上没有 git 时，chip 说的是找不到 git',
-  String(chipNoGit.props.title).indexOf('这台机器上找不到 git') >= 0)
-ok('chip 不再跟着首帧说「这个目录不是 Git 仓库」',
-  String(chipNoGit.props.title).indexOf('不是 Git 仓库') < 0)
+console.log('  没有 git 时 chip 上写的:', JSON.stringify(labelOf(chipNoGit)))
+ok('机器上没有 git 时，chip 上写着「没有 git」', labelOf(chipNoGit) === '没有 git')
+ok('chip 不再跟着首帧说「不是仓库」', labelOf(chipNoGit).indexOf('不是仓库') < 0)
 
 /* 「这个目录不是 Git 仓库」那一页是没有路径框的（路径不是问题，没什么可填的），
    所以 chip 也不能承诺「点击选择路径」—— 承诺一个点不到的东西比不承诺更坏。 */
-ok('（对照）not-a-repo 时 chip 不再承诺「点击选择路径」',
-  String(forSetup.props.title).indexOf('选择路径') < 0
-  && String(forSetup.props.title).indexOf('点击查看') >= 0)
+ok('（对照）not-a-repo 时 chip 不承诺「选择目录」（那一页没有路径框）',
+  labelOf(forSetup).indexOf('选择目录') < 0 && labelOf(forSetup) === '不是仓库')
 
 /* 第三种状态：连看哪个目录都还不知道（no-path，刚切会话那一瞬间就是这样）。
    那时要人填一个目录，说法也就得是「填」，不能说「这个目录不是仓库」。 */
@@ -539,11 +541,9 @@ const chipNoPathOpen = await chipTree()
 chipNoPathOpen.props.onClick()
 await wait(30)
 const chipNoPath = await chipTree()
-console.log('  路径没定时 chip 的 tooltip:', JSON.stringify(String(chipNoPath.props.title).slice(0, 60)))
-ok('路径没定时 chip 说的是「还没确定看哪个目录」',
-  String(chipNoPath.props.title).indexOf('还没确定看哪个目录') >= 0)
-ok('也不再说成「这个目录不是 Git 仓库」',
-  String(chipNoPath.props.title).indexOf('不是 Git 仓库') < 0)
+console.log('  路径没定时 chip 上写的:', JSON.stringify(labelOf(chipNoPath)))
+ok('路径没定时 chip 写的是「选择目录」', labelOf(chipNoPath) === '选择目录')
+ok('也不再说成「不是仓库」', labelOf(chipNoPath).indexOf('不是仓库') < 0)
 console.log('  引导页上有「打开这个目录」:', openHere !== undefined)
 openHere.props.onClick()
 await wait(30)

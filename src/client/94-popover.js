@@ -57,7 +57,13 @@
          itself against the same ancestor it always did, and the hover card is an
          absolutely positioned sibling that cannot push it around. */
       return h('div', { className: 'dsh-git-layer' },
-        h(GitPanel, { key: 'panel', sessionId: props.sessionId, active: isOpen, ready: everOpened }),
+        /* `useProjection` 要递下去：面板是这个组件的子树，拿到的不是 slot 给的
+           那一整套标准 prop，而它跟住"会话搬了目录"（模型 `create_worktree` / `cd`）
+           的唯一通道就是这条投影。 */
+        h(GitPanel, {
+          key: 'panel', sessionId: props.sessionId, active: isOpen, ready: everOpened,
+          useProjection: props.useProjection,
+        }),
         mode === 'hover' && isOpen !== true
           ? h('div', {
               key: 'switch', className: 'dsh-git-switch dsh-git-switch-hover',

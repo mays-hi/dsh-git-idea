@@ -87,7 +87,12 @@
           h('span', { className: missing === true ? 'dsh-git-set-hint dsh-git-warn' : 'dsh-git-set-hint' },
             ready !== true ? '正在读取…'
               : (missing === true
-                ? '还缺：' + (state.nameMissing === true ? '名字' : '邮箱') + ' —— 提交会被 git 拒绝'
+                /* 两半都缺时说两半。Host 一直带着 `emailMissing`，只是这里没读 —— 于是
+                   名字和邮箱都没配的人先被告知"还缺：名字"，填完再被告知"还缺：邮箱"，
+                   两趟才走完一件本来一趟就能说清的事。 */
+                ? '还缺：' + (state.nameMissing === true && state.emailMissing === true
+                  ? '名字和邮箱'
+                  : (state.nameMissing === true ? '名字' : '邮箱')) + ' —— 提交会被 git 拒绝'
                 : (source(state.name, state.nameOrigin) + ' · ' + source(state.email, state.emailOrigin))))),
 
         h('div', { className: 'dsh-git-set-row' },

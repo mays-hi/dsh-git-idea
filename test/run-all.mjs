@@ -30,6 +30,7 @@ const COUNTING = [
   'gp45-rpc-gate-test.mjs',
   'gp46-windows-shell-test.mjs',
   'gp47-posix-path-test.mjs',
+  'gp48-worktree-test.mjs',
 ]
 /* Suites that report by exit code and print their own lines. */
 const PROSE = ['gp34a-host-test.mjs', 'gp34d-config-test.mjs', 'gp34e-bridge-test.mjs']
@@ -76,12 +77,71 @@ if (stale('build-package.mjs', 'run `node build-package.mjs` first: lib/index.js
    before the executor exists and registers no RPC), and the client half
    defines the `styles` symbol its CSS fragment calls. Assert them on the
    files that ship, not on the sources they are assembled from. */
+/* ── 正式包那两半真的能装吗 ──
+
+   光看字符串不够：这两个文件是把同一份片段包进 ESM 模块和一个
+   __ModuleLoader__ classic script 的结果，而**加载**这一步只有浏览器会做。这里
+   在 Node 里把两步都走一遍 —— 客户端那份用假的 window/document/React 走完
+   `load` → `factory(require)` → `apply(ctx)`，看它有没有把三个 slot 注册上去。 */
+function clientHalfLoads() {
+  const source = fs.readFileSync(path.join(ROOT, 'client', 'client.js'), 'utf8')
+  let factory = null
+  const fakeWindow = { __ModuleLoader__: { load: (bundle) => { factory = bundle.factory } } }
+  const element = { textContent: '', parentNode: null }
+  const fakeDocument = {
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    createElement: () => element,
+    querySelector: () => null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    hidden: false,
+    defaultView: { innerWidth: 1400, innerHeight: 900, localStorage: { getItem: () => null, setItem: () => {} } },
+  }
+  try {
+    new Function('window', 'document', 'fetch', 'requestAnimationFrame', source)(
+      fakeWindow, fakeDocument, () => Promise.reject(new Error('no fetch')), () => {})
+  } catch (error) {
+    return 'client/client.js does not evaluate: ' + String(error != null ? error.message : error)
+  }
+  if (typeof factory !== 'function') return 'client/client.js registered no module factory'
+  const React = {
+    createElement: () => null,
+    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useEffect: () => {},
+    useLayoutEffect: () => {},
+    useMemo: (factory_) => factory_(),
+    useCallback: (fn) => fn,
+    memo: (component) => component,
+  }
+  let module_ = null
+  try {
+    module_ = factory((name) => (name === 'react' ? React : undefined))
+  } catch (error) {
+    return 'client/client.js factory threw: ' + String(error != null ? error.message : error)
+  }
+  if (module_ == null || typeof module_.apply !== 'function') return 'client/client.js exports no apply'
+  let slots = 0
+  const slotsService = { inject: (name, cb) => cb(), register: () => { slots += 1; return () => {} } }
+  const ctx = {
+    get: (name) => (name === 'slots' ? slotsService : undefined),
+    effect: (cb) => { const dispose = cb(); return typeof dispose === 'function' ? dispose : () => {} },
+  }
+  try {
+    module_.apply(ctx)
+  } catch (error) {
+    return 'client/client.js apply threw: ' + String(error != null ? error.message : error)
+  }
+  if (slots !== 3) return 'client/client.js registered ' + String(slots) + ' slot(s), expected 3'
+  return null
+}
+
 function publishedGap() {
   const host = fs.readFileSync(path.join(ROOT, 'lib', 'index.js'), 'utf8')
   const client = fs.readFileSync(path.join(ROOT, 'client', 'client.js'), 'utf8')
   if (host.indexOf("export const inject = ['shell']") < 0) return 'lib/index.js does not declare the shell inject'
   if (client.indexOf('const styles = {') < 0) return 'client/client.js does not define styles'
-  return null
+  return clientHalfLoads()
 }
 const gap = publishedGap()
 if (gap !== null) {

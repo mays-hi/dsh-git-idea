@@ -135,11 +135,11 @@
        same classes as the toolbar's icon tools (so they are the same hit area and
        the same hover), the mirror of the chevron the branch rows use for "go
        there", and the glyph the panel's own refresh already draws. */
-    function diffIconButton(key, glyph, title, onClick, options) {
+    function diffIconButton(key, glyph, label, onClick, options) {
       const opts = options == null ? {} : options
       return h('button', {
         key: key, type: 'button', className: 'dsh-git-tool dsh-git-tool-ico',
-        disabled: opts.disabled === true, title: title, onClick: onClick,
+        disabled: opts.disabled === true, 'aria-label': label, onClick: onClick,
       }, glyph)
     }
 
@@ -233,14 +233,13 @@
         ? h('button', {
             key: 'stage', type: 'button', className: 'dsh-git-btn',
             disabled: props.busy === true,
-            title: target.staged === true ? '从索引里撤下这个文件' : '把这个文件的改动放进索引',
             onClick: function () { props.onStage(target.staged !== true) },
           }, target.staged === true ? '取消暂存' : '暂存')
         : null
 
       const head = h('div', { key: 'head', className: 'dsh-git-diffhead' },
         diffIconButton('back', h(Icon, { name: 'back', size: 14 }), '返回文件列表', props.onBack),
-        h('span', { key: 'p', className: 'dsh-git-diffpath', title: target.path }, target.path),
+        h('span', { key: 'p', className: 'dsh-git-diffpath' }, target.path),
         target.status !== undefined
           ? h('span', { key: 'st', className: 'dsh-git-st' + statusClass(target.status) }, statusLabel(target.status))
           : null,
