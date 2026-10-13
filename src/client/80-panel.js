@@ -59,7 +59,10 @@
       const [size, setSize] = React.useState(panelSize)
       const [armed, setArmed] = React.useState('')
       const [prompt, setPrompt] = React.useState(null)
-      const [needsUpstream, setNeedsUpstream] = React.useState(false)
+      /* 「这个分支还没有上游」是 push 和 pull 共有的一次失败，但两者要补的那一步不同
+         （`push -u` 对 `pull --set-upstream`），所以记的不是一个布尔值，是失败的那个
+         动作：`'push'` / `'pull'` / `''`（没有这样一次失败）。 */
+      const [upstreamOp, setUpstreamOp] = React.useState('')
       /* The file whose patch is on screen, and a counter the refresh button
          bumps. Null means the list the reader came from is on screen — the two
          lists that can open a diff (the changes tree, a commit's file list) both
@@ -71,6 +74,9 @@
          on the click that opens one, never for the whole tree up front. */
       const [untrackedOpen, setUntrackedOpen] = React.useState({})
       const [untrackedFiles, setUntrackedFiles] = React.useState({})
+      /* 这个工作区里的仓库清单（见 Host 的 69-repos.js）：顶栏那颗「仓库」chip 和「不是
+         仓库」那个引导页都从它渲染 —— 同一份清单，两个地方说同一件事。 */
+      const [roots, setRoots] = React.useState(null)
       /* ── the working tree, read by pathspec ──
 
          `git status` stats every tracked file and walks every untracked
@@ -247,6 +253,34 @@
         setUntrackedFiles({})
       }
 
+      /* ── 这个工作区里有哪几个仓库 ──
+
+         DSH 的会话目录常常是「装着若干项目的那一层」：它自己不是仓库，而下面有好几个。
+         这一份读就是那张清单（一次向下扫描，Host 按工作区缓存）。会话自己的目录一变
+         （`projectionCwd`：模型 `create_worktree` 或 `cd`），问的就是另一个工作区了，要
+         重问一遍；⟳ 也是 —— 它顺带把那边的缓存清掉。
+
+         读不到不是错误：面板照旧把当前这一个仓库说清楚，只是没有那颗「仓库」chip。 */
+      React.useEffect(function () {
+        if (rootsRouteGone()) return undefined
+        let alive = true
+        callHost('git/repos', { sessionId: sessionId }).then(function (list) {
+          if (alive !== true) return
+          rememberRoots(sessionId, list)
+          setRoots(list)
+        }, function (failure) { rootsRouteRefused(failure) })
+        return function () { alive = false }
+      }, [sessionId, sessionDir, reloadAt])
+
+      /* 别的界面也能换仓库（输入框旁那张悬浮卡片，见 70-branchpicker），共享的那份一变，
+         这个面板跟着搬 —— 两个地方说的是同一件事：「这个会话现在看的是哪一个仓库」。 */
+      const repoAppliedVersion = useRepoApplied()
+      React.useEffect(function () {
+        const shared = sessionRepo(sessionId)
+        if (shared.length === 0 || sameRepoPath(shared, appliedRepo)) return
+        applyRepo(shared)
+      }, [repoAppliedVersion])
+
       const bump = bumpData
 
       /* ── what a hidden panel costs ──
@@ -285,6 +319,17 @@
          它占着，为一次「提交」让读者等十秒、十秒内点什么都要排队，是没有道理的。 */
       const REWRITES_TREE = ['git/checkout', 'git/pull', 'git/sequence', 'git/init']
 
+      /* 用哪个远端：配过的里面优先 `origin`（git 自己的默认名字，也是读者的期待），
+         没有就取第一个。空字符串表示这个仓库一个远端都没配 —— 调用方会换一套说法
+         （Host 那边根本不会起命令，答复里那句话已经说明了为什么）。
+         来源是 `refs.remoteNames`（`git remote` 的答案），不是 ref 列表：刚 `git remote
+         add` 完、还没 fetch 过的仓库一个远程跟踪分支都没有，而它有远端。 */
+      const upstreamRemote = function () {
+        const names = refs != null && refs.ok === true && Array.isArray(refs.remoteNames) ? refs.remoteNames : []
+        if (names.length === 0) return ''
+        return names.indexOf('origin') >= 0 ? 'origin' : names[0]
+      }
+
       /* One path for every panel operation. A failed operation still re-reads,
          because the failures that matter — a conflicting cherry-pick, merge or
          revert — leave the repository in a different state than they found it. */
@@ -293,7 +338,7 @@
         setBusy(true)
         setArmed('')
         setError(null)
-        setNeedsUpstream(false)
+        setUpstreamOp('')
         panelBox.needFull = REWRITES_TREE.indexOf(method) >= 0
         const request = base(appliedRepo)
         if (payload != null) Object.assign(request, payload)
@@ -303,17 +348,21 @@
         }, function (failure) {
           setBusy(false)
           setError(failureText(failure))
-          if (method === 'git/push' && failureText(failure).indexOf('upstream') >= 0) {
-            /* 「这个分支还没有上游」是一次可以自己走完的失败：设置里开了这一条时，
-               就把横幅本来要问的那一步直接做掉（同一个请求，带上 setUpstream）。问过
-               的那一次不再自动重试 —— 它要是也失败，横幅照旧出现，读者还有得按。 */
+          const reply = failure.reply
+          /* 是不是「这个分支还没有上游」，由 Host 问过 git 才算数（回复里的
+             `needsUpstream`，见 10-shell.js）—— 那是 pull 和 push 共有的一次失败，
+             只是要补的那一步不同。这个面板也不再从 git 那句话里认它：那句话是翻译过的。 */
+          if (reply != null && reply.needsUpstream === true && (method === 'git/push' || method === 'git/pull')) {
             const retry = payload == null || payload.setUpstream !== true
-            const remote = refs != null && refs.ok === true && refs.remote.length > 0 ? refs.remote[0].name : ''
-            if (plugin.pushSetUpstream === true && retry && remote.length > 0 && currentName.length > 0) {
-              runOp('git/push', { setUpstream: true, remote: remote, branch: currentName })
+            /* 设置里那一句只承诺了 push（"推送没有上游的分支时直接推上去"），所以自动
+               走完那一步的只有 push；pull 的 `--set-upstream` 得读者自己按一下 ——
+               它会改这条分支的跟踪关系，不该由一次点击顺手决定。 */
+            if (method === 'git/push' && plugin.pushSetUpstream === true && retry
+              && upstreamRemote().length > 0 && currentName.length > 0) {
+              runOp('git/push', { setUpstream: true, remote: upstreamRemote(), branch: currentName })
               return
             }
-            setNeedsUpstream(true)
+            setUpstreamOp(method === 'git/pull' ? 'pull' : 'push')
           }
           bump()
         })
@@ -677,8 +726,6 @@
       }
 
       const changes = status != null && status.ok === true ? mergeChanges(status) : []
-      /* 工作树页签的徽标和页签里那份清单要说的是同一个数，所以它只算一次。 */
-      const wtCount = worktreeCount(worktrees)
       let stagedCount = 0
       for (let i = 0; i < changes.length; i += 1) if (changes[i].staged === true) stagedCount += 1
 
@@ -759,19 +806,18 @@
       const sequencer = work != null && work.ok === true ? text(work.sequencer) : ''
       const conflicts = status != null && status.ok === true ? status.unmerged.length : 0
 
-      /* One button: the mark (a character or an icon), a short word, an optional
-         badge. The word on screen is what the button does; the full sentence is
-         the button's accessible name, where there is room for it. Neither of them
-         is a tooltip — nothing in this panel pops up the browser's own box. */
+      /* One button: the mark (a character or an icon, or — for the two buttons in
+         the half-done-operation banner — the act's own word), plus an optional
+         badge. On the toolbars the mark alone says what the button does: every
+         control there is a glyph, and the full sentence is the button's
+         accessible name, where there is room for it. Neither of them is a
+         tooltip — nothing in this panel pops up the browser's own box. */
       const tool = function (key, mark, aria, onClick, options) {
         const opts = options == null ? {} : options
         const classes = ['dsh-git-tool']
         if (opts.danger === true) classes.push('dsh-git-danger')
         if (opts.on === true) classes.push('dsh-git-tool-on')
         const parts = [mark]
-        if (typeof opts.text === 'string' && opts.text.length > 0) {
-          parts.push(h('span', { key: 't', className: 'dsh-git-tool-text' }, opts.text))
-        }
         if (typeof opts.badge === 'number' && opts.badge > 0) {
           parts.push(h('span', { key: 'b', className: 'dsh-git-tool-badge' }, String(opts.badge)))
         }
@@ -785,13 +831,14 @@
          beside the branch it acts on — not in the commit graph's own toolbar,
          which is about the selected commit. The middle toolbar keeps only what
          the selection scopes. */
-      /* 这四个以前只有记号（⟳ ⇣ ↓ ↑），名字在悬浮提示里。现在词就在按钮上，
-         和分支卡片上那排 chip 是同一套（⇣ 获取 / ↓ 拉取 / ↑ 推送）。 */
+      /* 这四个只有记号（⟳ ⇣ ↓ ↑）：名字在 `aria-label` 里（读屏）和键盘焦点上，屏幕上
+         不写字 —— 和中间那一排提交动作（拣选 / 还原 / 标签 / 分支）、以及分支卡片上那排
+         chip 是同一套。领先/落后的数字照旧跟在记号后面（↓2 / ↑3）。 */
       const syncGroup = h('div', { className: 'dsh-git-sync' },
-        tool('refresh', '⟳', '重新读取仓库（忽略缓存）', refresh, { disabled: !repoOk || busy, text: '刷新' }),
-        tool('fetch', '⇣', 'fetch：从所有远端取回最新引用', function () { runOp('git/fetch') }, { disabled: !repoOk || busy, text: '获取' }),
-        tool('pull', '↓', 'pull：拉取并合入当前分支', function () { runOp('git/pull') }, { disabled: !repoOk || busy, badge: behind, text: '拉取' }),
-        tool('push', '↑', 'push：推送当前分支', function () { runOp('git/push') }, { disabled: !repoOk || busy, badge: ahead, text: '推送' }))
+        tool('refresh', '⟳', '重新读取仓库（忽略缓存）', refresh, { disabled: !repoOk || busy }),
+        tool('fetch', '⇣', 'fetch：从所有远端取回最新引用', function () { runOp('git/fetch') }, { disabled: !repoOk || busy }),
+        tool('pull', '↓', 'pull：拉取并合入当前分支', function () { runOp('git/pull') }, { disabled: !repoOk || busy, badge: behind }),
+        tool('push', '↑', 'push：推送当前分支', function () { runOp('git/push') }, { disabled: !repoOk || busy, badge: ahead }))
 
       /* ── 头上的那颗分支 chip ──
 
@@ -823,7 +870,8 @@
       /* Inside the header, which spans the panel: the card then starts at the
          panel's left margin however many rows the header wraps to, and there is
          no measured offset to keep in sync. */
-      const switchCard = switcher === 'panel'
+      /* 两颗 chip（分支那颗、仓库那颗）点开的是同一张卡片：这个面板在看哪一个。 */
+      const switchCard = switcher === 'panel' || switcher === 'roots'
         ? h('div', {
             key: 'sw', className: 'dsh-git-switch dsh-git-switch-panel',
             /* The same mark the hover card carries. Without it the card counts as
@@ -833,7 +881,10 @@
           },
             h(BranchPicker, {
               sessionId: sessionId,
-              repo: appliedRepo,
+              /* 面板现在看的是哪一个仓库：appliedRepo 还是空的时候（读者没换过）就是这次身份读
+                 回来的那个 —— 卡片用它给清单第一组打星、也用它去读那个仓库的分支。少了这个回退，
+                 卡片收到的是空串（= 会话工作区），清单里就没有一行是「现在这个」。 */
+              repo: appliedRepo.length > 0 ? appliedRepo : (work != null ? text(work.repo) : ''),
               mode: 'panel',
               dirty: status != null && status.ok === true
                 ? status.staged.length + status.unstaged.length + status.untracked.length + status.unmerged.length
@@ -1003,16 +1054,16 @@
               record: plugin.cherryPickRecord === true,
             })
           },
-          { disabled: !canAct, text: '拣选' }),
+          { disabled: !canAct }),
         tool('revert', h(Icon, { name: 'revert', size: 15 }), '还原：revert，生成一个反向提交来撤销它',
           function () { runOp('git/sequence', { op: 'revert', action: 'start', target: selectedCommit }) },
-          { disabled: !canAct, text: '还原' }),
+          { disabled: !canAct }),
         tool('tag', h(Icon, { name: 'tag', size: 15 }), '标签：在这个提交上打标签',
           function () { setArmed(''); setPrompt({ kind: 'tag', value: '' }) },
-          { disabled: !canAct, text: '标签' }),
+          { disabled: !canAct }),
         tool('branch', h(BranchIcon, { size: 15 }), '分支：从这个提交新建分支并切过去',
           function () { setArmed(''); setPrompt({ kind: 'branch', value: '' }) },
-          { disabled: !canAct, text: '分支' }),
+          { disabled: !canAct }),
         /* Pinned to the right end of the strip, and short: the room it reserves
            is room the filters cannot use, and "200 条" says as much as
            "200 条匹配" once the filters above it are visible. */
@@ -1062,16 +1113,25 @@
           : tool('seq-abort', '中止', '放弃本次' + seqLabel,
               function () { setArmed('abort') }, { disabled: busy }))
 
-      const upstreamHint = needsUpstream && refs != null && refs.ok === true && refs.remote.length > 0
+      /* ── 「这个分支还没有上游」那一行 ──
+
+         pull 和 push 都会在这句话上失败，而它们要补的那一步不同（`push -u` 对
+         `pull --set-upstream`），所以按钮跟着失败的那个动作走。远端名字直接写在句子里：
+         一键补上的那一步会改这条分支的跟踪关系，读者得看得见自己在认哪个远端。
+         一个远端都没有的仓库走不到这里 —— Host 没起命令，那句话已经在上面那条里了。 */
+      const upstreamRemoteName = upstreamRemote()
+      const upstreamHint = upstreamOp.length > 0 && upstreamRemoteName.length > 0
         ? h('div', { className: 'dsh-git-prompt' },
-            h('span', { key: 'l', className: 'dsh-git-hint' }, '这个分支还没有上游'),
+            h('span', { key: 'l', className: 'dsh-git-hint' }, '这个分支还没有上游（' + upstreamRemoteName + '）'),
             h('button', {
-              key: 'u', type: 'button', className: 'dsh-git-btn dsh-git-primary', disabled: busy,
+              key: 'u', type: 'button', className: 'dsh-git-btn dsh-git-primary',
+              disabled: busy || currentName.length === 0,
               onClick: function () {
-                runOp('git/push', { setUpstream: true, remote: refs.remote[0].name, branch: currentName })
+                runOp(upstreamOp === 'pull' ? 'git/pull' : 'git/push',
+                  { setUpstream: true, remote: upstreamRemoteName, branch: currentName })
               },
-            }, '推送并设为上游'),
-            h('button', { key: 'n', type: 'button', className: 'dsh-git-btn', onClick: function () { setNeedsUpstream(false) } }, '忽略'))
+            }, upstreamOp === 'pull' ? '拉取并设为上游' : '推送并设为上游'),
+            h('button', { key: 'n', type: 'button', className: 'dsh-git-btn', onClick: function () { setUpstreamOp('') } }, '忽略'))
         : null
 
       const shownRef = allRefs ? '' : (activeRef.length > 0 ? activeRef : (graph != null && graph.ok === true ? text(graph.ref) : ''))
@@ -1100,6 +1160,33 @@
         viewButton('tree', '树', '文件树视图：按目录折叠'),
         viewButton('flat', '扁平', '扁平文件视图：每个文件一行，名字在前、目录压暗，按路径排序'))
 
+      /* ── 顶栏那颗「仓库」chip：一个工作区里有几个仓库时，屏幕上得说清「现在看的是哪一个」 ──
+
+         **它和旁边那颗分支 chip 打开的是同一张卡片**（`BranchPicker`：仓库那一组在最上面，
+         下面接着 HEAD / 本地 / 远端）。它曾经开一张只有仓库的卡片 —— 而「换这个面板看哪一个」
+         本来就只有一个家，两颗按钮、两张卡片说同一件事，所以卡片收成一张；但**这颗 chip
+         留着**：「现在看的是哪一个」这句话在多仓库的工作区里得一直看得见，不该只藏在点开之后。
+
+         只有一种可能时它不出现（工作区里就一个仓库），和别处同一条规矩。名字用清单里的
+         相对路径（`apps/web`）：两个项目同名时，只有相对路径分得开。 */
+      const rootList = roots != null && roots.ok === true && Array.isArray(roots.roots) ? roots.roots : []
+      const activeRoot = appliedRepo.length > 0 ? appliedRepo : (work != null ? text(work.repo) : '')
+      const activeRootEntry = repoHere(rootList, appliedRepo, work != null ? text(work.repo) : '')
+      const rootChip = needsSetup === true || rootList.length < 2
+        ? null
+        : h('button', {
+            key: 'root', type: 'button',
+            className: 'dsh-git-root-chip' + (switcher === 'roots' ? ' dsh-git-root-chip-on' : ''),
+            onClick: function () { setSwitchMode(switcher === 'roots' ? null : 'roots') },
+            'aria-label': '这个工作区里有 ' + String(rootList.length) + ' 个仓库，现在看的是 '
+              + (activeRootEntry === null ? activeRoot : repoLabel(activeRootEntry))
+              + ' —— 点开可以换一个',
+          },
+            h(Icon, { key: 'i', name: 'folder', size: 13 }),
+            h('span', { key: 'n', className: 'dsh-git-root-chip-n' },
+              activeRootEntry === null ? '仓库' : repoLabel(activeRootEntry)),
+            h('span', { key: 'c', className: 'dsh-git-root-count' }, String(rootList.length)))
+
       const header = h('div', { className: 'dsh-git-top' },
         h('span', { className: 'dsh-git-title' }, 'Git'),
         needsSetup
@@ -1116,19 +1203,10 @@
                 '变更',
                 changes.length > 0 ? h('span', { key: 'n', className: 'dsh-git-tool-badge' }, String(changes.length)) : null),
               h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'log' ? ' dsh-git-tab-on' : ''),
-                'aria-label': '提交历史', onClick: function () { setTab('log'); setDiffTarget(null) } }, '历史'),
-              /* 工作树是 DSH 自己会造出来的东西，所以这个页签在多数仓库里是空
-                 的 —— 只有一棵树。它照样常驻：树出现的那一刻，读者要能在这个
-                 面板里找到它，而不是猜它去了哪。 */
-              h('button', { type: 'button', className: 'dsh-git-tab' + (tab === 'worktrees' ? ' dsh-git-tab-on' : ''),
-                'aria-label': wtCount > 1
-                  ? '这个仓库有 ' + String(wtCount) + ' 棵工作树（含当前这一份）—— 点开看它们在哪'
-                  : '工作树：DSH 的 create_worktree 建出的新树会出现在这里',
-                onClick: function () { setTab('worktrees'); setDiffTarget(null) } },
-                '工作树',
-                wtCount > 1 ? h('span', { key: 'n', className: 'dsh-git-tool-badge' }, String(wtCount)) : null)),
+                'aria-label': '提交历史', onClick: function () { setTab('log'); setDiffTarget(null) } }, '历史')),
         needsSetup ? null : syncGroup,
         needsSetup ? null : branchChip,
+        needsSetup ? null : rootChip,
         h('span', { key: 'grow', className: 'dsh-git-grow' }),
         viewSwitch,
         switchCard)
@@ -1156,6 +1234,11 @@
           sessionId: sessionId,
           initial: text(work.repo),
           reason: text(work.reason),
+          /* 「这个路径不在工作区里」那一页要说清工作区是哪个；「不是仓库」那一页要列出
+             工作区下面的仓库（和顶栏那颗 chip 是同一份清单）。 */
+          workspace: text(roots != null ? roots.workspace : ''),
+          roots: rootList,
+          truncated: roots != null && roots.truncated === true,
           /* git's own stderr only adds information when git itself misbehaved.
              For "no repository here" the explanation above already says it, and
              the raw fatal: line would just be noise. */
@@ -1182,14 +1265,6 @@
           onStage: diffTarget.kind === 'file'
             ? function (staged) { setStaged([{ path: diffTarget.path }], staged) }
             : undefined,
-        })
-      } else if (tab === 'worktrees') {
-        body = h(WorktreePane, {
-          key: 'worktrees',
-          data: worktrees,
-          /* 点别的树：只把这个面板切过去看。会话不动 —— 模型在哪棵树上干活是
-             DSH 和模型自己的事，这个插件不搬会话，也不注册任何工具。 */
-          onOpen: function (next) { applyRepo(next) },
         })
       } else if (tab === 'changes') {
         body = h(ChangesPane, {

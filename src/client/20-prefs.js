@@ -56,6 +56,8 @@
       if (settingsLoaded) return
       settingsLoaded = true
       gitSettings = normalizeSettings(readStoredJSON(SETTINGS_KEY, null))
+      /* 读到了也要说一声：挂载前就订阅了的界面（先开面板、后开设置页）靠这条更新。 */
+      settingsSignal.notify()
     }
 
     function saveSettings(next) {
@@ -74,12 +76,17 @@
        half, so they travel across browsers and machines. As an ordinary plugin
        this is exactly what its config section would hold. */
 
+    /* 这份名单只负责**第一帧**：Host 还没答复时页面上该有什么值。schema 本身归
+       Host（70-config.js 的 `normalizeConfig`）—— 下面那个归一化函数故意不做白名单，
+       理由写在它自己那段注释里。 */
     const PLUGIN_CONFIG_DEFAULTS = {
       initBranch: 'main', cherryPickRecord: false,
       /* 空 = 用部署 PATH 里的 git。 */
       gitPath: '',
       /* 这三条是插件自己给 git 的实参，不是 git 设置的副本。 */
       fetchPrune: true, pullRebase: false, pushSetUpstream: false,
+      /* 工作区里找仓库往下几层：0 是「不找」（见 69-repos.js）。 */
+      repoScanDepth: 2,
     }
     let pluginConfig = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
     let pluginConfigPath = ''
@@ -96,15 +103,28 @@
     const pluginConfigCommittedSignal = createSignal(function () { return pluginConfigCommitted })
     const usePluginConfigCommitted = pluginConfigCommittedSignal.use
 
+    /* ── 合并，不是过滤 ──
+
+       认得的键照旧归整类型，**不认识的键原样带走**。以前这里是一张白名单，代价是
+       一次真事故：`repoScanDepth` 没写进上面那份名单，于是设置页里那个下拉框永远
+       显示默认的 2（Host 明明答了 3），而且读者改**任何**一个别的插件设置，400ms 后
+       落盘的那一份都会把它抹掉 —— Host 收到一份没有这个键的配置，只能按默认值写。
+
+       schema 只有一个主人（Host 的 `normalizeConfig`：它做白名单，也做钳位）。这边
+       多做一次白名单，就是第二个主人，也就会有第二次这样的漂移。 */
     function normalizePluginConfig(raw) {
-      const out = Object.assign({}, PLUGIN_CONFIG_DEFAULTS)
-      if (raw == null || typeof raw !== 'object') return out
-      if (typeof raw.initBranch === 'string') out.initBranch = raw.initBranch.trim().slice(0, 120)
-      out.cherryPickRecord = raw.cherryPickRecord === true
-      if (typeof raw.gitPath === 'string') out.gitPath = raw.gitPath.trim().slice(0, 400)
-      out.fetchPrune = raw.fetchPrune !== false
-      out.pullRebase = raw.pullRebase === true
-      out.pushSetUpstream = raw.pushSetUpstream === true
+      const out = Object.assign({}, PLUGIN_CONFIG_DEFAULTS, raw != null && typeof raw === 'object' ? raw : {})
+      if (typeof out.initBranch !== 'string') out.initBranch = PLUGIN_CONFIG_DEFAULTS.initBranch
+      out.initBranch = out.initBranch.trim().slice(0, 120)
+      out.cherryPickRecord = out.cherryPickRecord === true
+      if (typeof out.gitPath !== 'string') out.gitPath = PLUGIN_CONFIG_DEFAULTS.gitPath
+      out.gitPath = out.gitPath.trim().slice(0, 400)
+      out.fetchPrune = out.fetchPrune !== false
+      out.pullRebase = out.pullRebase === true
+      out.pushSetUpstream = out.pushSetUpstream === true
+      out.repoScanDepth = typeof out.repoScanDepth === 'number' && isFinite(out.repoScanDepth)
+        ? out.repoScanDepth
+        : PLUGIN_CONFIG_DEFAULTS.repoScanDepth
       return out
     }
 

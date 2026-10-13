@@ -30,6 +30,7 @@ export const TARGETS = [
       'src/host/66-refs.js',
       'src/host/67-worktrees.js',
       'src/host/68-detail.js',
+      'src/host/69-repos.js',
       'src/host/70-config.js',
       'src/host/72-gitbin.js',
       'src/host/74-identity.js',
@@ -56,6 +57,7 @@ export const TARGETS = [
       'src/client/58-branchinfo.js',
       'src/client/60-icons.js',
       'src/client/62-branchstate.js',
+      'src/client/64-repos.js',
       'src/client/70-branchpicker.js',
       'src/client/76-worktrees.js',
       'src/client/80-panel.js',
@@ -86,7 +88,17 @@ export function render(target) {
     if (!fs.existsSync(file)) throw new Error('missing source fragment: ' + rel)
     return normalize(fs.readFileSync(file, 'utf8'))
   })
-  return banner(target) + bodies.join('')
+  const text = banner(target) + bodies.join('')
+  /* Compile it here, without running it. The fragments share one scope and one of them
+     is the template literal that holds the whole stylesheet: a stray backtick inside a
+     CSS comment closes that string, and the result is a plugin that never loads — with
+     the only symptom being a syntax error in a browser console nobody reads. */
+  try {
+    new Function(text)
+  } catch (error) {
+    throw new Error(target.out + ' has a syntax error: ' + String(error != null && error.message !== undefined ? error.message : error))
+  }
+  return text
 }
 
 export function buildAll(write) {

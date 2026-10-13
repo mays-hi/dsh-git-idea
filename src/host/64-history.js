@@ -187,6 +187,14 @@ async function readPanel(input, target, paths) {
 }
 
 async function panelSnapshot(input) {
+  /* 请求里那个路径不在会话工作区里（见 `repoOutsideWorkspace`）：不起进程、不进缓存，
+     直接按「这个路径不对」回答；答复里带着被拒的那个路径，引导页要把它显示出来。 */
+  if (input != null && isStr(input.repoRefused) && input.repoRefused.length > 0) {
+    const refused = missingPanel(input.repoRefused, 'outside')
+    const workspace = sessionWorkdir(input)
+    refused.workspace = isStr(workspace) && workspace.length > 0 ? workspace : null
+    return refused
+  }
   const target = repoFrom(input, null)
   if (target === undefined) return missingPanel(null, 'no-path')
   /* Two tags, never one: a cheap answer cached under the full read's name would

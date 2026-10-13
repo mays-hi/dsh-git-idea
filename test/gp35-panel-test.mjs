@@ -199,8 +199,12 @@ const branchesReply = {
     { name: 'solo', current: false, committedAt: nowSec - 3600, upstream: '', track: '', ahead: 0, behind: 0, head: 'bbb', subject: 'solo tip' },
     { name: 'feature/one', current: false, committedAt: nowSec - 90000, upstream: 'origin/feature/one', track: '>', ahead: 1, behind: 0, head: 'ccc', subject: 'one tip' },
     { name: 'zeta', current: false, committedAt: nowSec - 9000, upstream: '', track: '', ahead: 0, behind: 0, head: 'ddd', subject: 'z' },
+    { name: 'synced', current: false, committedAt: nowSec - 12000, upstream: 'origin/synced', track: '=', ahead: 0, behind: 0, head: 'fff', subject: 'synced tip' },
   ],
-  remotes: [{ name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r' }],
+  remotes: [
+    { name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r', sameAsLocal: false },
+    { name: 'main', remote: 'origin', ref: 'origin/main', committedAt: nowSec - 5, head: 'aaa', subject: 'tip main', sameAsLocal: true },
+  ],
 }
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {

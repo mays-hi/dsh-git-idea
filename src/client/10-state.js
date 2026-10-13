@@ -96,10 +96,21 @@
           return function () { listeners.delete(listener) }
         },
         /* The React face of the signal: read the value when the signal fires,
-           never the one this render closed over. */
+           never the one this render closed over — and square up once on mount.
+
+           That first re-read is not belt-and-braces: a preference is loaded from
+           storage during the very render that first asks for it (`loadSettings`
+           hangs off a ref / an effect), so `useState(read())` has already frozen
+           the default, and the notification that follows a load fires before this
+           effect has subscribed to it. Without the extra read, the surface that
+           mounts first shows defaults until something else happens to notify —
+           which is exactly what the settings page did when it was opened before
+           the composer chip had ever mounted. React bails out when the value is
+           unchanged, so the common case costs nothing. */
         use: function () {
           const pair = React.useState(read())
           React.useEffect(function () {
+            pair[1](read())
             return signal.subscribe(function () { pair[1](read()) })
           }, [])
           return pair[0]
@@ -409,15 +420,31 @@
        away unread, which looks exactly like the click doing nothing. */
     let switchBusy = false
 
+    /* ── 卡片里有东西正等着读者 ──
+
+       `switchBusy` 管的是「一次操作正在飞」；这一条管的是「读者正在这张卡片里做事」：
+       点了「从此分支新建分支…」，子菜单收掉，卡片里多出一行还没打字的输入框，而指针这时
+       正好落回卡片外面（子菜单原先挂在那儿）—— `pointerleave` 一到，200ms 后整张卡片连
+       那个输入框一起消失，看起来就像这一下点击没被听见。两步删除的第二步同理。
+
+       所以这些状态自己按住卡片：到点先看一眼，还按着就再等一会儿。按住不是永不收起 ——
+       取消、提交、点到别处都会把它放开（见 70-branchpicker.js）。 */
+    let switchHolds = false
+
     function hoverCloseSoon() {
       clearHoverTimer()
       if (switchMode !== 'hover') return
+      /* 正在飞的操作不安排收起：那次操作的答复（新分支，或者为什么失败）要留在屏幕上
+         给人看（见 `switchBusy`）。它结束之后，卡片等下一次「指针离开」再收。 */
       if (switchBusy === true) return
       const timer = ctx.get('timer')
       if (timer === undefined) { setSwitchMode(null); return }
       hoverTimer = timer.timeout(function () {
         hoverTimer = null
-        if (switchMode === 'hover') setSwitchMode(null)
+        if (switchMode !== 'hover') return
+        /* 读者正在这张卡片里打字：指针在不在卡片上都不能收。 */
+        if (switchHolds === true) { hoverCloseSoon(); return }
+        setSwitchMode(null)
       }, 200)
     }
 
@@ -468,6 +495,85 @@
       repoAppliedSignal.notify()
     }
 
+    /* ── 这两个路径是同一个目录吗 ──
+
+       清单里的路径是 Host 扫出来的，手上的那一个可能来自会话、可能来记忆、也可能是
+       读者敲的：Windows 上一个正斜杠一个反斜杠、末尾多一个斜杠、盘符大小写不同 —— 都是
+       同一个目录。只有两边都是盘符路径时才忽略大小写（和 Host 的 `sameDir` 同一条规则）。 */
+    function sameRepoPath(left, right) {
+      const norm = function (value) {
+        let out = text(value).replace(/\\/g, '/')
+        while (out.length > 1 && out.charAt(out.length - 1) === '/') out = out.slice(0, -1)
+        return out
+      }
+      const a = norm(left)
+      const b = norm(right)
+      if (a.length === 0 || b.length === 0) return false
+      if (a === b) return true
+      const drive = /^[a-zA-Z]:\//
+      return drive.test(a) && drive.test(b) && a.toLowerCase() === b.toLowerCase()
+    }
+
+    /* 一个路径的最后一段（`/a/b/c/` → `c`）；Windows 的反斜杠也算分隔符。 */
+    function pathBase(value) {
+      let out = text(value)
+      while (out.length > 1 && (out.charAt(out.length - 1) === '/' || out.charAt(out.length - 1) === '\\')) out = out.slice(0, -1)
+      const at = Math.max(out.lastIndexOf('/'), out.lastIndexOf('\\'))
+      return at >= 0 ? out.slice(at + 1) : out
+    }
+
+    /* ── 这个工作区里有哪几个仓库 ──
+
+       Host 那份清单（`git/repos`，见 69-repos.js）按**工作区**缓存：一次往下找 `.git`
+       的扫描，同一条路径不该扫第二遍。这里也一样 —— 面板和 chip 问的是同一个问题，谁先
+       拿到谁就写下来，另一个直接读。
+
+       会话 id 也留一份：工作区自己不是仓库时，chip 手上只有会话，不知道工作区是哪个
+       目录，而清单要按那个路径去查。 */
+    const rootLists = {}
+    const sessionWorkspaces = {}
+    let rootsVersion = 0
+    const rootsSignal = createSignal(function () { return rootsVersion })
+    const useRootsVersion = rootsSignal.use
+
+    function rememberRoots(sessionId, reply) {
+      if (reply == null || reply.ok !== true) return
+      const workspace = text(reply.workspace)
+      if (workspace.length === 0) return
+      rootLists[workspace] = reply
+      if (sessionId !== undefined && sessionId !== null && String(sessionId).length > 0) {
+        sessionWorkspaces[String(sessionId)] = workspace
+      }
+      rootsVersion += 1
+      rootsSignal.notify()
+    }
+
+    function rootsOf(workspace) {
+      const found = rootLists[text(workspace)]
+      return found === undefined ? null : found
+    }
+
+    function sessionRoots(sessionId) {
+      if (sessionId === undefined || sessionId === null) return null
+      return rootsOf(sessionWorkspaces[String(sessionId)])
+    }
+
+    /* ── 这个 Host 上根本没有那条路 ──
+
+       `git/repos` 是和这一份 Client 一起发出来的，但先升了插件的一半、Host 还是旧的（动态桥
+       热更、或者一个页面连着刚重启一半的部署）也发生过。那一条答复是 `... is not registered`
+       —— `callHost` 会为它重试 24 次（约 3 秒、24 个请求），而面板每次 bump 都会再问一遍。
+       一次就够说明了：这条路不在这个 Host 上，不要再问。 */
+    let rootsRouteMissing = false
+
+    function rootsRouteGone() {
+      return rootsRouteMissing === true
+    }
+
+    function rootsRouteRefused(failure) {
+      if (failureText(failure).indexOf(HOST_NOT_READY) >= 0) rootsRouteMissing = true
+    }
+
     /* ── panel geometry ──
 
        Zero means "follow the composer width / 74vh", which stays the default;
@@ -490,6 +596,7 @@
       const parsed = readStoredJSON(PANEL_SIZE_KEY, null)
       if (parsed != null && typeof parsed.w === 'number' && typeof parsed.h === 'number') {
         panelSize = { w: parsed.w, h: parsed.h }
+        panelSizeSignal.notify()
       }
     }
 

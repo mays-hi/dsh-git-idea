@@ -199,8 +199,12 @@ const branchesReply = {
     { name: 'solo', current: false, committedAt: nowSec - 3600, upstream: '', track: '', ahead: 0, behind: 0, head: 'bbb', subject: 'solo tip' },
     { name: 'feature/one', current: false, committedAt: nowSec - 90000, upstream: 'origin/feature/one', track: '>', ahead: 1, behind: 0, head: 'ccc', subject: 'one tip' },
     { name: 'zeta', current: false, committedAt: nowSec - 9000, upstream: '', track: '', ahead: 0, behind: 0, head: 'ddd', subject: 'z' },
+    { name: 'synced', current: false, committedAt: nowSec - 12000, upstream: 'origin/synced', track: '=', ahead: 0, behind: 0, head: 'fff', subject: 'synced tip' },
   ],
-  remotes: [{ name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r' }],
+  remotes: [
+    { name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r', sameAsLocal: false },
+    { name: 'main', remote: 'origin', ref: 'origin/main', committedAt: nowSec - 5, head: 'aaa', subject: 'tip main', sameAsLocal: true },
+  ],
 }
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
@@ -304,19 +308,21 @@ ok('分支触发器用短标签（当前 main）', textOf(byClass(t, 'dsh-git-lf
   && textOf(byClass(t, 'dsh-git-lf')[0]).indexOf('当前分支（') < 0)
 ok('筛选用的是无边框 select/input', byClass(t, 'dsh-git-lf-select').length === 3 && byClass(t, 'dsh-git-lf-input').length === 1)
 /* 只看中间栏这条工具栏：面板头部那组同步按钮也是 .dsh-git-tool。
-   提交操作现在是「图标 + 词」（IDEA 也把词写出来），按词找。 */
+   提交操作现在只有图标（屏幕上一个字都不写），完整说法在 aria-label 里 —— 按它找。 */
 const toolBar = byClass(t, 'dsh-git-tools')[0]
 const TOOL_WORDS = ['拣选', '还原', '标签', '分支']
-const toolWith = (tree, word) => byClass(tree, 'dsh-git-tool').filter((b) => textOf(b).indexOf(word) >= 0)[0]
+const toolAria = (b) => String(b === undefined ? '' : (b.props['aria-label'] || ''))
+/* 按 aria 的**开头**认：「拣选：…」这句话里也有「分支」两个字，按包含找会认错按钮。 */
+const toolWith = (tree, word) => byClass(tree, 'dsh-git-tool').filter((b) => toolAria(b).indexOf(word + '：') === 0)[0]
 const commitTools = (tree) => TOOL_WORDS.map((w) => toolWith(tree, w))
 const iconTools = commitTools(toolBar)
-console.log('  提交操作按钮:', JSON.stringify(byClass(toolBar, 'dsh-git-tool').map(textOf)))
+console.log('  提交操作按钮:', JSON.stringify(byClass(toolBar, 'dsh-git-tool').map((b) => toolAria(b).slice(0, 10))))
 ok('提交操作就是这四个按钮，一个不多一个不少',
   byClass(toolBar, 'dsh-git-tool').length === 4 && iconTools.every((b) => b !== undefined))
-ok('每个按钮都写着自己的词，完整说法进了 aria-label',
-  iconTools.map(textOf).join('|') === '拣选|还原|标签|分支'
-  && ['拣选', '还原', '标签', '分支'].every((w) => String(toolWith(toolBar, w).props['aria-label']).indexOf(w) === 0))
-ok('词旁边那个图标还在（不是一个纯文字按钮）', iconTools.every((b) => collect(b).some((n) => n.type === 'svg')))
+ok('按钮上只有一个图标，一个字的描述都没有；完整说法进了 aria-label',
+  iconTools.map(textOf).join('') === ''
+  && ['拣选', '还原', '标签', '分支'].every((w) => toolAria(toolWith(toolBar, w)).indexOf(w) === 0))
+ok('图标还在（不是一个空按钮）', iconTools.every((b) => collect(b).some((n) => n.type === 'svg')))
 const iconPaths = (btn) => collect(btn).filter((n) => n.type === 'svg')
   .map((n) => n.props.children.map((c) => String(c.props.d || '')).join('|')).join('||')
 const shapes = iconTools.map(iconPaths)

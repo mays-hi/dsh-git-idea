@@ -88,6 +88,37 @@ function sameDir(left, right) {
    "池空着/树都被删了"时的兜底。 */
 const WORKTREE_POOL_DIR = '.agents/worktrees'
 
+/* ── 插件读过的那几棵树在哪 ──
+
+   工作树可以建在源仓库外面（DSH 默认建在里面，git 不限），而「能读哪一个仓库」那条
+   线（`repoOutsideWorkspace`, 见 69-repos.js）不能因此把「那颗 chip 里点一行就切过去」
+   拦下来。所以这一份读顺手把每棵树的路径记下来：名单是 git 自己说的，不是客户端递来
+   的。这里只记，不做判断 —— 判断在 `insideKnownWorktree` 里。 */
+const knownWorktrees = []
+const KNOWN_WORKTREES_MAX = 40
+
+function rememberWorktrees(entries) {
+  const paths = []
+  for (let i = 0; i < entries.length; i += 1) {
+    const path = trimPath(entries[i].path)
+    if (path.length > 0) paths.push(path)
+  }
+  if (paths.length === 0) return
+  knownWorktrees.push(paths)
+  while (knownWorktrees.length > KNOWN_WORKTREES_MAX) knownWorktrees.shift()
+}
+
+/* 这条路径是不是某棵已经读过的工作树（或它里面的路径）。 */
+function insideKnownWorktree(target) {
+  for (let i = 0; i < knownWorktrees.length; i += 1) {
+    const paths = knownWorktrees[i]
+    for (let j = 0; j < paths.length; j += 1) {
+      if (sameDir(paths[j], target) || relativeInside(paths[j], target) !== '') return true
+    }
+  }
+  return false
+}
+
 /* `path` 在 `root` 里面时的相对路径，否则空串。用来回答"这条改动是不是
    落在某棵工作树里"。 */
 function relativeInside(root, target) {
@@ -167,6 +198,9 @@ async function readWorktrees(input, repo) {
       current: here.length > 0 && sameDir(item.path, here),
     })
   }
+  /* 工作树可以不在工作区里面：这份名单是「能读哪些路径」那条线的第三个来源
+     （见 `repoOutsideWorkspace`）。 */
+  rememberWorktrees(entries)
   return {
     ok: true, repo: listed.cwd,
     /* 这一份读是**从哪棵树**发出来的：面板用它做"当前这一份"那句话的答案，行里的

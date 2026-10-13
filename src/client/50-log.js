@@ -186,16 +186,8 @@
       const badgeOf = function (name) {
         const meta = metaOf[name]
         if (meta === undefined) return []
-        const ahead = typeof meta.ahead === 'number' ? meta.ahead : 0
-        const behind = typeof meta.behind === 'number' ? meta.behind : 0
-        const out = []
-        /* IDEA's two marks, and its two colours: a blue down arrow for the
-           commits waiting on the remote, a green up arrow for the ones waiting
-           to be pushed. The number stays because "three behind" is the question
-           people actually have; IDEA answers it in the mouseover only. */
-        if (behind > 0) out.push(h('span', { key: 'b', className: 'dsh-git-ab dsh-git-ab-in', 'aria-label': '落后上游 ' + String(behind) + ' 个提交，需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))))
-        if (ahead > 0) out.push(h('span', { key: 'a', className: 'dsh-git-ab dsh-git-ab-out', 'aria-label': '领先上游 ' + String(ahead) + ' 个提交，需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))))
-        return out
+        /* 记号本身在 40-format.js 的 abMarks 里（同一件事卡片上也要说一遍）。 */
+        return abMarks(meta, '')
       }
       const rows = []
 

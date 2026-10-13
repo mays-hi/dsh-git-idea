@@ -199,8 +199,12 @@ const branchesReply = {
     { name: 'solo', current: false, committedAt: nowSec - 3600, upstream: '', track: '', ahead: 0, behind: 0, head: 'bbb', subject: 'solo tip' },
     { name: 'feature/one', current: false, committedAt: nowSec - 90000, upstream: 'origin/feature/one', track: '>', ahead: 1, behind: 0, head: 'ccc', subject: 'one tip' },
     { name: 'zeta', current: false, committedAt: nowSec - 9000, upstream: '', track: '', ahead: 0, behind: 0, head: 'ddd', subject: 'z' },
+    { name: 'synced', current: false, committedAt: nowSec - 12000, upstream: 'origin/synced', track: '=', ahead: 0, behind: 0, head: 'fff', subject: 'synced tip' },
   ],
-  remotes: [{ name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r' }],
+  remotes: [
+    { name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r', sameAsLocal: false },
+    { name: 'main', remote: 'origin', ref: 'origin/main', committedAt: nowSec - 5, head: 'aaa', subject: 'tip main', sameAsLocal: true },
+  ],
 }
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
@@ -703,6 +707,11 @@ const normalCard = await switcherWith(branchesReply, dirtyPanel)
 console.log('  普通仓库里同一行:', JSON.stringify(textOf(byClass(normalCard, 'dsh-git-bs-check')[0]).slice(0, 60)))
 ok('（对照）普通仓库里「先暂存再切」还在', byClass(normalCard, 'dsh-git-bs-check').length === 1)
 ok('（对照）普通仓库也不会冒出 unborn 那句', textOf(normalCard).indexOf('还没有第一个提交') < 0)
+/* 当前分支那行还压着多少没提交的改动：和面板左栏那一行同一个记号（●N），也就是那颗 chip
+   角标上的那个数 —— 分支列表说的是「这些分支停在哪」，这一行上还压着多少是同一件事的另一半。 */
+ok('当前分支那行带着未提交改动数（●2）',
+  textOf(rowWith(normalCard, 'main')).indexOf('●2') >= 0, textOf(rowWith(normalCard, 'main')))
+ok('别的分支行不带这个数', textOf(rowWith(normalCard, 'solo')).indexOf('●') < 0)
 
 /* ── 切过去了，但改动恢复时冲突 ──
 
@@ -750,3 +759,57 @@ ok('说清工作区没被弄丢（stash 条目还在）',
 ok('git 自己说的话也露面（哪个文件没合上）', conflictText.indexOf('Merge conflict in f.txt') >= 0)
 ok('两条流里取有内容的那条，不是固定读 stderr', conflictText.indexOf('could not apply') < 0)
 host.call = plainCheckout
+
+console.log('')
+console.log('== hover 卡片里「从此分支新建分支…」：输入框留下，卡片不在指针底下收掉 ==')
+/* 用户报的那一条：悬浮卡片 → 子菜单 → 点「从此分支新建分支…」，子菜单一收，指针正好
+   落回卡片外面，200ms 后整张卡片连同刚出现的输入框一起消失 —— 看起来像这一下点击没被
+   听见。这里把这条动线整条走一遍：输入框在、卡片在；取消之后，按住放开，卡片才照常收。 */
+let nbChip = await chipTree()
+if (nbChip.props.className.indexOf('dsh-git-chip-open') >= 0) { nbChip.props.onClick(); await wait(10) }
+nbChip = await chipTree()
+nbChip.props.onPointerEnter()
+fireTimers()
+await wait(15)
+let nb = await settle('pop')
+ok('hover 卡片开着', byClass(nb, 'dsh-git-switch-hover').length === 1)
+const nbRows = byClass(nb, 'dsh-git-bs-row').filter((r) => String(r.props.className).indexOf('dsh-git-bs-action') < 0)
+const nbRow = nbRows.find((r) => textOf(r).indexOf('solo') >= 0) || nbRows[0]
+const nbName = textOf(byClass(nbRow, 'dsh-git-bs-name')[0])
+nbRow.props.onMouseEnter({ currentTarget: { offsetTop: 60 } })
+fireTimers()
+await wait(15)
+nb = await settle('pop')
+const nbFly = flyPanel(nb)
+ok('子菜单弹出来了', nbFly !== undefined)
+buttons(nbFly).find((b) => textOf(b) === '从此分支新建分支…').props.onClick({ stopPropagation() {} })
+await wait(15)
+nb = await settle('pop')
+const nbCreate = byClass(nb, 'dsh-git-bs-create')[0]
+ok('子菜单收起来，卡片里出现新分支那一行', nbCreate !== undefined && flyPanel(nb) === undefined)
+ok('输入框写着起点是刚才那一行（' + nbName + '）',
+  nbCreate !== undefined && String(byClass(nbCreate, 'dsh-git-input')[0].props.placeholder).indexOf(nbName) >= 0,
+  nbCreate === undefined ? '' : String(byClass(nbCreate, 'dsh-git-input')[0].props.placeholder))
+ok('输入框自己拿焦点（点了就是要打字）', nbCreate !== undefined && byClass(nbCreate, 'dsh-git-input')[0].props.autoFocus === true)
+/* 指针离开卡片（子菜单收掉之后它正好落在卡片外面）：这时必须收不了。 */
+byClass(nb, 'dsh-git-switch-hover')[0].props.onPointerLeave()
+ok('离开卡片之后有一个待收起的计时器', timers.filter((x) => x.kind === 'timeout' && !x.dead && x.delay === 200).length === 1)
+fireTimers()
+await wait(15)
+nb = await settle('pop')
+ok('到点也不收：卡片和输入框都还在', byClass(nb, 'dsh-git-switch-hover').length === 1 && byClass(nb, 'dsh-git-bs-create').length === 1)
+fireTimers()
+await wait(15)
+nb = await settle('pop')
+ok('再过一轮仍然在（按住是持续的，不是一次性的）', byClass(nb, 'dsh-git-switch-hover').length === 1)
+const nbCancel = byClass(nb, 'dsh-git-bs-create')[0] === undefined
+  ? undefined
+  : buttons(byClass(nb, 'dsh-git-bs-create')[0]).find((b) => textOf(b) === '取消')
+ok('取消按钮也还在', nbCancel !== undefined)
+if (nbCancel !== undefined) nbCancel.props.onClick()
+await wait(15)
+nb = await settle('pop')
+fireTimers()
+await wait(15)
+nb = await settle('pop')
+ok('取消之后按住放开，卡片照常收起（没有永远挂住）', byClass(nb, 'dsh-git-switch-hover').length === 0)

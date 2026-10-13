@@ -199,8 +199,12 @@ const branchesReply = {
     { name: 'solo', current: false, committedAt: nowSec - 3600, upstream: '', track: '', ahead: 0, behind: 0, head: 'bbb', subject: 'solo tip' },
     { name: 'feature/one', current: false, committedAt: nowSec - 90000, upstream: 'origin/feature/one', track: '>', ahead: 1, behind: 0, head: 'ccc', subject: 'one tip' },
     { name: 'zeta', current: false, committedAt: nowSec - 9000, upstream: '', track: '', ahead: 0, behind: 0, head: 'ddd', subject: 'z' },
+    { name: 'synced', current: false, committedAt: nowSec - 12000, upstream: 'origin/synced', track: '=', ahead: 0, behind: 0, head: 'fff', subject: 'synced tip' },
   ],
-  remotes: [{ name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r' }],
+  remotes: [
+    { name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r', sameAsLocal: false },
+    { name: 'main', remote: 'origin', ref: 'origin/main', committedAt: nowSec - 5, head: 'aaa', subject: 'tip main', sameAsLocal: true },
+  ],
 }
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
@@ -408,8 +412,9 @@ host.call = function (method, args) {
 }
 const badgeOf = (tree) => byClass(tree, 'dsh-git-badge')
 const badgeText = (tree) => (badgeOf(tree)[0] === undefined ? '' : textOf(badgeOf(tree)[0]))
-/* 「还在核对」现在由**最前面那颗图标**说：它在转圈，而不是后面多出一句话。
-   （这一段最早看的是 title —— 那个框已经全去掉了。） */
+/* 「还在核对」现在由**数字那一格**说（实心数字 / 空心旧数字 / 空心 `…`），
+   转圈只剩切换分支在用 —— 那一次是全树读，大仓库上 8–10 秒，转起来就是一颗停不
+   下来的圈（这一段最早看的是 title —— 那个框已经全去掉了）。 */
 const spinning = (tree) => collect(tree).some((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0)
 const badgeClass = (tree) => (badgeOf(tree)[0] === undefined ? '' : String(badgeOf(tree)[0].props.className))
 
@@ -423,16 +428,20 @@ tick()
 await wait(40)
 const during = await renderUntilStable(makeElement(chip, { sessionId: 's-2' }), 'chip-s2')
 ok('便宜的第一次读回来后徽标还在，没有先掉到 0', badgeText(during) === '3')
-ok('但它被标成「还没核对」（半透明）', /dsh-git-badge-stale/.test(badgeClass(during)))
-ok('还没量出来时那颗图标在转，不会谎称工作区干净',
-  spinning(during) === true && during.props.title === undefined)
+ok('但它被标成「还没核对」（空心）', /dsh-git-badge-stale/.test(badgeClass(during)))
+/* 这一条以前是反向的（"还在核对"由转圈说）。核对读的是整棵树，大仓库上 8–10 秒 ——
+   让图标转那么久就是用户报的那个"转很长时间"。现在它不转，改由数字那一格说：
+   旧数字还在（上面两条），只是空心。 */
+ok('核对中不再转圈：转圈只留给切换分支', spinning(during) !== true)
+ok('（对照）同一刻它的 aria-label 仍然说得出「正在核对改动」',
+  String(during.props['aria-label']).indexOf('正在核对改动') >= 0)
 
 const release2 = fullGate
 fullGate = null
 release2()
 await wait(40)
 const settled3 = await renderUntilStable(makeElement(chip, { sessionId: 's-2' }), 'chip-s2')
-ok('完整读回来之后同一个数字转正（去掉半透明）', badgeText(settled3) === '3' && !/stale/.test(badgeClass(settled3)))
+ok('完整读回来之后同一个数字转正（不再是空心）', badgeText(settled3) === '3' && !/stale/.test(badgeClass(settled3)))
 
 /* 换会话：这个会话是第一次来，自己的完整读还没回来 */
 fullGate = true
@@ -457,6 +466,38 @@ ok('改动清零后徽标消失', badgeOf(clean).length === 0)
 ok('干净之后图标停下来，chip 上只剩分支名',
   badgeOf(clean).length === 0 && spinning(clean) !== true && textOf(clean) === 'main'
   && clean.props.title === undefined)
+
+console.log('')
+console.log('=== 这个仓库还没量过：数字那一格先写一个空心的「…」 ===')
+/* 没有可信数字时不能"什么都不画"：干净时的确认态本来就是一个徽标都没有，空格子
+   等于谎称"现在也干净"。以前这颗雷是那颗转圈圆环拆的，现在由 `…` 拆 —— 不动，
+   但和"核对过了"分得开。 */
+const beforeFresh = host.call
+const FRESH_HEAD = { ok: true, repo: '/tmp/ws-fresh', branch: 'main', detached: false, upstream: 'origin/main', ahead: 0, behind: 0, sequencer: null }
+fullGate = true
+host.call = function (method, args) {
+  if (method !== 'git/panel') return beforeFresh(method, args)
+  if (args != null && args.quick === true) {
+    return Promise.resolve(Object.assign({ partial: true, staged: [], unstaged: [], untracked: [], unmerged: [] }, FRESH_HEAD))
+  }
+  const reply = Object.assign({ staged: [], unstaged: [{ path: 'x.txt', code: ' M' }], untracked: [], unmerged: [] }, FRESH_HEAD)
+  return new Promise(function (resolve) { fullGate = resolve.bind(null, reply) })
+}
+watchSig = 'SIG-H'
+const fresh = await renderUntilStable(makeElement(chip, { sessionId: 's-4' }), 'chip-s4')
+ok('还没有数字时那一格写「…」，不是空着',
+  badgeText(fresh) === '…' && /dsh-git-badge-pending/.test(badgeClass(fresh)))
+ok('也不转圈（转圈只留给切换分支）', spinning(fresh) !== true)
+ok('读屏照样听得到「正在核对改动」',
+  String(fresh.props['aria-label']).indexOf('正在核对改动') >= 0)
+const releaseFresh = fullGate
+fullGate = null
+releaseFresh()
+await wait(40)
+const freshDone = await renderUntilStable(makeElement(chip, { sessionId: 's-4' }), 'chip-s4')
+ok('量出来之后换成真的数字，也不再空心',
+  badgeText(freshDone) === '1' && !/stale|pending/.test(badgeClass(freshDone)))
+host.call = beforeFresh
 
 console.log('')
 console.log('=== 一个页面里的两个会话：各自轮询自己的工作区 ===')

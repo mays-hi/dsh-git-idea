@@ -12,16 +12,20 @@
           + '装上 git，或让它出现在 dsh 进程的 PATH 里，再试一次。'
       }
       const err = text(result.stderr).replace(/\s+$/, '')
+      /* git 的拒绝常常在最后一行（前面几行是建议），两句解释都要那一行垫在下面。 */
+      const lastLine = function (raw) {
+        const lines = raw.length > 0 ? raw.split('\n') : []
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+          if (lines[i].trim().length > 0) return lines[i].trim()
+        }
+        return ''
+      }
       const detail = err.length > 0 ? err.slice(0, 400) : text(result.stdout).replace(/\s+$/, '').slice(0, 400)
       /* git 在这件事上说八行，其中七行是建议（"Run git config --global ..."），最后
          一行才是拒绝本身。这里说的是同一件事，但先说面板里能点的那个地方（设置页的
          提交身份），再给能照抄的命令 —— 两条路都留着，因为面板并不总是开着的。 */
       if (result.needsIdentity === true) {
-        const lines = err.length > 0 ? err.split('\n') : []
-        let last = ''
-        for (let i = lines.length - 1; i >= 0; i -= 1) {
-          if (lines[i].trim().length > 0) { last = lines[i].trim(); break }
-        }
+        const last = lastLine(err)
         const why = 'git 不知道这次提交该署谁的名字，所以把它拒了 —— 作者身份写在 git 的配置里，'
           + '不在这个仓库里。设置页「dsh-git-idea配置 → 提交身份」里可以填，'
           + '或者在终端里跑一遍：\n'
@@ -32,6 +36,30 @@
            唯一一道 —— 一个失败的钩子、一次没解决的冲突各自另有话说，把那句话丢掉就是
            同一类误诊（"这台机器上没有 git" 曾经也这样盖掉过真正的答案）。 */
         return last.length > 0 ? why + '\n' + last : why
+      }
+      /* ── 没有远端的仓库 ──
+
+         Host 在网络动作之前先问过 git「配了哪些远端」：一个都没有时它连命令都不起，
+         直接用这个 `error` 回答（见 80-rpc.js 的 `noRemoteReply`）。为什么值得一句话：
+         `git fetch --all` 在没有远端的仓库里**是成功退出的**，不说这句话，那颗按钮按
+         下去就是「什么都没有发生」—— 读者分不清是按钮坏了，还是本来就没得取。 */
+      if (result.error === 'no-remote') {
+        return '这个仓库还没有配置远端，fetch / pull / push 都没有对象可谈，所以这一步没有被执行。\n'
+          + '在终端里给它一个远端（名字习惯用 origin），回到面板按 ⟳ 就能用：\n'
+          + '  git remote add origin <仓库地址>\n'
+          + '  第一次推送：git push -u origin <分支名>'
+      }
+      /* ── 有远端，但这个分支没有上游 ──
+
+         由 git 自己判定（见 10-shell.js 的 `upstreamMissing`），不听它那句话 ——
+         那句话是翻译过的，而且 pull 和 push 说法不同。 */
+      if (result.needsUpstream === true) {
+        const why = '这个分支还没有上游：git 不知道跟哪条远端分支比对，所以既拉不了也推不了。\n'
+          + '面板里那一行可以一键补上，或者在终端里跑：\n'
+          + '  git push -u <远端> <分支>              # 推上去并认下上游\n'
+          + '  git pull --set-upstream <远端> <分支>   # 拉的同时认下上游'
+        const said = lastLine(err)
+        return said.length > 0 ? why + '\n' + said : why
       }
       /* git says "Unable to create ... .git/index.lock: Permission denied", which
          reads as a broken repository. It is the file sandbox refusing the write,

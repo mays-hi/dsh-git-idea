@@ -29,6 +29,9 @@ function normalizeConfig(raw) {
        upstream asks first. git's own `push.default` / `pull.rebase` still apply
        underneath and are not overridden. */
     fetchPrune: true, pullRebase: false, pushSetUpstream: false,
+    /* 工作区里找仓库时往下看几层。0 是「不扫」（只认工作区那一个目录，也就是这个
+       键出现之前的行为），1 只看直接子目录，2 再往下一层。见 69-repos.js。 */
+    repoScanDepth: 2,
   }
   if (raw == null || typeof raw !== 'object') return out
   if (isStr(raw.initBranch)) out.initBranch = raw.initBranch.trim().slice(0, 120)
@@ -37,6 +40,9 @@ function normalizeConfig(raw) {
   out.fetchPrune = raw.fetchPrune !== false
   out.pullRebase = raw.pullRebase === true
   out.pushSetUpstream = raw.pushSetUpstream === true
+  if (typeof raw.repoScanDepth === 'number' && isFinite(raw.repoScanDepth)) {
+    out.repoScanDepth = Math.max(0, Math.min(ROOT_SCAN_MAX, Math.floor(raw.repoScanDepth)))
+  }
   return out
 }
 
@@ -102,6 +108,14 @@ async function writeConfigFile(raw, args) {
 }
 
 async function initSnapshot(input) {
+  /* 请求里那个路径不在会话工作区里（见 repoOutsideWorkspace）：这里不能拿去初始化，
+     因为 repoFrom 已经把它换成了工作区 —— 照做就等于在读者没点过的目录里 git init。 */
+  if (input != null && isStr(input.repoRefused) && input.repoRefused.length > 0) {
+    return {
+      ok: false, error: 'outside-workspace', repo: input.repoRefused,
+      stderr: '这个路径不在会话工作区里，不能在这里初始化仓库',
+    }
+  }
   const target = repoFrom(input, null)
   if (target === undefined) return { ok: false, error: 'no-path', stderr: '无法确定要初始化的目录', repo: null }
   const kind = await pathKind(input, target)

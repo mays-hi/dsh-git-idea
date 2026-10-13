@@ -31,6 +31,7 @@ const COUNTING = [
   'gp46-windows-shell-test.mjs',
   'gp47-posix-path-test.mjs',
   'gp48-worktree-test.mjs',
+  'gp49-repos-test.mjs',
 ]
 /* Suites that report by exit code and print their own lines. */
 const PROSE = ['gp34a-host-test.mjs', 'gp34d-config-test.mjs', 'gp34e-bridge-test.mjs']

@@ -199,8 +199,12 @@ const branchesReply = {
     { name: 'solo', current: false, committedAt: nowSec - 3600, upstream: '', track: '', ahead: 0, behind: 0, head: 'bbb', subject: 'solo tip' },
     { name: 'feature/one', current: false, committedAt: nowSec - 90000, upstream: 'origin/feature/one', track: '>', ahead: 1, behind: 0, head: 'ccc', subject: 'one tip' },
     { name: 'zeta', current: false, committedAt: nowSec - 9000, upstream: '', track: '', ahead: 0, behind: 0, head: 'ddd', subject: 'z' },
+    { name: 'synced', current: false, committedAt: nowSec - 12000, upstream: 'origin/synced', track: '=', ahead: 0, behind: 0, head: 'fff', subject: 'synced tip' },
   ],
-  remotes: [{ name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r' }],
+  remotes: [
+    { name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r', sameAsLocal: false },
+    { name: 'main', remote: 'origin', ref: 'origin/main', committedAt: nowSec - 5, head: 'aaa', subject: 'tip main', sameAsLocal: true },
+  ],
 }
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
@@ -369,7 +373,8 @@ const isPaths = (s) => s.indexOf('路径') === 0
 const badgeOf = (tree) => byClass(tree, 'dsh-git-badge')
 const badgeText = (tree) => (badgeOf(tree)[0] === undefined ? '' : textOf(badgeOf(tree)[0]))
 const badgeClass = (tree) => (badgeOf(tree)[0] === undefined ? '' : String(badgeOf(tree)[0].props.className))
-/* 「还在核对」现在由 chip 最前面那颗图标说：它在转圈，而不是后面加一句话 */
+/* 「还在核对」现在由 chip 上**数字那一格**说：空心的旧数字、或者空心的 `…`；
+   转圈只剩切换分支在用（那一次是全树读，大仓库上 8–10 秒，转起来就停不下来）。 */
 const spinning = (tree) => collect(tree).some((n) => n.type === 'svg' && String(n.props.className || '').indexOf('dsh-git-spin') >= 0)
 const tabLabel = (tree) => {
   const tab = buttons(tree).find((b) => textOf(b).indexOf('变更') >= 0)
@@ -476,11 +481,15 @@ mark = calls.length
 holdAll = true
 await bump('SIG-3')
 const mid = await repaint()
-console.log('  中间态:', JSON.stringify({ spin: spinning(mid.chip) }))
+console.log('  中间态:', JSON.stringify({ badge: badgeText(mid.chip), cls: badgeClass(mid.chip), spin: spinning(mid.chip) }))
 ok('干净的那份读数不能继续当「现在也干净」用：立刻整棵树重读',
   shapesSince(mark).indexOf('整树') >= 0)
-ok('还没量回来时那颗图标在转，不谎称干净',
-  spinning(mid.chip) === true && mid.chip.props.title === undefined)
+/* 上一次量出来是干净的（0 个改动、没有徽标），仓库又动过了 —— 这时屏幕上不能继续
+   空着，那等于说"现在也干净"。以前是不让那颗转圈圆环停；现在数字那一格写一个空心
+   的 `…`，一样不谎称，但不再有转很久的动画（见 gp41 那一段）。 */
+ok('还没量回来时数字那一格写空心的「…」，不谎称干净',
+  badgeText(mid.chip) === '…' && /dsh-git-badge-pending/.test(badgeClass(mid.chip))
+  && spinning(mid.chip) !== true && mid.chip.props.title === undefined)
 releaseAll()
 seen = await repaint()
 ok('量回来之后数字出现', badgeText(seen.chip) === '1')

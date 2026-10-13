@@ -8,6 +8,9 @@ function runShell(spec) {
     /* DSH_HOME 指到 /tmp：插件配置就落在这里，而不是跑测试那个人的 ~/.dsh —— 他要是
        在真机上改过配置（比如设了 git 路径），那台机器的配置会悄悄改变这些断言的答案。 */
     const c = spawn('sh', ['-c', spec.command], { cwd: spec.workdir, env: Object.assign({}, process.env, { DSH_HOME: '/tmp/gp34a-home' }) })
+    /* 同 gp34e：git 输出的提交信息、路径都可能是多字节，按 chunk 拼 Buffer 会拆坏它们。 */
+    c.stdout.setEncoding('utf8')
+    c.stderr.setEncoding('utf8')
     let o = '', e = ''
     c.stdout.on('data', b => o += b); c.stderr.on('data', b => e += b)
     c.on('error', er => res({ exitCode: null, stdout: { text: o }, stderr: { text: String(er.message) } }))
@@ -78,11 +81,14 @@ console.log('  main 与上游一致:', main.ahead === 0 && main.behind === 0 && 
 console.log('  local-only 没有上游:', r.branches.find(b => b.name === 'local-only').upstream === '')
 
 console.log('')
-console.log('=== 远端分支（本地已同名的剔除）===')
-console.log('  remotes:', JSON.stringify(r.remotes.map(x => x.name + '@' + x.remote)))
-console.log('  有 remote-only:', r.remotes.some(x => x.name === 'remote-only' && x.remote === 'origin'))
-console.log('  没有重复的 main:', r.remotes.every(x => x.name !== 'main'))
-console.log('  没有重复的 ahead-one:', r.remotes.every(x => x.name !== 'ahead-one'))
+console.log('=== 远端分支（全部，本地已有同名的也标出来）===')
+console.log('  remotes:', JSON.stringify(r.remotes.map(x => x.name + '@' + x.remote + (x.sameAsLocal === true ? '(本地已有)' : ''))))
+console.log('  有 remote-only:', r.remotes.some(x => x.name === 'remote-only' && x.remote === 'origin' && x.sameAsLocal === false))
+/* 原来这里把本地已有同名的丢掉，于是一个把什么都推上去的仓库里这一组会整组消失 ——
+   读者只能问「远端组呢」。现在全都列，同名的用 sameAsLocal 标出来给客户端压暗。 */
+console.log('  本地已有同名的也列（main / ahead-one）:',
+  r.remotes.some(x => x.name === 'main' && x.sameAsLocal === true)
+  && r.remotes.some(x => x.name === 'ahead-one' && x.sameAsLocal === true))
 console.log('  current/previous:', r.current, '/', r.previous)
 
 console.log('')
@@ -327,7 +333,64 @@ console.log('  ahead-one:', JSON.stringify(aheadOne))
 check('refs 带上上游名', aheadOne !== undefined && aheadOne.upstream.length > 0)
 check('refs 带上领先/落后', aheadOne.ahead === 1 && behindOne.behind === 1)
 check('refs 带上最后提交时间', typeof aheadOne.at === 'number' && aheadOne.at > 0)
+
+console.log('')
+console.log('=== 远端那一组：全部远端跟踪分支 ===')
+/* 这一组是「远端有什么」的答案，要一直有：本地已有同名的也列（标出来给客户端压暗），
+   只有本地没有的才不压。丢掉同名的那个版本在「什么都推上去」的仓库里会让整组消失。 */
+check('远端那一组列出本地没有的（remote-only）',
+  r.remotes.some(x => x.name === 'remote-only' && x.remote === 'origin' && x.sameAsLocal === false))
+check('本地已有同名的分支也列出来，并带上标记（main / ahead-one）',
+  r.remotes.some(x => x.name === 'main' && x.sameAsLocal === true)
+  && r.remotes.some(x => x.name === 'ahead-one' && x.sameAsLocal === true))
 if (searchOk !== true) process.exit(1)
+
+console.log('')
+console.log('=== 一个远端都没配的仓库：网络按钮不再假装 ===')
+/* git fetch --all 在没配远端的仓库里**退出码是 0、一个字都不说**（它只是没有对象可取），
+   面板原来把这个答复当成功 —— 那颗按钮按下去就是「什么都没有发生」。pull 和 push 会失败，
+   但说出来的是 git 自己的英文建议，两条路都只通向终端。Host 现在先问一遍「配了哪些远端」
+   （git remote；ref 列表答不了这个问题，见 66-refs.js），一个都没有就自己回答。 */
+const LONELY = '/tmp/gp41-lonely'
+await sh('rm -rf ' + LONELY + ' && mkdir -p ' + LONELY, '/tmp')
+await sh('git init -q -b main . && git config user.email t@t && git config user.name t && echo l > l.txt && git add -A && git commit -qm one', LONELY)
+await H('git/flush')({ repo: LONELY })
+const lonelyRefs = await H('git/refs')({ repo: LONELY })
+check('refs 说得出「一个远端都没配」',
+  lonelyRefs.ok === true && Array.isArray(lonelyRefs.remoteNames) && lonelyRefs.remoteNames.length === 0)
+const lonelyFetch = await H('git/fetch')({ repo: LONELY })
+const lonelyPull = await H('git/pull')({ repo: LONELY })
+const lonelyPush = await H('git/push')({ repo: LONELY })
+console.log('  fetch/pull/push ->', JSON.stringify([lonelyFetch.error, lonelyPull.error, lonelyPush.error]))
+check('fetch 不再「成功但什么都没做」', lonelyFetch.ok !== true && lonelyFetch.error === 'no-remote')
+check('pull / push 也是同一句话（不再把 git 的英文建议丢给读者）',
+  lonelyPull.ok !== true && lonelyPull.error === 'no-remote'
+  && lonelyPush.ok !== true && lonelyPush.error === 'no-remote')
+await H('git/flush')({ repo: R })
+const realRefs = await H('git/refs')({ repo: R })
+console.log('  配了远端的仓库 ->', JSON.stringify(realRefs.remoteNames))
+check('配了远端的仓库照旧（名字就是 git remote 的答案）',
+  realRefs.ok === true && realRefs.remoteNames.indexOf('origin') >= 0)
+
+console.log('')
+console.log('=== 有远端，但这条分支没有上游 ===')
+/* needsUpstream 由 git 自己判定（@{upstream} 解析不出来 —— 见 10-shell.js），不去认
+   它那句话：网络命令没有钉住 locale，那句话是翻译过的，而且 pull 和 push 说法还不一样。 */
+const NOUP = '/tmp/gp41-noup'
+await sh('rm -rf ' + NOUP + ' && git clone -q ' + O + ' ' + NOUP, '/tmp')
+await sh('git config user.email t@t && git config user.name t && git checkout -q -b noup', NOUP)
+const noUpPull = await H('git/pull')({ repo: NOUP })
+const noUpPush = await H('git/push')({ repo: NOUP })
+console.log('  noup 上 ->', JSON.stringify({ pull: noUpPull.error, pullUp: noUpPull.needsUpstream, pushUp: noUpPush.needsUpstream }))
+check('pull 失败时 Host 自己判定「缺上游」', noUpPull.ok !== true && noUpPull.needsUpstream === true)
+check('push 也一样（面板不再从 git 那句话里认它）', noUpPush.ok !== true && noUpPush.needsUpstream === true)
+const setPull = await H('git/pull')({ repo: NOUP, setUpstream: true, remote: 'origin', branch: 'main' })
+const tracked = await sh('git rev-parse --abbrev-ref --symbolic-full-name @{u}', NOUP)
+console.log('  pull --set-upstream ->', JSON.stringify({ ok: setPull.ok, upstream: tracked.out.trim() }))
+check('一键补上：pull --set-upstream 拉完就认下了上游',
+  setPull.ok === true && tracked.out.trim() === 'origin/main')
+const nowPush = await H('git/push')({ repo: NOUP })
+check('补上之后就不再说「缺上游」了', nowPush.needsUpstream !== true)
 
 console.log('')
 console.log('=== 写操作跑在谁的沙箱里 ===')
@@ -1312,6 +1375,62 @@ emitSession('session/event', { header: { id: 'session-other', cwd: R } }, { type
 await H('git/flush')({ repo: WT_W1 })
 const stillMine = await H('git/branches')({ sessionId: 'session-live' })
 check('别的会话搬目录不影响这一条', stillMine.ok === true && stillMine.repo === WT_W1)
+
+console.log('')
+console.log('=== 工作区里有哪几个仓库：往下扫、不往上翻、也不起 git ===')
+/* 会话目录是「装着若干项目的那一层」时（它自己不是仓库），插件要能说出下面有哪几个仓库
+   —— 见 Host 的 69-repos.js。这里用真的目录树和真的 git 跑一遍，断言落在清单本身。 */
+const RW = '/tmp/gp34-workspace'
+await sh('rm -rf ' + RW + ' /tmp/gp34-workspace-other && mkdir -p ' + RW + '/alpha ' + RW + '/beta/deep ' + RW + '/node_modules/pkg ' + RW + '/.hidden ' + RW + '/gamma /tmp/gp34-workspace-other', '/tmp')
+await sh('git init -q -b feature-a .', RW + '/alpha')
+await sh('git init -q -b deep-branch .', RW + '/beta/deep')
+await sh('git init -q -b skipped .', RW + '/node_modules/pkg')
+await sh('git init -q -b hidden-one .', RW + '/.hidden')
+await sh('printf %s "gitdir: /tmp/gp34-workspace-other/.git/worktrees/x" > ' + RW + '/gamma/.git', '/tmp')
+await sh('git init -q -b elsewhere .', '/tmp/gp34-workspace-other')
+const reposHere = await H('git/repos')({ repo: RW })
+check('工作区自己不是仓库时，清单里是子孙里的仓库',
+  reposHere.ok === true && Array.isArray(reposHere.roots) && reposHere.roots.length === 2)
+check('由近到远：浅的那一个在前',
+  reposHere.roots.length === 2 && reposHere.roots[0].rel === 'alpha' && reposHere.roots[1].rel === 'beta/deep')
+check('分支名是从 HEAD 文件里读出来的（这一份读不起 git）',
+  reposHere.roots.length === 2 && reposHere.roots[0].branch === 'feature-a' && reposHere.roots[1].branch === 'deep-branch')
+check('node_modules 与点开头的目录都不下探',
+  reposHere.roots.every((r) => r.rel.indexOf('node_modules') < 0 && r.rel.indexOf('.hidden') < 0))
+check('.git 是文件的目录（子模块 / 链接工作树）不算另一个仓库',
+  reposHere.roots.every((r) => r.rel !== 'gamma'))
+check('每个根都带着绝对路径与相对路径',
+  reposHere.roots.every((r) => r.path.indexOf(RW) === 0 && r.rel.length > 0 && r.depth >= 1))
+
+const RR = '/tmp/gp34-rootrepo'
+await sh('rm -rf ' + RR + ' && mkdir -p ' + RR + '/apps/web && cd ' + RR + ' && git init -q -b main . && git config user.email t@t && git config user.name T && echo a > a.txt && git add -A && git commit -qm first && cd ' + RR + '/apps/web && git init -q -b web-branch .', '/tmp')
+const reposRoot = await H('git/repos')({ repo: RR })
+check('工作区自己是仓库时，它排第一（depth 0，带自己的分支）',
+  reposRoot.roots.length === 2 && reposRoot.roots[0].path === RR && reposRoot.roots[0].depth === 0 && reposRoot.roots[0].branch === 'main')
+check('它里面的检出也在清单里（IDEA 的多根）',
+  reposRoot.roots[1].rel === 'apps/web' && reposRoot.roots[1].branch === 'web-branch')
+check('清单按工作区缓存：再问一次是同一份答案',
+  JSON.stringify(await H('git/repos')({ repo: RR })) === JSON.stringify(reposRoot))
+
+console.log('')
+console.log('=== 只读会话工作区里的仓库：外面的路径被拒 ===')
+services.sessions = { get: (id) => (id === 'session-repos' ? { header: { id: 'session-repos', cwd: RW } } : undefined) }
+const outsideRepo = '/tmp/gp34-workspace-other'
+const refused = await H('git/panel')({ sessionId: 'session-repos', repo: outsideRepo })
+check('工作区外面的路径被拒，答复里带着那个路径和工作区',
+  refused.ok === false && refused.reason === 'outside' && refused.repo === outsideRepo && refused.workspace === RW)
+check('同前缀但不是它下面的路径也被拒（不是字符串前缀就放行）',
+  refused.reason === 'outside' && (await H('git/branches')({ sessionId: 'session-repos', repo: outsideRepo })).ok === false)
+const insideRepo = await H('git/panel')({ sessionId: 'session-repos', repo: RW + '/alpha' })
+check('工作区下面的路径照读（引导页手填的就是这种）',
+  insideRepo.ok === true && insideRepo.branch === 'feature-a')
+const refusedInit = await H('git/init')({ sessionId: 'session-repos', repo: outsideRepo })
+check('git init 不会落到工作区头上',
+  refusedInit.ok === false && refusedInit.error === 'outside-workspace')
+const allowedWt = await H('git/panel')({ sessionId: 'session-repos', repo: WT_OUT, sessionCwd: WT })
+check('工作区外面的工作树照读（git 自己列出来的那几棵）',
+  allowedWt.ok === true && allowedWt.branch === 'w2')
+delete services.sessions
 
 /* 前面任何一条 ✗ 都要反映到退出码上 */
 if (failedChecks > 0) {

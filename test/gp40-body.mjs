@@ -172,16 +172,18 @@ const favIn = (t) => {
   return acts === undefined ? undefined : buttons(acts).find((b) => String(b.props.className).indexOf('dsh-git-bs-fav') >= 0)
 }
 const favBefore = favIn(hoverB)
-console.log('  收藏按钮:', JSON.stringify(textOf(favBefore)))
-ok('收藏按钮此时可用，写的是「收藏」',
-  textOf(favBefore).indexOf('收藏') >= 0 && favBefore.disabled !== true && favBefore.props.title === undefined)
+const ariaOfBtn = (b) => String(b === undefined ? '' : (b.props['aria-label'] || ''))
+console.log('  收藏按钮:', JSON.stringify(ariaOfBtn(favBefore)))
+ok('收藏按钮此时可用，说的是「收藏 zeta」',
+  ariaOfBtn(favBefore).indexOf('收藏') >= 0 && ariaOfBtn(favBefore).indexOf('zeta') >= 0
+  && favBefore.disabled !== true && favBefore.props.title === undefined)
 favBefore.props.onClick({ stopPropagation() {}, preventDefault() {} })
 await wait(20)
 const starred = await settle()
 const favAfter = favIn(starred)
 ok('点一下就收藏了那一行（按钮自己变成已收藏）', String(favAfter.props.className).indexOf('dsh-git-bs-fav-on') >= 0)
 ok('收藏之后高亮还在同一个分支上（按钮的主语没有跟着排序跑）',
-  textOf(favAfter).indexOf('取消收藏') >= 0 && byClass(starred, 'dsh-git-bs-row-on').length === 1
+  ariaOfBtn(favAfter).indexOf('取消收藏') >= 0 && byClass(starred, 'dsh-git-bs-row-on').length === 1
   && textOf(byClass(starred, 'dsh-git-bs-row-on')[0]).indexOf('zeta') >= 0)
 
 /* ── 弹层里的记号要和面板左栏同一套 ──
@@ -193,6 +195,22 @@ ok('收藏之后高亮还在同一个分支上（按钮的主语没有跟着排�
 console.log('')
 console.log('== 弹层与面板：同一套记号 ==')
 ok('弹层里也有一列专门放「当前分支」的记号', byClass(starred, 'dsh-git-bs-cur').length === branchRows(starred).length)
+/* ↓ / ↑ 是同一套记号：左栏那个分支树上怎么说，这里就怎么说；没有要拉要推的行两边都空着。 */
+const marksOf = (r) => collect(r).filter((n) => typeof n.props.className === 'string' && n.props.className.split(' ').indexOf('dsh-git-ab') >= 0)
+ok('与上游一致的行在卡片上也没有记号（和左栏同一套）', marksOf(rowWith(starred, 'synced')).length === 0)
+/* 远端那一组是「远端有什么」的答案：全部远端跟踪分支都在，本地已有同名的压暗一档
+   （IDEA 用 Remote 节点嵌套说明这件事，这里是一张平铺清单，所以用深浅）。 */
+const remoteGroup = byClass(starred, 'dsh-git-bs-group').find((g) => textOf(g).indexOf('远端') >= 0)
+ok('远端那一组列出全部远端跟踪分支（本地已有同名的也在，计数 2）',
+  remoteGroup !== undefined && textOf(remoteGroup).indexOf('2') >= 0, remoteGroup === undefined ? '' : textOf(remoteGroup))
+const dimRows = branchRows(starred).filter((r) => String(r.props.className).indexOf('dsh-git-bs-row-same') >= 0)
+ok('与本地同名的那一行压暗一档，另一行（本地没有的）不压',
+  dimRows.length === 1 && textOf(dimRows[0]).indexOf('main') >= 0
+  && String(rowWith(starred, 'remote-only').props.className).indexOf('dsh-git-bs-row-same') < 0)
+ok('领先/落后的行在卡片上照旧带数字', textOf(rowWith(starred, 'main')).indexOf('↑2') >= 0 && textOf(rowWith(starred, 'main')).indexOf('↓1') >= 0)
+ok('没有上游的分支一个记号都没有', marksOf(rowWith(starred, 'zeta')).length === 0)
+/* 当前分支那行还压着多少没提交的改动（●N）在 gp38 那张卡片上验：那一节的面板读数
+   里本来就有未提交改动，这里这份 fixture 的脏改动数不是它的重点。 */
 const curRow = branchRows(starred).find((r) => String(r.props.className).indexOf('dsh-git-bs-row-cur') >= 0)
 console.log('  当前分支行:', textOf(byClass(curRow, 'dsh-git-bs-name')[0]), JSON.stringify(textOf(byClass(curRow, 'dsh-git-bs-cur')[0])))
 ok('当前分支用面板那个 ★，不是铅笔', textOf(byClass(curRow, 'dsh-git-bs-cur')[0]) === '★')
@@ -214,12 +232,14 @@ ok('分组头里不再有自画的 SVG 箭头', group !== undefined && collect(g
 const chipsRow = byClass(starred, 'dsh-git-bs-head-acts')[0]
 const chipTexts = (chipsRow === undefined ? [] : buttons(chipsRow)).map((b) => textOf(b))
 console.log('  动作 chip:', JSON.stringify(chipTexts))
-ok('动作 chip 是「记号 + 短词」（角标是数字，留着）',
-  chipTexts.length === 5 && chipTexts[0].indexOf('⇣') === 0 && chipTexts[0].indexOf('获取') > 0
+/* 屏幕上只有记号（⇣ ↓ ↑ + ☆）：词全部搬进 aria-label，和面板头部那几个 tool 同一套。 */
+ok('动作 chip 皮肤上只有记号，一个字的描述都没有',
+  chipTexts.length === 5 && chipTexts[0].indexOf('⇣') === 0
   && chipTexts[1].indexOf('↓') === 0 && chipTexts[2].indexOf('↑') === 0
-  && chipTexts[3].indexOf('+') === 0 && ['☆', '★'].indexOf(chipTexts[4].charAt(0)) >= 0)
-ok('chip 上没有原生提示框（词就在屏幕上）',
-  buttons(chipsRow).every((b) => b.props.title === undefined))
+  && chipTexts[3].indexOf('+') === 0 && ['☆', '★'].indexOf(chipTexts[4].charAt(0)) >= 0
+  && chipTexts.every((w) => ['获取', '拉取', '推送', '新建', '收藏'].every((word) => w.indexOf(word) < 0)))
+ok('chip 上没有原生提示框，完整说法都在 aria-label 里',
+  buttons(chipsRow).every((b) => b.props.title === undefined) && buttons(chipsRow).every((b) => ariaOfBtn(b).length > 0))
 ok('动作 chip 用的是面板那几个字符，不是另画一套 SVG',
   chipsRow !== undefined && collect(chipsRow).filter((n) => n.type === 'svg').length === 0)
 ok('收藏按钮就在这排动作里', favIn(starred) !== undefined)
@@ -472,6 +492,7 @@ host.call = function (method, args) {
         { segments: ['main'], data: 'main', upstream: 'origin/main', ahead: 2, behind: 1, at: nowSec - 60 },
         { segments: ['feature'], data: 'feature', upstream: 'origin/feature', ahead: 0, behind: 3, at: nowSec - 900 },
         { segments: ['stable'], data: 'stable', upstream: 'origin/stable', ahead: 4, behind: 0, at: nowSec - 90000 },
+        { segments: ['sync'], data: 'sync', upstream: 'origin/sync', ahead: 0, behind: 0, at: nowSec - 90000 },
         { segments: ['lone'], data: 'lone', upstream: '', ahead: 0, behind: 0, at: 0 },
       ],
       remote: [],
@@ -509,6 +530,11 @@ ok('领先 4 的分支显示 ↑4，而且是「需要推送」的绿色一档',
   && /dsh-git-ab-out/.test(String(pick(rowNamed('stable'), 'dsh-git-ab')[0].props.className)))
 ok('领先又落后的两个都显示', textOf(rowNamed('main')).indexOf('↑2') >= 0 && textOf(rowNamed('main')).indexOf('↓1') >= 0)
 ok('没有上游的分支两个都不显示', textOf(rowNamed('lone')).indexOf('↑') < 0 && textOf(rowNamed('lone')).indexOf('↓') < 0)
+/* IDEA 的写法：能做的事才标出来。与上游一致（0/0）时不写任何记号 —— 屏幕上空着，
+   就是「没有要拉、也没有要推」；一个 = 之类的记号只会让人问它是什么意思。 */
+ok('与上游一致的分支一个记号都不写（IDEA 也这样）',
+  pick(rowNamed('sync'), 'dsh-git-ab').length === 0 && textOf(rowNamed('sync')).indexOf('=') < 0)
+ok('没有上游的分支也一样空着', pick(rowNamed('lone'), 'dsh-git-ab').length === 0)
 ok('当前分支顶上显示未提交改动数（●3）', textOf(rowNamed('main')).indexOf('●3') >= 0)
 const headRow = rowNamed('main')
 ok('当前分支加粗（IDEA 的写法）',
@@ -519,6 +545,8 @@ ok('箭头的含义说给读屏，行上没有提示框',
   ariaIn(rowNamed('feature')).indexOf('落后上游 3 个提交') >= 0
   && ariaIn(rowNamed('main')).indexOf('3 个未提交改动') >= 0
   && rowNamed('feature').props.title === undefined)
+ok('一致/没有上游这两行连 aria 里也没有记号',
+  ariaIn(rowNamed('sync')).indexOf('落后上游') < 0 && ariaIn(rowNamed('sync')).indexOf('领先上游') < 0)
 
 host.call = beforeRefs
 fibers.clear()

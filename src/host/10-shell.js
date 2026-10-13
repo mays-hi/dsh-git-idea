@@ -298,6 +298,24 @@ async function identityMissing(args) {
   return asked.exitCode !== 0
 }
 
+/* ── 这个分支有没有上游 ──
+
+   和身份那条同一个道理，认的不是 git 那句话：关于「没有上游」，pull 和 push 说得
+   不一样（"There is no tracking information for the current branch" 对
+   "The current branch x has no upstream branch"），而且 —— 和面板那些读不同 ——
+   网络命令没有钉住 locale（`gitC` 才有 LC_ALL=C，见 `gitNet`），git 会把它翻成
+   机器说的话。所以失败之后问 git 一遍：`@{upstream}` 解析得出来就有，解析不出来
+   就没有。只在**已经失败**之后问，走得通的那条路一分钱都不付。
+
+   游离 HEAD 得先排除：那里 `@{upstream}` 也解析不出来，但那是「不在分支上」，有它
+   自己的一句解释（git 会说 "You are not currently on a branch"），不该被说成缺上游。 */
+async function upstreamMissing(args) {
+  const head = await gitC(args, ['symbolic-ref', '-q', '--short', 'HEAD'], null, {})
+  if (head.exitCode !== 0) return false
+  const asked = await gitC(args, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], null, {})
+  return asked.exitCode !== 0
+}
+
 /* The same answer as a marker inside a panel script, where a non-zero exit code
    cannot be the transport: `$gd` is already known to be non-empty by the time
    this runs, so it is one git process, in the whole-tree read only. */

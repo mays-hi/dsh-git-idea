@@ -5,6 +5,9 @@ const body = fs.readFileSync(process.env.GP_SRC || fileURLToPath(new URL('../hos
 function runShell(spec) {
   return new Promise((res) => {
     const c = spawn('sh', ['-c', spec.command], { cwd: spec.workdir, env: Object.assign({}, process.env, { DSH_HOME: '/tmp/gp34d-home/.dsh', HOME: '/tmp/gp34d-home', GIT_CONFIG_GLOBAL: '/tmp/gp34d-home/.gitconfig', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }) })
+    /* 同 gp34e：git 输出的提交信息、路径都可能是多字节，按 chunk 拼 Buffer 会拆坏它们。 */
+    c.stdout.setEncoding('utf8')
+    c.stderr.setEncoding('utf8')
     let o = '', e = ''
     c.stdout.on('data', b => o += b); c.stderr.on('data', b => e += b)
     c.on('error', er => res({ exitCode: null, stdout: { text: o }, stderr: { text: String(er.message) } }))
@@ -29,7 +32,9 @@ console.log('  默认值:', JSON.stringify(first.config))
 
 const IDENT_DIR = '/tmp/gp34d-home/.dsh'
 const CONFIG_FILE = IDENT_DIR + '/dsh-git-idea.json'
-const saved = await H('git/config-save')({ config: { initBranch: 'develop', cherryPickRecord: true } })
+/* `repoScanDepth` 一起存：客户端那一侧以前会把不认识的键丢掉（见 gp43），这一侧要证明
+   Host 不只认那几个「老的」键 —— 收到就收下、钳好、写到磁盘。 */
+const saved = await H('git/config-save')({ config: { initBranch: 'develop', cherryPickRecord: true, repoScanDepth: 3 } })
 console.log('  保存:', saved.ok, JSON.stringify(saved.config))
 console.log('  落在磁盘上的:', CONFIG_FILE, JSON.stringify(fs.readFileSync(CONFIG_FILE, 'utf8').replace(/\s+/g, ' ')))
 const again = await H('git/config')({})
@@ -45,6 +50,11 @@ check0('保存之后磁盘上确实有这份文件（不是只活在内存里）
   fs.existsSync(CONFIG_FILE) && fs.readFileSync(CONFIG_FILE, 'utf8').indexOf('"initBranch": "develop"') >= 0)
 check0('而且没有 fs 服务也能读回来（骨架里只给了 shell）',
   JSON.stringify(again.config) === JSON.stringify(saved.config))
+check0('repoScanDepth 原样落到磁盘（客户端不再自己过滤一遍，Host 也不漏掉它）',
+  saved.config.repoScanDepth === 3
+  && JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')).repoScanDepth === 3)
+const clamped = await H('git/config-save')({ config: Object.assign({}, saved.config, { repoScanDepth: 99 }) })
+check0('越界的深度由 Host 钳到 0–3', clamped.config.repoScanDepth === 3)
 if (guards0.length > 0) process.exit(1)
 
 console.log('')

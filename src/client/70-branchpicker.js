@@ -11,7 +11,9 @@
       const where = text(props.where)
       return h('div', {
         className: 'dsh-git-bs-row' + (props.active === true ? ' dsh-git-bs-row-on' : '') + (isCurrent ? ' dsh-git-bs-row-cur' : '')
-          + (props.busy === true ? ' dsh-git-bs-busy' : '') + (props.flying === true ? ' dsh-git-bs-row-fly' : ''),
+          + (props.busy === true ? ' dsh-git-bs-busy' : '') + (props.flying === true ? ' dsh-git-bs-row-fly' : '')
+          /* 远端那一组里本地已有同名的那些：压暗一档，说明「这条你本地已经有了」。 */
+          + (row.sameAsLocal === true ? ' dsh-git-bs-row-same' : ''),
         onMouseEnter: function (event) { props.onEnter(props.rowKey, props.at, event) },
         onMouseLeave: function () { props.onLeave() },
         onClick: function (event) { props.onPick(name, isCurrent, props.rowKey, event) },
@@ -22,8 +24,14 @@
         h('span', { key: 'c', className: 'dsh-git-bs-cur', 'aria-label': isCurrent ? '当前分支' : undefined }, isCurrent ? '★' : ''),
         h('span', { key: 'i', className: 'dsh-git-bs-ico' }, h(BranchIcon, { size: 13 })),
         h('span', { key: 'n', className: 'dsh-git-bs-name' }, name),
-        behind > 0 ? h('span', { key: 'b', className: 'dsh-git-bs-ab dsh-git-ab-in', 'aria-label': '落后上游 ' + String(behind) + ' 个提交，需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))) : null,
-        ahead > 0 ? h('span', { key: 'a', className: 'dsh-git-bs-ab dsh-git-ab-out', 'aria-label': '领先上游 ' + String(ahead) + ' 个提交，需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))) : null,
+        /* 当前分支那行带上未提交改动数 —— 和面板左栏那一行同一个记号（●N，那颗 chip 上的
+           角标也是这个数）。分支列表说的是「这些分支停在哪」，而当前这一行上还压着多少没
+           提交的东西，是同一个问题的另一半。 */
+        isCurrent && typeof props.dirty === 'number' && props.dirty > 0
+          ? h('span', { key: 'd', className: 'dsh-git-tdirty', 'aria-label': String(props.dirty) + ' 个未提交改动' }, '●' + String(props.dirty))
+          : null,
+        /* ↓ / ↑：和面板左栏同一个记号、同一个判据（见 40-format.js 的 abMarks）。 */
+        abMarks(row, 'dsh-git-bs-ab '),
         upstream.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, upstream)
           : (where.length > 0 ? h('span', { key: 'u', className: 'dsh-git-bs-up' }, where) : null),
         /* 行尾只剩下「这个分支能做的事」。收藏挪到了上面那排动作里（一行一个
@@ -40,6 +48,11 @@
     function BranchPicker(props) {
       const version = useDataVersion()
       useBranchPrefs()
+      useRootsVersion()
+      /* 卡片自己记着「现在看的是哪个仓库」：悬停卡片里也能换（见下面那一段），换完
+         读的就是新那一个；`props.repo` 变了（chip 那边换了）再跟回去。 */
+      const [repo, setRepo] = React.useState(props.repo)
+      React.useEffect(function () { setRepo(props.repo) }, [props.repo])
       const [data, setData] = React.useState(branchCache[props.repo] !== undefined ? branchCache[props.repo] : null)
       const [error, setError] = React.useState(null)
       const [note, setNote] = React.useState(null)
@@ -48,7 +61,7 @@
          above this component, in the popover's pointer handling. */
       switchBusy = busy
       React.useEffect(function () {
-        return function () { switchBusy = false }
+        return function () { switchBusy = false; switchHolds = false }
       }, [])
       const [query, setQuery] = React.useState('')
       const [index, setIndex] = React.useState(0)
@@ -60,6 +73,10 @@
       const [fly, setFly] = React.useState(null)
       const [creating, setCreating] = React.useState(null)
       const [armedDelete, setArmedDelete] = React.useState('')
+      /* 卡片里有东西正等着读者（见 10-state.js 的 `switchHolds`）：还没有名字的新分支、
+         两步删除的第二步。悬停卡片在指针离开 200ms 后自己收起，这些状态必须留住它 ——
+         不然刚点开的那一行输入框会在打字之前消失。 */
+      switchHolds = creating !== null || armedDelete.length > 0
 
       /* Where the flyout hangs: the row's own offset inside the scrolling list,
          translated into the card's coordinates. Rows are offset from the list
@@ -102,7 +119,8 @@
 
       const request = function (extra) {
         const built = { sessionId: props.sessionId }
-        if (props.repo != null && props.repo.length > 0) built.repo = props.repo
+        const mine = text(repo)
+        if (mine.length > 0) built.repo = mine
         if (extra != null) Object.assign(built, extra)
         return built
       }
@@ -124,7 +142,7 @@
         let alive = true
         rpc('git/branches', request(null), '读不到分支列表').then(function (result) {
           if (!alive) return
-          rememberBranches(props.repo, result)
+          rememberBranches(text(repo), result)
           setData(result)
           setIndex(0)
         }, function (failure) {
@@ -133,7 +151,37 @@
           setError('读不到分支列表：' + failureText(failure))
         })
         return function () { alive = false }
-      }, [props.repo, props.sessionId, version])
+      }, [repo, props.sessionId, version])
+
+      /* ── 这个工作区里有哪几个仓库 ──
+
+         chip 和面板都能换（见 10-state 的 `rememberRepo`），输入框旁这张卡片也得能 ——
+         读者在输入框边上点开它，第一件想确认的事常常是「我看的是哪一个」。清单走共享
+         缓存：chip / 面板问过就直接读，谁都没问过才自己问一次。 */
+      const rootsReply = sessionRoots(props.sessionId)
+      React.useEffect(function () {
+        if (rootsReply !== null || rootsRouteGone()) return undefined
+        let alive = true
+        callHost('git/repos', { sessionId: props.sessionId }).then(function (list) {
+          if (alive !== true) return
+          rememberRoots(props.sessionId, list)
+        }, function (failure) { rootsRouteRefused(failure) })
+        return function () { alive = false }
+      }, [props.sessionId, rootsReply])
+      const rootList = rootsReply != null && rootsReply.ok === true && Array.isArray(rootsReply.roots)
+        ? rootsReply.roots : []
+      const activeRoot = repoHere(rootList, text(repo), data != null ? text(data.repo) : '')
+      /* 换的是「看哪一个仓库」，不是会话在哪儿干活 —— 和面板那张清单同一条规矩。 */
+      const pickRepo = function (path) {
+        if (sameRepoPath(path, text(repo))) return
+        rememberRepo(props.sessionId, path)
+        setRepo(path)
+        setQuery('')
+        setIndex(0)
+        setFly(null)
+        setCreating(null)
+        setData(branchCache[path] !== undefined ? branchCache[path] : null)
+      }
 
       const choose = function (name, useStash) {
         if (busy === true || name.length === 0) return
@@ -336,6 +384,16 @@
          an answer that is already known while the list is being built. */
       const navAt = new Map()
       for (let i = 0; i < actions.length; i += 1) nav.push({ kind: 'action', def: actions[i] })
+      /* 仓库那一排排在分支前面：键盘顺序和视觉顺序一致。搜索框也管它们 —— 清单上的
+         东西和下面的分支是同一张卡片上的内容。 */
+      const rootRowsShown = []
+      for (let i = 0; i < rootList.length; i += 1) {
+        if (needle.length === 0 || hit(repoLabel(rootList[i])) || hit(text(rootList[i].path))) rootRowsShown.push(rootList[i])
+      }
+      const rootIndexBase = actions.length
+      if (rootList.length > 1 && rootRowsShown.length > 0 && collapsed['roots'] !== true) {
+        for (let i = 0; i < rootRowsShown.length; i += 1) nav.push({ kind: 'root', root: rootRowsShown[i] })
+      }
       for (let g = 0; g < groups.length; g += 1) {
         if (collapsed[groups[g].id] === true) continue
         for (let i = 0; i < groups[g].rows.length; i += 1) {
@@ -459,12 +517,11 @@
       for (let i = 0; i < actions.length; i += 1) {
         const def = actions[i]
         const on = nav[index] !== undefined && nav[index].kind === 'action' && nav[index].def === def
-        /* 记号 + 短词（⇣ 获取 / ↓ 拉取 / ↑ 推送 / + 新建分支）。文字以前只活在
-           悬浮提示里，而那是浏览器自己弹的框 —— 卡片上不再有它，那就把词写出来；
-           面板头部那几个 tool 也照这个画法改了，两处仍然是同一套。 */
+        /* 只有记号（⇣ / ↓ / ↑ / +）：屏幕上一个字都不写 —— 面板头部那几个 tool 也是
+           这样画的，两处仍然是同一套。词还在 `aria-label` 里（读屏），也还在下面的
+           搜索结果里（按名字找得到这个动作，见 `hit`）。 */
         const parts = [
           h('span', { key: 'i', className: 'dsh-git-bs-glyph' }, def.glyph),
-          h('span', { key: 't', className: 'dsh-git-bs-chip-t' }, def.short),
         ]
         /* 面板那几个 tool 的角标就是一个数字药丸，这里也照那个样子：记号已经
            是 ⇣/↓/↑ 了，角标再带一个箭头就成了「↓拉取↓1」。 */
@@ -474,6 +531,9 @@
           className: 'dsh-git-bs-chip'
             + (on ? ' dsh-git-bs-chip-on' : '')
             + (def.id === 'new' ? ' dsh-git-bs-chip-new' : ''),
+          /* 屏幕上只有一个记号：整句话给读屏，领先/落后的数字也一起说。 */
+          'aria-label': def.label
+            + (def.badge !== undefined ? '（' + def.badge + '）' : ''),
           disabled: busy === true,
           onMouseEnter: function () { setIndex(i) },
           onClick: function (event) { stopEvent(event); def.run() },
@@ -482,6 +542,7 @@
       chips.push(h('button', {
         key: 'a:fav', type: 'button',
         className: 'dsh-git-bs-chip dsh-git-bs-fav' + (pickedStarred ? ' dsh-git-bs-fav-on' : ''),
+        'aria-label': (pickedStarred ? '取消收藏 ' : '收藏 ') + (pickedName.length > 0 ? pickedName : '（先把指针放到一行上）'),
         disabled: pickedName.length === 0 || busy === true,
         onClick: function (event) {
           stopEvent(event)
@@ -489,8 +550,7 @@
           toggleStar(pickedName)
           setReveal(pickedKey)
         },
-      }, h('span', { key: 'i', className: 'dsh-git-bs-glyph dsh-git-bs-glyph-star' }, pickedStarred ? '★' : '☆'),
-        h('span', { key: 't', className: 'dsh-git-bs-chip-t' }, pickedStarred ? '取消收藏' : '收藏')))
+      }, h('span', { key: 'i', className: 'dsh-git-bs-glyph dsh-git-bs-glyph-star' }, pickedStarred ? '★' : '☆')))
       const items = []
 
       /* 分组头那一行的折叠：箭头和整行点哪都算。箭头本身是面板左栏那个 twisty，
@@ -501,6 +561,28 @@
           next[id] = prev[id] !== true
           return next
         })
+      }
+
+      /* 仓库清单排在最前面：它是这张卡片里唯一改变「下面这些分支是谁的」的东西。只有
+         一个仓库时整段不出现（和面板那颗 chip 同一条规则：只有一种可能时，少一行比多
+         一行好）。它借分支分组那一套折叠，读者可以把它收起来。 */
+      if (rootList.length > 1) {
+        const shutRoots = collapsed['roots'] === true
+        items.push(h('div', {
+          key: 'g:roots', className: 'dsh-git-bs-group',
+          onClick: function () { toggleGroup('roots') },
+        },
+          twisty({ collapsed: shutRoots, onToggle: function () { toggleGroup('roots') } }),
+          h('span', { key: 'l' }, '这个工作区里的仓库'),
+          h('span', { key: 'n', className: 'dsh-git-bs-count' }, String(rootRowsShown.length))))
+        if (!shutRoots) {
+          for (let i = 0; i < rootRowsShown.length; i += 1) {
+            const one = rootRowsShown[i]
+            items.push(repoRow(one,
+              activeRoot !== null && sameRepoPath(one.path, activeRoot.path),
+              index === rootIndexBase + i, pickRepo))
+          }
+        }
       }
 
       for (let g = 0; g < groups.length; g += 1) {
@@ -548,6 +630,7 @@
             at: at,
             active: at >= 0 && at === index,
             current: row.current === true,
+            dirty: props.dirty,
             busy: busy === true,
             flying: fly !== null && fly.key === rowKey,
             onEnter: onRowEnter,
@@ -636,6 +719,7 @@
           const entry = nav[index]
           if (entry === undefined) return
           if (entry.kind === 'action') entry.def.run()
+          else if (entry.kind === 'root') pickRepo(text(entry.root.path))
           else choose(text(entry.row.name), stash)
         } else if (event.key === 'Tab') {
           event.preventDefault()
@@ -670,8 +754,7 @@
               : '当前按最近提交排序，点击改为按名称（A→Z）',
             onClick: function () { setBranchSort(branchSort === 'name' ? 'recent' : 'name') },
           },
-            h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 13 }),
-            h('span', { key: 't', className: 'dsh-git-bs-chip-t' }, branchSort === 'name' ? '名称' : '时间'))),
+            h(Icon, { name: branchSort === 'name' ? 'sortName' : 'sortRecent', size: 13 }))),
         h('div', {
           key: 'l', className: 'dsh-git-bs-list',
           ref: function (node) { pickerList = node },

@@ -199,8 +199,12 @@ const branchesReply = {
     { name: 'solo', current: false, committedAt: nowSec - 3600, upstream: '', track: '', ahead: 0, behind: 0, head: 'bbb', subject: 'solo tip' },
     { name: 'feature/one', current: false, committedAt: nowSec - 90000, upstream: 'origin/feature/one', track: '>', ahead: 1, behind: 0, head: 'ccc', subject: 'one tip' },
     { name: 'zeta', current: false, committedAt: nowSec - 9000, upstream: '', track: '', ahead: 0, behind: 0, head: 'ddd', subject: 'z' },
+    { name: 'synced', current: false, committedAt: nowSec - 12000, upstream: 'origin/synced', track: '=', ahead: 0, behind: 0, head: 'fff', subject: 'synced tip' },
   ],
-  remotes: [{ name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r' }],
+  remotes: [
+    { name: 'remote-only', remote: 'origin', ref: 'origin/remote-only', committedAt: nowSec - 500, head: 'eee', subject: 'r', sameAsLocal: false },
+    { name: 'main', remote: 'origin', ref: 'origin/main', committedAt: nowSec - 5, head: 'aaa', subject: 'tip main', sameAsLocal: true },
+  ],
 }
 let checkoutReply = { ok: true, repo: '/tmp/ws', stashed: false, dirty: 0, popConflict: false, stdout: '', stderr: '', exitCode: 0 }
 const host = {
@@ -300,7 +304,14 @@ const identityCalls = []
 const identitySaves = []
 const toolCalls = []
 const configSaves = []
-let configNow = configReply().config
+/* 本浏览器那份设置先塞一个非默认值：第 0 节要断言「直接开设置页（输入框旁那颗 chip
+   还没挂过）也读得到它」—— 读数挂在 ref 上，而 useState 在渲染时就把默认值定死了，
+   之后的通知又发生在订阅之前。 */
+store['dsh.git-idea.settings'] = JSON.stringify({ hoverSwitch: false })
+
+/* 这份配置刻意带着一个 Host 有、客户端**没有**写进自己那份名单的键（`repoScanDepth`）：
+   它下面那一节盯的就是这个 —— 以前它会被客户端丢掉。 */
+let configNow = Object.assign({}, configReply().config, { repoScanDepth: 3 })
 let identityReply = {
   ok: true, repo: '/tmp/ws', insideRepo: true,
   name: 'Ada Lovelace', email: 'ada@example.com',
@@ -345,6 +356,77 @@ const inputByPlaceholder = function (t, placeholder) {
 const btnWith = function (t, label) { return buttons(t).filter(function (b) { return textOf(b) === label })[0] }
 const warnText = function (t) { return byClass(t, 'dsh-git-warn').map(function (n) { return textOf(n) }).join(' | ') }
 const effectiveRow = function (t) { return rowTexts(t).filter(function (x) { return x.indexOf('此刻生效') >= 0 })[0] || '' }
+
+/* ── 0. 插件配置：一个键都不能悄悄丢 ──
+
+   客户端以前把 Host 的插件配置 schema 抄了一份白名单，而 `repoScanDepth` 没抄进去：
+   那个下拉框永远显示默认的 2（Host 明明答了 3），而且读者改**任何**一个别的插件设置，
+   400ms 后落盘的那一份都会把它抹回默认 —— Host 收到一份没有这个键的配置。这一节盯的
+   就是「一个键都不能悄悄丢」。 */
+console.log('')
+console.log('== 设置页 · 插件配置的键一个都不能丢 ==')
+const selectFor = function (t, label) {
+  const row = setRow(t, label)
+  return row === undefined ? undefined : collect(row).filter(function (n) { return n.type === 'select' })[0]
+}
+let keyTree = await sectionTree('gp43-plugin-keys')
+const depthBox = selectFor(keyTree, '往下找几层仓库')
+console.log('  repoScanDepth 控件:', JSON.stringify(depthBox === undefined ? null : depthBox.props.value))
+ok('Host 答的 repoScanDepth 显示在控件上（不是永远显示默认的 2）',
+  depthBox !== undefined && depthBox.props.value === '3')
+
+/* 同一类错：存过的偏好要在**第一帧**就生效，而不是等别的界面 notify 一次。 */
+const hoverBox = collect(setRow(keyTree, '鼠标停在输入框旁')).filter(function (n) {
+  return n.type === 'input' && n.props.type === 'checkbox'
+})[0]
+ok('存过的本浏览器偏好第一帧就生效（不需要别人先通知一次）',
+  hoverBox !== undefined && hoverBox.props.checked === false)
+
+inputByPlaceholder(keyTree, 'main').props.onChange({ target: { value: 'trunk' } })
+await wait(5)
+fireTimers()
+await wait(20)
+console.log('  改 initBranch 之后存下去的:', JSON.stringify(configSaves[configSaves.length - 1]))
+ok('改别的键不会把 repoScanDepth 洗掉（以前这里就丢了）',
+  configSaves.length >= 1 && configSaves[configSaves.length - 1].initBranch === 'trunk'
+  && configSaves[configSaves.length - 1].repoScanDepth === 3)
+
+keyTree = await sectionTree('gp43-plugin-keys')
+selectFor(keyTree, '往下找几层仓库').props.onChange({ target: { value: '1' } })
+await wait(5)
+fireTimers()
+await wait(20)
+ok('这个下拉框自己也能改（以前点了不动：值当场被白名单丢掉）',
+  configSaves[configSaves.length - 1].repoScanDepth === 1)
+
+/* ── 0b. 变更页视图：README 一直把它列在「本浏览器」里，页面上却一直没有这一格 ── */
+console.log('')
+console.log('== 设置页 · 变更页视图 ==')
+keyTree = await sectionTree('gp43-view')
+const viewBox = selectFor(keyTree, '变更页视图')
+console.log('  控件:', JSON.stringify(viewBox === undefined ? null : viewBox.props.value))
+ok('设置页上有这个控件', viewBox !== undefined && viewBox.props.value === 'tree')
+viewBox.props.onChange({ target: { value: 'flat' } })
+await wait(5)
+keyTree = await sectionTree('gp43-view')
+ok('选「平铺列表」写进本浏览器那份设置',
+  JSON.parse(store['dsh.git-idea.settings']).changesView === 'flat')
+
+/* ── 0c. 「本浏览器全部恢复默认」得真的是全部 ── */
+console.log('')
+console.log('== 设置页 · 本浏览器全部恢复默认 ==')
+store['dsh.git-idea.panel'] = JSON.stringify({ w: 640, h: 480 })
+store['dsh.git-idea.stars'] = JSON.stringify(['keep-me'])
+keyTree = await sectionTree('gp43-reset')
+btnWith(keyTree, '本浏览器全部恢复默认').props.onClick()
+await wait(5)
+const afterReset = JSON.parse(store['dsh.git-idea.settings'])
+const resetSize = JSON.parse(store['dsh.git-idea.panel'])
+const resetStars = JSON.parse(store['dsh.git-idea.stars'])
+console.log('  恢复之后:', JSON.stringify({ changesView: afterReset.changesView, size: resetSize, stars: resetStars }))
+ok('外观与节奏回到默认', afterReset.changesView === 'tree' && afterReset.hoverSwitch === true)
+ok('面板尺寸回到「跟随输入框」', resetSize.w === 0 && resetSize.h === 0)
+ok('切换器的收藏被清掉', Array.isArray(resetStars) && resetStars.length === 0)
 
 /* ── 1. 缺一半的时候说什么 ── */
 
@@ -546,15 +628,19 @@ const panelSaved = host.call
 host.call = function (method, args) {
   if (method === 'git/push') {
     pushCalls.push(args)
-    /* 第一次失败在 git 自己的那句话上；带上 -u 的那一次成功。 */
+    /* 第一次失败在「这个分支没有上游」上；带上 -u 的那一次成功。
+       `needsUpstream` 是 Host 判定的那一格（见 10-shell.js 的 `upstreamMissing`）——
+       面板不再从 git 那句话里认它，所以这里给的是那格，不是那句话。 */
     if (args != null && args.setUpstream === true) return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
-    return Promise.resolve({ ok: false, repo: '/tmp/ws', stdout: '', stderr: 'fatal: The current branch main has no upstream branch', exitCode: 128 })
+    return Promise.resolve({ ok: false, needsUpstream: true, repo: '/tmp/ws', stdout: '', stderr: 'fatal: The current branch main has no upstream branch', exitCode: 128 })
   }
   if (method === 'git/refs') {
     return Promise.resolve({
       ok: true, repo: '/tmp/ws', current: ['main'], previous: '',
       local: [{ segments: ['main'], data: 'main' }],
       remote: [{ name: 'origin', remote: 'origin', refs: [{ segments: ['origin', 'main'], data: 'origin/main' }] }],
+      /* 配过哪些远端：`git remote` 的答案，横幅上那个名字从这里来。 */
+      remoteNames: ['origin'],
     })
   }
   if (method === 'git/config') return Promise.resolve(configReply({ config: Object.assign({}, configNow, { pushSetUpstream: pushSetUpstream }) }))
@@ -607,5 +693,95 @@ ok('开着的时候自己走完那一步：第二次带着 -u、远端和分支'
   && pushCalls[1].remote === 'origin' && pushCalls[1].branch === 'main')
 ok('走完了就不用再问一句', textOf(pushTree).indexOf('推送并设为上游') < 0)
 ok('没有第二次重试（-u 那次失败也不会再套一层）', pushCalls.filter(function (a) { return a.setUpstream === true }).length === 1)
+
+host.call = panelSaved
+
+/* ── 7. 没有上游的 pull：和 push 共用一次失败，要补的那一步不同 ── */
+
+console.log('')
+console.log('== 面板 · 没有上游的 pull ==')
+const pullCalls = []
+host.call = function (method, args) {
+  if (method === 'git/pull') {
+    pullCalls.push(args)
+    if (args != null && args.setUpstream === true) return Promise.resolve({ ok: true, repo: '/tmp/ws', stdout: '', stderr: '', exitCode: 0 })
+    return Promise.resolve({
+      ok: false, needsUpstream: true, repo: '/tmp/ws', stdout: '',
+      stderr: 'There is no tracking information for the current branch.', exitCode: 1,
+    })
+  }
+  if (method === 'git/refs') {
+    return Promise.resolve({
+      ok: true, repo: '/tmp/ws', current: ['main'], previous: '',
+      local: [{ segments: ['main'], data: 'main' }], remote: [],
+      remoteNames: ['origin'],
+    })
+  }
+  return panelSaved(method, args)
+}
+/* 同一个 label 渲染才是同一个 fiber：换了 label 就等于重新挂载，`git/refs` 不会发
+   出去（push 那一段的注释里已经踩过一次）。所以同步组这颗按钮也照 push 的做法点。 */
+const clickSync = async function (aria) {
+  const t = await openPanel()
+  const bar = byClass(t, 'dsh-git-sync')[0]
+  const btn = buttons(bar === undefined ? t : bar)
+    .filter(function (b) { return String(b.props['aria-label']).indexOf(aria) === 0 })[0]
+  if (btn !== undefined) btn.props.onClick()
+  await wait(30)
+  return await settle('pop')
+}
+let pullTree = await clickSync('pull：拉取并合入当前分支')
+console.log('  失败之后:', JSON.stringify({ 次数: pullCalls.length, 横幅: textOf(pullTree).indexOf('设为上游') >= 0 }))
+ok('pull 在没有上游的分支上失败：横幅给的是「拉取并设为上游」，不是推送那一句',
+  pullCalls.length === 1 && textOf(pullTree).indexOf('拉取并设为上游') >= 0
+  && textOf(pullTree).indexOf('推送并设为上游') < 0)
+ok('横幅里写清了认哪个远端', textOf(pullTree).indexOf('这个分支还没有上游（origin）') >= 0)
+
+const promptBar = byClass(pullTree, 'dsh-git-prompt')[0]
+const pullFix = buttons(promptBar === undefined ? pullTree : promptBar)
+  .filter(function (b) { return textOf(b).indexOf('拉取并设为上游') >= 0 })[0]
+ok('那一行有按钮可以按', pullFix !== undefined)
+if (pullFix !== undefined) pullFix.props.onClick()
+await wait(30)
+const pullAfter = await settle('pop')
+console.log('  按下去:', JSON.stringify(pullCalls.map(function (a) { return a.setUpstream === true ? 'setUpstream' : 'plain' })))
+ok('按下去带的就是 setUpstream + 远端 + 分支',
+  pullCalls.length === 2 && pullCalls[1].setUpstream === true
+  && pullCalls[1].remote === 'origin' && pullCalls[1].branch === 'main')
+ok('补上之后横幅收起来了', textOf(pullAfter).indexOf('拉取并设为上游') < 0)
+
+/* ── 8. 一个远端都没有的仓库 ──
+
+   `git fetch --all` 在这种仓库里是**成功退出**的，所以这里 Mock 的是 Host 自己那
+   一句「没有远端」——它连 git 都没起（见 80-rpc.js 的 `noRemoteReply`）。要测的是：
+   面板不再显示成「什么都没发生」，而是把那句话和要跑的命令说出来。 */
+
+console.log('')
+console.log('== 面板 · 没有远端 ==')
+const lonelyCalls = []
+host.call = function (method, args) {
+  if (method === 'git/refs') {
+    return Promise.resolve({
+      ok: true, repo: '/tmp/lonely', current: ['main'], previous: '',
+      local: [{ segments: ['main'], data: 'main' }], remote: [], remoteNames: [],
+    })
+  }
+  if (method === 'git/fetch' || method === 'git/pull' || method === 'git/push') {
+    lonelyCalls.push(method)
+    return Promise.resolve({
+      ok: false, repo: '/tmp/lonely', error: 'no-remote', stdout: '', stderr: '',
+      exitCode: null, command: '',
+    })
+  }
+  return panelSaved(method, args)
+}
+const lonelyTree = await clickSync('fetch：从所有远端取回最新引用')
+const strip = byClass(lonelyTree, 'dsh-git-error')[0]
+const said = strip === undefined ? '' : textOf(strip)
+console.log('  面板说:', JSON.stringify(said.slice(0, 60)))
+ok('fetch 不再是一个安静的 no-op：面板说出了「这个仓库还没有配置远端」',
+  lonelyCalls.indexOf('git/fetch') >= 0 && said.indexOf('这个仓库还没有配置远端') >= 0)
+ok('并且给出可以照抄的那条命令', said.indexOf('git remote add origin') >= 0)
+ok('这时不画「设上游」的横幅（没有远端可认）', textOf(lonelyTree).indexOf('设为上游') < 0)
 
 host.call = panelSaved

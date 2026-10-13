@@ -3,13 +3,17 @@
 
    DSH 0.2 的模型工具 `create_worktree` 把新树建在源仓库里面的
    `.agents/worktrees/<branch>`，然后把会话的生效目录搬过去。这个插件对这件事
-   不做任何写操作，只把它说清楚：
+   不做任何写操作，只把它说清楚（三处，都不是一份工作树清单）：
 
-   1. 面板头上一颗"这是工作树 w1"的身份；
-   2. 一个页签，列出全部工作树，点一行只切换面板看哪一棵；
-   3. 改动列表里那条工作树池的注解（git 把整棵未跟踪目录折叠成一条）；
-   4. chip 上一颗工作树标记；
-   5. 会话的生效目录一变（`workingDirectory` 投影），chip 和面板就要重读。 */
+   1. 输入框那颗 chip：在最前面那颗图标上换成工作树字形；
+   2. 面板头上那颗分支 chip：同一颗按钮、同一个位置换字形（不再并排第二颗）；
+   3. 改动列表里那条工作树池的注解（git 把整棵未跟踪目录折叠成一条）。
+
+   面板那张「看哪一个」清单**没有**工作树这一组：它列的是工作区里的仓库，和输入框旁
+   那张悬浮卡片同一套逻辑 —— 这也是这一节后半段钉的东西（曾经它是第三个页签，中间
+   还短暂地当过那颗 chip 里的第二组，两次都删掉了）。
+
+   4. 会话的生效目录一变（`workingDirectory` 投影），chip 和面板就要重读。 */
 
 const WT_W1 = '/tmp/ws/.agents/worktrees/w1'
 const WT_GONE = '/tmp/ws/.agents/worktrees/gone'
@@ -42,18 +46,15 @@ host.call = function (method, args) {
 const panelCalls = () => calls2.filter((c) => c.method === 'git/panel')
 const worktreeCalls = () => calls2.filter((c) => c.method === 'git/worktrees')
 const tabNamed = (tree, label) => byClass(tree, 'dsh-git-tab').find((b) => textOf(b).indexOf(label) >= 0)
-const rowsOf = (tree) => byClass(tree, 'dsh-git-wt-row')
-const rowNamed = (tree, name) => rowsOf(tree).find((r) => textOf(r).indexOf(name) >= 0)
 
 console.log('== 面板头上：只有一颗 chip，它在工作树里换字形 ==')
 /* 这里曾经并排两颗按钮：一颗写分支名、一颗写工作树名 —— 而 DSH 默认拿分支名给工作树
    命名，屏幕上就是两个几乎一样的词顶着两颗分支样的图标。现在合成一颗：链接工作树里
-   它把**最前面那颗图标**换成工作树字形（和输入框那颗 chip 同一个做法），页签仍然是
-   去工作树列表的路。 */
+   它把**最前面那颗图标**换成工作树字形（和输入框那颗 chip 同一个做法）。 */
 let panelTree = await openPanel()
 const headerChips = byClass(panelTree, 'dsh-git-branch-chip')
 console.log('  头部 chip:', headerChips.map(textOf))
-ok('头上只有一颗分支 chip（没有第二颗"工作树"按钮）',
+ok('头上只有一颗分支 chip（没有第二颗工作树按钮）',
   headerChips.length === 1 && byClass(panelTree, 'dsh-git-wtchip').length === 0)
 ok('它在链接工作树里画的是工作树字形',
   headerChips.length === 1 && collect(headerChips[0]).some((n) => n.type === 'path'
@@ -67,55 +68,27 @@ ok('这颗 chip 上没有悬浮提示（title 去掉了）',
 ok('分支名照旧写着', headerChips.length === 1 && textOf(headerChips[0]).length > 0)
 
 console.log('')
-console.log('== 工作树页签：列出全部树，标出主/当前/锁定/可清理 ==')
+console.log('== 「看哪一个」那张清单里没有工作树这一组 ==')
+/* 这一份读回答了 3 棵树，面板照样不画它们：清单只有一个来源（`git/repos` 扫出来的
+   工作区里的仓库），和输入框旁那张悬浮卡片同一套逻辑。这个 fixture 里一个仓库都没扫
+   出来（`git/repos` 走的是 mock 的默认答复），所以那颗 chip 也不该出现 —— 「只有一种
+   可能时那块位置不出现」是同一条规矩的另一半。 */
 const tabs = byClass(panelTree, 'dsh-git-tab').map(textOf)
 console.log('  页签:', JSON.stringify(tabs))
-ok('多了一个「工作树」页签', tabs.some((t) => t.indexOf('工作树') >= 0))
-ok('页签上带着数量徽标（3 棵）',
-  byClass(panelTree, 'dsh-git-tool-badge').some((b) => textOf(b) === '3'))
-const wtTab = tabNamed(panelTree, '工作树')
-wtTab.props.onClick()
-/* label 决定 fiber：面板从头到尾用同一个 label，切页签才是"同一个组件换 state"，
-   而不是重新挂一个（见 harness 的 renderRoot）。 */
-panelTree = await settle()
-const wtRows = rowsOf(panelTree)
-console.log('  行:', wtRows.map(textOf))
-ok('列出三棵工作树', wtRows.length === 3)
-ok('当前那一棵被标出来', byClass(panelTree, 'dsh-git-wt-row-on').length === 1
-  && byClass(panelTree, 'dsh-git-wt-row-on')[0] === rowNamed(panelTree, 'w1'))
-const badges = byClass(panelTree, 'dsh-git-wt-badge').map(textOf)
-console.log('  徽标:', JSON.stringify(badges))
-ok('主工作树、当前、锁定、可清理都被说出来',
-  badges.indexOf('主') >= 0 && badges.indexOf('当前') >= 0
-  && badges.indexOf('锁定') >= 0 && badges.indexOf('可清理') >= 0)
-ok('每一行都带着它的路径（读者要能确认是哪一份检出）',
-  wtRows.every((r) => textOf(r).indexOf('/tmp/ws') >= 0))
-ok('页签里写着这个池在哪、那条未跟踪改动是什么、怎么让它别再出现',
-  textOf(byClass(panelTree, 'dsh-git-wt-head')[0]).indexOf('.agents/worktrees') >= 0
-  && textOf(byClass(panelTree, 'dsh-git-wt-head')[0]).indexOf('.gitignore') >= 0)
-/* 清单是"仓库的身份"这一级的东西，不是每次渲染都要问一遍的东西。 */
+ok('「工作树」不是页签', tabs.length === 2 && tabs.every((t) => t.indexOf('工作树') < 0))
+ok('工作树的行、徽标、注解一个都没有',
+  byClass(panelTree, 'dsh-git-wt-row').length === 0 && byClass(panelTree, 'dsh-git-wt-badge').length === 0
+  && byClass(panelTree, 'dsh-git-roots-note').length === 0)
+ok('（对照）这一份读确实答了 3 棵树（不是 mock 没接上）',
+  worktreeReply.ok === true && worktreeReply.entries.length === 3)
+ok('一个仓库都没扫出来时，顶栏那颗「仓库」chip 也不出现',
+  byClass(panelTree, 'dsh-git-root-chip').length === 0)
+/* 清单是仓库身份这一级的东西，不是每次渲染都要问一遍的东西。 */
 const readsBefore = worktreeCalls().length
 for (let i = 0; i < 5; i += 1) panelTree = await settle()
 await wait(10)
 console.log('  再渲染 5 次的额外读:', worktreeCalls().length - readsBefore)
-ok('工作树清单不会每次渲染都重读', worktreeCalls().length - readsBefore <= 1)
-
-console.log('')
-console.log('== 点别的树：只切这个面板，会话不动 ==')
-calls2.length = 0
-rowNamed(panelTree, 'gone').props.onClick()
-await wait(20)
-panelTree = await settle()
-const switchCalls = panelCalls().filter((c) => c.args != null && c.args.repo === WT_GONE)
-console.log('  切过去的请求:', JSON.stringify(switchCalls.slice(0, 2).map((c) => c.args.repo)))
-ok('面板按那棵树重新读了一次', switchCalls.length > 0)
-ok('读的就是那棵树的路径', switchCalls.every((c) => c.args.repo === WT_GONE))
-/* 只切视图的意思：没有一条请求在"移动会话"——插件根本没有那种 RPC。 */
-ok('没有任何"移动会话"的调用（插件不搬工作目录）',
-  calls2.every((c) => c.method.indexOf('git/worktrees') === 0 || c.method.indexOf('git/panel') === 0
-    || c.method.indexOf('git/') === 0))
-ok('会话 id 一直跟着请求走（沙箱策略要它）',
-  switchCalls.every((c) => c.args.sessionId === 's-1'))
+ok('这一份读不会每次渲染都重读', worktreeCalls().length - readsBefore <= 1)
 
 console.log('')
 console.log('== 改动列表：池那条改动被标出来，但不被藏掉 ==')
@@ -133,8 +106,7 @@ panelTree = await settle()
 const notes = byClass(panelTree, 'dsh-git-wtnote')
 console.log('  标记:', notes.map(textOf))
 ok('那条 .agents/ 改动带上了工作树注解', notes.length === 1 && textOf(notes[0]) === '工作树池')
-ok('注解本身不再挂提示框（那句话搬进了工作树页签，见上一节）',
-  notes.length === 1 && notes[0].props.title === undefined)
+ok('注解就是一个记号，不挂提示框', notes.length === 1 && notes[0].props.title === undefined)
 const untrackedRows = byClass(panelTree, 'dsh-git-trow').map(textOf)
 console.log('  未跟踪行:', JSON.stringify(untrackedRows.filter((t) => t.length > 0).slice(-4)))
 ok('那条改动照样列出来（标记，不隐藏）',
@@ -147,7 +119,7 @@ console.log('== chip：前导图标自己换，而不是在后面再挂一颗 ==
 /* 在链接工作树里，chip **最前面那颗**图标从分支字形换成工作树字形（VS Code codicon
    的 worktree）：一个 glyph 读起来是一个按钮，两颗 flex 兄弟读起来像两个按钮。
    分支图标是三颗实心圆（cx=4 cy=3.5 那颗在）；工作树字形是一条实心路径，起手就是
-   M12.854。两个判据各自独立，所以"换错了"和"两颗都在"都能被看见。 */
+   M12.854。两个判据各自独立，所以换错了和两颗都在都能被看见。 */
 const glyphPaths = (tree) => collect(tree)
   .filter((n) => n.type === 'path' && typeof n.props.d === 'string')
   .map((n) => String(n.props.d))
@@ -180,7 +152,7 @@ ok('（对照）主工作树里没有工作树字形', hasWorktreeGlyph(chipTree
 console.log('')
 console.log('== 会话把工作目录搬进工作树：chip 要立刻重读 ==')
 /* 这是 DSH 0.2 新增的那条信息（`workingDirectory` 投影）。它变了，仓库并没有动：
-   `git/watch` 的签名完全可以不变，所以"重读"这件事必须由这个值触发。 */
+   `git/watch` 的签名完全可以不变，所以重读这件事必须由这个值触发。 */
 calls2.length = 0
 let projected = '/tmp/ws'
 const projection = () => projected
@@ -202,31 +174,3 @@ const stable = panelCalls().length
 projTree = await projectedChip('chip-proj')
 await wait(20)
 ok('（对照）投影没变就不重读', panelCalls().length === stable)
-
-console.log('')
-console.log('== 读不成时说的话：分得清"没有工作区"和"不是仓库" ==')
-/* Host 这一份读用 `error` 说"为什么没读成"（面板那几位读用 `reason`）。客户端曾经
-   只认后者，"还不知道这个会话的工作区在哪"那一句因此永远说不出口 —— 每种失败都被
-   说成"不是一个 Git 仓库"。这里两种失败各走一遍，把那条路钉住。 */
-const openWorktreesTab = async (label) => {
-  const first = await renderUntilStable(makeElement(popover, { sessionId: 's-1' }), label)
-  tabNamed(first, '工作树').props.onClick()
-  return await settle(label)
-}
-worktreeReply = { ok: false, repo: null, error: 'no-path', current: '', pool: '.agents/worktrees', entries: [] }
-const noPathTree = await openWorktreesTab('pop-nopath')
-console.log('  没有工作区:', JSON.stringify(textOf(noPathTree).slice(0, 90)))
-ok('没有工作区时说的是"还不知道这个会话的工作区在哪"',
-  textOf(noPathTree).indexOf('还不知道这个会话的工作区在哪') >= 0)
-
-worktreeReply = { ok: false, repo: '/tmp/ws', error: 'not-a-repository', noGit: false, current: '', pool: '.agents/worktrees', entries: [] }
-const notRepoTree = await openWorktreesTab('pop-notrepo')
-console.log('  不是仓库:', JSON.stringify(textOf(notRepoTree).slice(0, 90)))
-ok('不是仓库时说的是仓库的事，不再提工作区',
-  textOf(notRepoTree).indexOf('不是一个 Git 仓库') >= 0
-  && textOf(notRepoTree).indexOf('还不知道这个会话的工作区在哪') < 0)
-
-worktreeReply = { ok: false, repo: '/tmp/ws', error: 'not-a-repository', noGit: true, current: '', pool: '.agents/worktrees', entries: [] }
-const noGitTree = await openWorktreesTab('pop-nogit')
-ok('机器上没有 git 时说的是 git 的事',
-  textOf(noGitTree).indexOf('这台机器上找不到 git') >= 0)

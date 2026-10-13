@@ -34,6 +34,28 @@ async function authorsSnapshot(input) {
   return await cached(repo, 'authors', function () { return readAuthors(input, repo) })
 }
 
+/* ── 配了哪些远端 ──
+
+   `refs/remotes/*` 说的是「取回来过哪些远端分支」，不是「配了哪些远端」：一个刚
+   `git remote add` 完、还没 fetch 过的仓库，ref 列表是空的，而它明明有远端；反过来，
+   一个远端被删掉之后，它留下的远程跟踪分支还会在列表里待一阵。要回答「这个仓库到底
+   有没有远端」，只能问 git 自己的配置 —— `git remote` 就是那个答案（git 会顺带把
+   worktree 的 commondir、config 里的 include 都算进去，读配置文件是读不出来的）。
+
+   一次进程，进 `refs` 这一份答复：面板头部那三个网络按钮从这里知道该不该按、按下去
+   要跟谁说话（见 80-rpc.js 的 `noRemoteReply`）。 */
+async function readRemoteNames(args) {
+  const names = []
+  const listed = await gitC(args, ['remote'], null, {})
+  if (listed.exitCode !== 0) return names
+  const rows = listed.stdout.split('\n')
+  for (let i = 0; i < rows.length; i += 1) {
+    const name = rows[i].trim()
+    if (name.length > 0 && names.indexOf(name) < 0) names.push(name)
+  }
+  return names
+}
+
 async function readRefs(input, repo) {
   const args = argsFor(input)
   /* The tracking columns matter as much as the names here: the tree is where a
@@ -45,7 +67,7 @@ async function readRefs(input, repo) {
     '--format=%(refname)%1f%(refname:short)%1f%(HEAD)%1f%(objectname:short)%1f%(upstream:short)%1f%(upstream:track)%1f%(committerdate:unix)',
     'refs/heads', 'refs/remotes'], null, {})
   if (listed.exitCode !== 0) {
-    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, noGit: gitMissing(listed), current: [], local: [], remote: [] }
+    return { ok: false, repo: repo === undefined ? null : repo, error: 'not-a-repository', stderr: listed.stderr, noGit: gitMissing(listed), current: [], local: [], remote: [], remoteNames: [] }
   }
   const local = []
   const current = []
@@ -83,7 +105,10 @@ async function readRefs(input, repo) {
     const unborn = await headBranchWithoutCommit(args)
     if (unborn.length > 0) current.push(unborn)
   }
-  return { ok: true, repo: listed.cwd, current: current, local: local, remote: remote }
+  /* 配过的远端问的是 git 的配置，和上面那份 ref 列表没有关系，所以单独一次进程；
+     它只在这份答复里出现一次（面板是按仓库缓存这次读的）。 */
+  const remoteNames = await readRemoteNames(args)
+  return { ok: true, repo: listed.cwd, current: current, local: local, remote: remote, remoteNames: remoteNames }
 }
 
 async function refsSnapshot(input) {
@@ -172,9 +197,18 @@ async function readBranches(input, repo) {
       })
     }
   }
+  /* ── 远端那一组：**全部**远端跟踪分支 ──
+
+     本地已有同名分支的**也列**（带一个 sameAsLocal 标记，客户端把那几行压暗一档）。原来这里
+     把同名的丢掉，理由是「两行都叫 dev 就是多一行」；但这一组要一直是「远端有什么」的答案 ——
+     IDEA 的 Remote 节点也是全都列。丢掉还有个更糟的后果：一个把什么都推上去的仓库里，这一组
+     会**整组消失**，读者只能问「远端组呢」。两种行并不冲突：本地那一行的右边写的是它的上游
+     （origin/dev），远端这一行写的是远端名（origin）。 */
   const remotes = []
   for (let i = 0; i < remoteRows.length; i += 1) {
-    if (localNames.indexOf(remoteRows[i].name) < 0) remotes.push(remoteRows[i])
+    const row = remoteRows[i]
+    row.sameAsLocal = localNames.indexOf(row.name) >= 0
+    remotes.push(row)
   }
   const prev = await git(args, ['rev-parse', '--abbrev-ref', '@{-1}'], null, {})
   const previous = prev.exitCode === 0 ? prev.stdout.trim() : ''

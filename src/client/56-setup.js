@@ -5,6 +5,9 @@
       /* 路径已经确定，只是这里没有仓库：没有要解释的规则，也没有要填的东西。
          不劝人换目录，也不让人把已经显示在上面的路径再抄一遍。 */
       'not-a-repo': { heading: '这个目录不是 Git 仓库', hint: '', editable: false },
+      /* 路径本身没问题，只是它不在这个会话的工作区里面：插件只读会话工作区里的仓库
+         （见 Host 的 `repoOutsideWorkspace`）。所以这一页能改 —— 改回工作区里的路径。 */
+      'outside': { heading: '这个路径不在会话工作区里', hint: '', editable: true },
       /* 目录是对的，机器上少了东西：这个页面不能改路径，也不能初始化 —— 两件事
          都救不了这个状态，而 `git init` 只会再失败一次。留一个「打开这个目录」
          当作装好 git 之后的重试。 */
@@ -38,6 +41,14 @@
          失败再演一次。 */
       const canInit = info.init !== false
       const target = draft.trim()
+      /* 「不在工作区里」要说清是哪个工作区：那句提示得带上路径。 */
+      const workspace = props.workspace === undefined ? '' : props.workspace
+      const hint = props.reason === 'outside' && workspace.length > 0
+        ? '这个会话的工作区是 ' + workspace + '。只有它里面的仓库能在这里打开 —— 要读别处的仓库，先让会话切到那个目录。'
+        : info.hint
+      /* 这个工作区下面扫到的仓库（Host 的 `git/repos`）：不是仓库的目录，第一件想知道的
+         就是「那这里面有仓库吗、在哪」。有就一行一个列出来，点一下就是打开它。 */
+      const roots = props.roots === undefined || props.roots === null ? [] : props.roots
 
       const open = function () {
         if (target.length === 0) return
@@ -65,7 +76,25 @@
       return h('div', { className: 'dsh-git-setup' },
         h('div', { className: 'dsh-git-setup-h' }, info.heading),
         h('div', { className: 'dsh-git-setup-path' }, props.initial.length > 0 ? props.initial : '（没能确定路径）'),
-        info.hint.length > 0 ? h('div', { className: 'dsh-git-hint' }, info.hint) : null,
+        hint.length > 0 ? h('div', { className: 'dsh-git-hint' }, hint) : null,
+        roots.length === 0 ? null : h('div', { className: 'dsh-git-setup-roots' },
+          h('div', { key: 'h', className: 'dsh-git-setup-roots-h' },
+            '这个工作区下面找到 ' + String(roots.length) + ' 个仓库'
+              + (props.truncated === true ? '（只列出前 ' + String(roots.length) + ' 个）' : '') + '，点一个打开：'),
+          roots.map(function (root) {
+            const path = text(root.path)
+            const label = text(root.rel).length > 0 ? text(root.rel) : path
+            const branch = text(root.branch)
+            return h('button', {
+              key: path, type: 'button', className: 'dsh-git-setup-root',
+              'aria-label': '打开 ' + path + (branch.length > 0 ? '（分支 ' + branch + '）' : ''),
+              onClick: function () { props.onOpen(path) },
+            },
+              h('span', { key: 'i', className: 'dsh-git-setup-root-ico' }, h(Icon, { name: 'folder', size: 13 })),
+              h('span', { key: 'n', className: 'dsh-git-setup-root-n' }, label),
+              branch.length > 0 ? h('span', { key: 'b', className: 'dsh-git-setup-root-b' }, branch) : null,
+              h('span', { key: 'p', className: 'dsh-git-setup-root-p' }, path))
+          })),
         props.stderr.length > 0 ? h('div', { className: 'dsh-git-hint dsh-git-error dsh-git-mono' }, props.stderr) : null,
         editable ? clearable('path', h('input', {
           className: 'dsh-git-input',

@@ -4,6 +4,58 @@
        would be a workaround around its own tree, not a feature. */
     const SETTINGS_NAV_LABEL = 'dsh-git-idea配置'
 
+    /* ── 设置页的三块积木 ──
+
+       一张卡片 = 一件事（插件配置 / 远程同步 / git 位置 / 提交身份 / 本浏览器），
+       卡片里每一行是**同一个两列网格**：左列名字，右列控件，控件自己的说明跟在控件
+       下面（还在右列里）。
+
+       以前每一行是「flex + 可换行 + 170px 的标签」：说明文字一换行就落回行首，于是
+       控件在 260px、说明却从 40px 开始 —— 整页的左边缘是锯齿形的。现在说明留在右列，
+       所有控件共用同一条竖线。布尔行也走同一个网格（勾选框占右列），所以「勾选框在
+       最左边、输入框在中间」那种两套左边距也没有了。 */
+    function setCard(title, desc, children) {
+      const body = []
+      for (let i = 0; i < children.length; i += 1) if (children[i] != null) body.push(children[i])
+      return h('section', { className: 'dsh-git-set-card' },
+        h('div', { className: 'dsh-git-set-card-h' }, title),
+        desc.length > 0 ? h('div', { className: 'dsh-git-set-card-d' }, desc) : null,
+        body.length > 0 ? h('div', { className: 'dsh-git-set-card-b' }, body) : null)
+    }
+
+    function setRow(label, control, hint) {
+      return h('div', { className: 'dsh-git-set-row' },
+        h('span', { className: 'dsh-git-set-label' }, label),
+        h('div', { className: 'dsh-git-set-ctl' },
+          control,
+          hint != null && hint.length > 0 ? h('div', { className: 'dsh-git-set-hint' }, hint) : null))
+    }
+
+    /* 一行布尔：勾选框和它的说明都落在右列，和上面那些输入框同一条竖线。 */
+    function setCheck(checked, disabled, onChange, label, hint) {
+      return h('div', { className: 'dsh-git-set-row' },
+        h('span', { className: 'dsh-git-set-label' }, ''),
+        h('div', { className: 'dsh-git-set-ctl' },
+          h('label', { className: 'dsh-git-set-check' },
+            h('input', { type: 'checkbox', checked: checked, disabled: disabled === true, onChange: onChange }),
+            h('span', null, label)),
+          hint != null && hint.length > 0 ? h('div', { className: 'dsh-git-set-hint' }, hint) : null))
+    }
+
+    /* 整行只有一句话的行（写入结果、失败原因）。名字不叫 setNote：提交身份那一组里
+       有个同名的 state setter，组件内会被它遮住（第一版就是这么丢的）。 */
+    function noteRow(text, extra) {
+      return h('div', { className: 'dsh-git-set-row' },
+        h('span', { className: 'dsh-git-set-label' }, ''),
+        h('div', { className: 'dsh-git-set-ctl' },
+          h('div', { className: extra === undefined ? 'dsh-git-set-hint' : extra }, text)))
+    }
+
+    /* 控件 + 一小段跟在旁边的字（「秒检查一次」、按钮 + 说明）。 */
+    function setInline(children) {
+      return h('div', { className: 'dsh-git-set-inline' }, children)
+    }
+
     /* ── 提交身份：写在 git 自己的配置里 ──
 
        这一组和上面那个插件配置文件不是一回事：`user.name` / `user.email` 是 git 的
@@ -68,6 +120,7 @@
         const from = text(origin)
         return from.length === 0 ? one : (one + '（来自 ' + from + '）')
       }
+      /* 两个范围合成一行：它们是同一个问题的两个答案（写进哪里），分两行时右列会空一格。 */
       const toggle = function (next) {
         return h('label', { className: 'dsh-git-set-check' },
           h('input', {
@@ -76,14 +129,10 @@
           }),
           h('span', null, next === 'global' ? '这台机器的所有仓库（--global）' : '只对这个仓库（--local）'))
       }
+      const repo = text(state != null ? state.repo : '')
 
-      return h('div', null,
-        h('div', { className: 'dsh-git-set-group' }, '提交身份（写在 git 自己的配置里）'),
-        h('div', { className: 'dsh-git-set-hint' },
-          'git 不知道作者是谁时会拒绝提交，而这台机器上终端里的 git 也用同一份配置。面板空着的框一个字节都不写。'),
-
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '此刻生效'),
+      return setCard('提交身份', '写在 git 自己的配置里：终端里的 git、IDEA、钩子看到的是同一份。空着的框一个字节都不写。', [
+        setRow('此刻生效',
           h('span', { className: missing === true ? 'dsh-git-set-hint dsh-git-warn' : 'dsh-git-set-hint' },
             ready !== true ? '正在读取…'
               : (missing === true
@@ -95,43 +144,37 @@
                   : (state.nameMissing === true ? '名字' : '邮箱')) + ' —— 提交会被 git 拒绝'
                 : (source(state.name, state.nameOrigin) + ' · ' + source(state.email, state.emailOrigin))))),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '名字'),
-          h('input', {
-            className: 'dsh-git-input dsh-git-set-input',
-            placeholder: '提交里显示的名字',
-            value: name,
-            onChange: function (event) { setName(event.target.value) },
-          })),
+        setRow('名字', h('input', {
+          className: 'dsh-git-input dsh-git-set-input',
+          placeholder: '提交里显示的名字',
+          value: name,
+          onChange: function (event) { setName(event.target.value) },
+        })),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '邮箱'),
-          h('input', {
-            className: 'dsh-git-input dsh-git-set-input',
-            placeholder: 'you@example.com',
-            value: email,
-            onChange: function (event) { setEmail(event.target.value) },
-          })),
+        setRow('邮箱', h('input', {
+          className: 'dsh-git-input dsh-git-set-input',
+          placeholder: 'you@example.com',
+          value: email,
+          onChange: function (event) { setEmail(event.target.value) },
+        })),
 
-        h('div', { className: 'dsh-git-set-row' }, h('span', { className: 'dsh-git-set-label' }, '写进哪里'), toggle('global')),
-        h('div', { className: 'dsh-git-set-row' }, h('span', { className: 'dsh-git-set-label' }, ''), toggle('local')),
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, ''),
-          h('span', { className: 'dsh-git-set-hint' },
-            text(state != null ? state.repo : '').length > 0
-              ? ('这个仓库 = ' + state.repo)
-              : '这个页面还不知道是哪个会话的仓库 —— 先打开一次面板（或输入框旁的 Git 按钮），或只写全局那一份')),
+        setRow('写进哪里',
+          h('div', { className: 'dsh-git-set-stack' }, [toggle('global'), toggle('local')]),
+          repo.length > 0
+            ? ('这个仓库 = ' + repo)
+            : '这个页面还不知道是哪个会话的仓库 —— 先打开一次面板（或输入框旁的 Git 按钮），或只写全局那一份'),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('button', {
+        setRow('',
+          setInline([h('button', {
             type: 'button', className: 'dsh-git-btn dsh-git-primary',
-            disabled: busy || (scope === 'local' && text(state != null ? state.repo : '').length === 0),
+            disabled: busy || (scope === 'local' && repo.length === 0),
             onClick: save,
-          }, busy ? '写入中…' : '写入 git 配置'),
-          h('span', { className: 'dsh-git-set-hint' }, '写进去就是以后所有提交的作者，别的工具也看得到')),
+          }, busy ? '写入中…' : '写入 git 配置')]),
+          '写进去就是以后所有提交的作者，别的工具也看得到'),
 
-        note.length > 0 ? h('div', { className: 'dsh-git-set-row dsh-git-set-hint' }, note) : null,
-        problem.length > 0 ? h('div', { className: 'dsh-git-set-row dsh-git-error' }, problem) : null)
+        note.length > 0 ? noteRow(note) : null,
+        problem.length > 0 ? noteRow(problem, 'dsh-git-error') : null,
+      ])
     }
 
     /* ── git 位置：这台机器上的哪个 git ──
@@ -175,24 +218,23 @@
             ? '设置里写的这个路径不可用：它不存在，或者不是可执行文件。面板里的每条命令都会失败。'
             : '这台机器的 PATH 上没有 git。装上它，或者在下面写一个绝对路径。'))
 
-      return h('div', null,
-        h('div', { className: 'dsh-git-set-group' }, 'git 位置'),
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '可执行文件'),
-          h('input', {
-            className: 'dsh-git-input dsh-git-set-input',
-            placeholder: '留空 = 用 PATH 里的 git',
-            value: draftPath,
-            onChange: function (event) { commitPath(event.target.value) },
-          })),
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, ''),
-          h('span', { className: found === true ? 'dsh-git-set-hint' : 'dsh-git-set-hint dsh-git-warn' }, verdict)),
+      return setCard('git 位置', '面板的每一条命令都以这一个词开头；它装在 PATH 之外时（Homebrew 前缀、IDE 自带的 git、nix profile）写绝对路径。', [
+        setRow('可执行文件', h('input', {
+          className: 'dsh-git-input dsh-git-set-input dsh-git-set-input-wide',
+          placeholder: '留空 = 用 PATH 里的 git',
+          value: draftPath,
+          onChange: function (event) { commitPath(event.target.value) },
+        })),
+
+        setRow('', h('span', { className: found === true ? 'dsh-git-set-hint' : 'dsh-git-set-hint dsh-git-warn' }, verdict)),
+
         shellRow(tool),
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, ''),
+
+        setRow('', setInline([
           h('button', { type: 'button', className: 'dsh-git-btn', onClick: probe }, '再检查一次'),
-          h('span', { className: 'dsh-git-set-hint' }, '面板读、写、初始化用的都是这一个')))
+          h('span', { className: 'dsh-git-set-hint' }, '面板读、写、初始化用的都是这一个'),
+        ])),
+      ])
     }
 
     /* ── 这些命令由谁读 ──
@@ -206,8 +248,7 @@
       const shell = tool.shell
       if (shell.kind === 'native') return null
       const none = shell.kind !== 'git-sh'
-      return h('div', { className: 'dsh-git-set-row' },
-        h('span', { className: 'dsh-git-set-label' }, '读命令的 shell'),
+      return setRow('读命令的 shell',
         h('span', { className: none ? 'dsh-git-set-hint dsh-git-warn' : 'dsh-git-set-hint' },
           none
             ? 'Windows 上这个插件的命令要由 POSIX shell 读，而没找到 Git for Windows 的 sh.exe：'
@@ -246,6 +287,15 @@
         set(key, isNaN(n) ? min : n)
       }
       const watchOff = draft.watchEnabled !== true
+      const option = function (one) {
+        return h('option', { key: String(one.value), value: String(one.value) }, one.label)
+      }
+      const select = function (value, options) {
+        return h('select', {
+          className: 'dsh-git-input dsh-git-set-input',
+          value: value,
+        }, options.map(option))
+      }
 
       return h('div', {
         className: 'dsh-git-set',
@@ -255,145 +305,151 @@
         },
       },
         h('div', { className: 'dsh-git-set-h' }, SETTINGS_NAV_LABEL),
-        h('div', { className: 'dsh-git-set-hint' }, '分两层：跟随插件的配置，和只影响本浏览器的外观与节奏。'),
+        h('div', { className: 'dsh-git-set-intro' }, '分两层：跟随插件的配置（写进部署目录旁的 json，换浏览器也一致），和只影响本浏览器外观与节奏的设置。'),
 
-        h('div', { className: 'dsh-git-set-group' }, '插件配置'),
-        h('div', { className: 'dsh-git-set-hint' },
+        /* ── 插件自己的配置 ── */
+        setCard('插件配置',
           pluginConfigPath.length > 0
-            ? ('保存在 ' + pluginConfigPath + ' —— 换浏览器也一致')
-            : '保存在部署配置目录旁的 dsh-git-idea.json —— 换浏览器也一致'),
+            ? ('保存在 ' + pluginConfigPath + '，跟着插件走')
+            : '保存在部署配置目录旁的 dsh-git-idea.json，跟着插件走', [
+          setRow('初始化仓库的默认分支',
+            clearable('init', h('input', {
+              className: 'dsh-git-input dsh-git-set-input',
+              placeholder: 'main',
+              value: pdraft.initBranch,
+              onChange: function (event) { setPlugin('initBranch', event.target.value) },
+            }), pdraft.initBranch.length > 0, function () { setPlugin('initBranch', '') }, 'dsh-git-clearable-set'),
+            '引导页「在此初始化仓库」会用它执行 git init -b；留空则用 git 自己的默认值'),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '初始化仓库的默认分支'),
-          clearable('init', h('input', {
-            className: 'dsh-git-input dsh-git-set-input',
-            placeholder: 'main',
-            value: pdraft.initBranch,
-            onChange: function (event) { setPlugin('initBranch', event.target.value) },
-          }), pdraft.initBranch.length > 0, function () { setPlugin('initBranch', '') }, 'dsh-git-clearable-set'),
-          h('span', { className: 'dsh-git-set-hint' }, '引导页「在此初始化仓库」会用它执行 git init -b；留空则用 git 自己的默认值')),
+          setCheck(pdraft.cherryPickRecord === true, false,
+            function (event) { setPlugin('cherryPickRecord', event.target.checked) },
+            'cherry-pick 时记录来源（-x）'),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('label', { className: 'dsh-git-set-check' },
-            h('input', {
-              type: 'checkbox', checked: pdraft.cherryPickRecord === true,
-              onChange: function (event) { setPlugin('cherryPickRecord', event.target.checked) },
-            }),
-            h('span', null, 'cherry-pick 时记录来源（-x）'))),
+          /* 一个工作区里的几个仓库：工作区自己不是仓库时，插件往下找几层（见 69-repos.js）。
+             0 是「不找」，也就是这个键出现之前的行为：只认工作区那一个目录。 */
+          setRow('往下找几层仓库',
+            h('select', {
+              className: 'dsh-git-input dsh-git-set-input',
+              value: String(pdraft.repoScanDepth),
+              onChange: function (event) { setPlugin('repoScanDepth', Number(event.target.value)) },
+            }, [
+              { value: 0, label: '不找（只看工作区那一个目录）' },
+              { value: 1, label: '1 层（只看直接子目录）' },
+              { value: 2, label: '2 层（默认）' },
+              { value: 3, label: '3 层' },
+            ].map(option)),
+            '再往里的检出不是「另一个仓库」，是它自己的内部结构'),
 
-        h('div', { className: 'dsh-git-set-group' }, '远程同步'),
-        h('div', { className: 'dsh-git-set-hint' },
-          '这三条是面板给 git 的实参，不是 git 自己的设置：下面没勾的，就是 git 原本的行为（`push.default`、`pull.rebase` 照旧生效）。'),
+          pluginConfigError.length > 0 ? noteRow('保存失败：' + pluginConfigError, 'dsh-git-error') : null,
+        ]),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('label', { className: 'dsh-git-set-check' },
-            h('input', {
-              type: 'checkbox', checked: pdraft.fetchPrune !== false,
-              onChange: function (event) { setPlugin('fetchPrune', event.target.checked) },
-            }),
-            h('span', null, 'fetch 时删掉远端已经删了的远程分支（--prune）'))),
-
-        h('div', { className: 'dsh-git-set-row' },
-          h('label', { className: 'dsh-git-set-check' },
-            h('input', {
-              type: 'checkbox', checked: pdraft.pullRebase === true,
-              onChange: function (event) { setPlugin('pullRebase', event.target.checked) },
-            }),
-            h('span', null, 'pull 用 rebase 而不是 merge（--rebase）'))),
-
-        h('div', { className: 'dsh-git-set-row' },
-          h('label', { className: 'dsh-git-set-check' },
-            h('input', {
-              type: 'checkbox', checked: pdraft.pushSetUpstream === true,
-              onChange: function (event) { setPlugin('pushSetUpstream', event.target.checked) },
-            }),
-            h('span', null, '推送没有上游的分支时直接推上去并设上游（push -u）'))),
-
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '也就是'),
-          h('span', { className: 'dsh-git-set-hint' },
-            'git fetch --all' + (pdraft.fetchPrune !== false ? ' --prune' : '')
-            + ' · git pull' + (pdraft.pullRebase === true ? ' --rebase' : '')
-            + ' · ' + (pdraft.pushSetUpstream === true ? 'git push -u <remote> <branch>（没有上游时）' : 'git push（没有上游时由面板问一句）'))),
+        /* ── 面板给 git 的实参 ── */
+        setCard('远程同步',
+          '这三条是面板给 git 的实参，不是 git 自己的设置：下面没勾的，就是 git 原本的行为（push.default、pull.rebase 照旧生效）。', [
+          setCheck(pdraft.fetchPrune !== false, false,
+            function (event) { setPlugin('fetchPrune', event.target.checked) },
+            'fetch 时删掉远端已经删了的远程分支（--prune）'),
+          setCheck(pdraft.pullRebase === true, false,
+            function (event) { setPlugin('pullRebase', event.target.checked) },
+            'pull 用 rebase 而不是 merge（--rebase）'),
+          setCheck(pdraft.pushSetUpstream === true, false,
+            function (event) { setPlugin('pushSetUpstream', event.target.checked) },
+            '推送没有上游的分支时直接推上去并设上游（push -u）'),
+          setRow('也就是',
+            h('code', { className: 'dsh-git-set-code' },
+              'git fetch --all' + (pdraft.fetchPrune !== false ? ' --prune' : '')
+              + ' · git pull' + (pdraft.pullRebase === true ? ' --rebase' : '')
+              + ' · ' + (pdraft.pushSetUpstream === true ? 'git push -u <remote> <branch>（没有上游时）' : 'git push（没有上游时由面板问一句）'))),
+        ]),
 
         h(GitToolchainGroup),
-
-        pluginConfigError.length > 0
-          ? h('div', { className: 'dsh-git-set-row dsh-git-error' }, '保存失败：' + pluginConfigError)
-          : null,
-
         h(GitIdentityGroup),
 
-        h('div', { className: 'dsh-git-set-group' }, '本浏览器'),
-        h('div', { className: 'dsh-git-set-hint' }, '这些只是外观和使用节奏，换浏览器各管各的。'),
+        /* ── 只写这个浏览器 ── */
+        setCard('本浏览器', '只写当前浏览器的 localStorage：这些是外观和使用节奏，换浏览器各管各的。', [
+          setCheck(draft.watchEnabled === true, false,
+            function (event) { set('watchEnabled', event.target.checked) },
+            '后台监测仓库变化，发现变化就自动刷新'),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('label', { className: 'dsh-git-set-check' },
-            h('input', {
-              type: 'checkbox', checked: draft.watchEnabled === true,
-              onChange: function (event) { set('watchEnabled', event.target.checked) },
-            }),
-            h('span', null, '后台监测仓库变化，发现变化就自动刷新'))),
+          setRow('面板打开时每',
+            setInline([
+              h('input', {
+                className: 'dsh-git-input dsh-git-set-num', type: 'number', min: 1, max: 120,
+                disabled: watchOff,
+                value: String(draft.watchFastSec),
+                onChange: function (event) { num('watchFastSec', event.target.value, 1, 120) },
+              }),
+              h('span', { className: 'dsh-git-set-hint' }, '秒检查一次'),
+            ])),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '面板打开时每'),
-          h('input', {
-            className: 'dsh-git-input dsh-git-set-num', type: 'number', min: 1, max: 120,
-            disabled: watchOff,
-            value: String(draft.watchFastSec),
-            onChange: function (event) { num('watchFastSec', event.target.value, 1, 120) },
-          }),
-          h('span', { className: 'dsh-git-set-hint' }, '秒检查一次')),
+          setRow('只有按钮时每',
+            setInline([
+              h('input', {
+                className: 'dsh-git-input dsh-git-set-num', type: 'number', min: 2, max: 600,
+                disabled: watchOff,
+                value: String(draft.watchSlowSec),
+                onChange: function (event) { num('watchSlowSec', event.target.value, 2, 600) },
+              }),
+              h('span', { className: 'dsh-git-set-hint' }, '秒检查一次'),
+            ])),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '只有按钮时每'),
-          h('input', {
-            className: 'dsh-git-input dsh-git-set-num', type: 'number', min: 2, max: 600,
-            disabled: watchOff,
-            value: String(draft.watchSlowSec),
-            onChange: function (event) { num('watchSlowSec', event.target.value, 2, 600) },
-          }),
-          h('span', { className: 'dsh-git-set-hint' }, '秒检查一次')),
+          setCheck(draft.watchChip === true, watchOff,
+            function (event) { set('watchChip', event.target.checked) },
+            '面板关着时也监测，让按钮上的分支名和改动数保持实时'),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('label', { className: 'dsh-git-set-check' },
-            h('input', {
-              type: 'checkbox', checked: draft.watchChip === true, disabled: watchOff,
-              onChange: function (event) { set('watchChip', event.target.checked) },
-            }),
-            h('span', null, '面板关着时也监测，让按钮上的分支名和改动数保持实时'))),
+          setCheck(draft.hoverSwitch === true, false,
+            function (event) { set('hoverSwitch', event.target.checked) },
+            '鼠标停在输入框旁的 Git 按钮上，弹出分支切换卡片（点一下就切）'),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('label', { className: 'dsh-git-set-check' },
-            h('input', {
-              type: 'checkbox', checked: draft.hoverSwitch === true,
-              onChange: function (event) { set('hoverSwitch', event.target.checked) },
-            }),
-            h('span', null, '鼠标停在输入框旁的 Git 按钮上，弹出分支切换卡片（点一下就切）'))),
+          /* 变更页开在「树」还是「扁平」：面板标题栏右边那颗切换按钮改的就是这一个
+             值，设置页里一直缺它一格 —— README 却一直把它列在「本浏览器」这张表里。 */
+          setRow('变更页视图',
+            h('select', {
+              className: 'dsh-git-input dsh-git-set-input',
+              value: draft.changesView === 'flat' ? 'flat' : 'tree',
+              onChange: function (event) { set('changesView', event.target.value) },
+            }, [
+              { value: 'tree', label: '目录树' },
+              { value: 'flat', label: '平铺列表' },
+            ].map(option)),
+            '面板「变更」页右上角那颗切换按钮也是它'),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '面板尺寸'),
-          h('span', { className: 'dsh-git-set-hint' },
-            panelSize.w > 0 || panelSize.h > 0
-              ? (String(panelSize.w) + ' × ' + String(panelSize.h) + ' 像素')
-              : '跟随输入框宽度 / 74vh'),
-          h('button', {
-            type: 'button', className: 'dsh-git-btn',
-            onClick: function () { publishPanelSize({ w: 0, h: 0 }); savePanelSize() },
-          }, '恢复默认尺寸')),
+          setRow('面板尺寸',
+            setInline([
+              h('span', { className: 'dsh-git-set-hint' },
+                panelSize.w > 0 || panelSize.h > 0
+                  ? (String(panelSize.w) + ' × ' + String(panelSize.h) + ' 像素')
+                  : '跟随输入框宽度 / 74vh'),
+              h('button', {
+                type: 'button', className: 'dsh-git-btn',
+                onClick: function () { publishPanelSize({ w: 0, h: 0 }); savePanelSize() },
+              }, '恢复默认尺寸'),
+            ])),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('span', { className: 'dsh-git-set-label' }, '切换器的记忆'),
-          h('span', { className: 'dsh-git-set-hint' }, '最近使用与收藏只写在这个浏览器里'),
-          h('button', {
-            type: 'button', className: 'dsh-git-btn',
-            onClick: function () { clearBranchMemory() },
-          }, '清除最近使用与收藏')),
+          setRow('切换器的记忆',
+            setInline([
+              h('span', { className: 'dsh-git-set-hint' }, '最近使用与收藏只写在这个浏览器里'),
+              h('button', {
+                type: 'button', className: 'dsh-git-btn',
+                onClick: function () { clearBranchMemory() },
+              }, '清除最近使用与收藏'),
+            ])),
 
-        h('div', { className: 'dsh-git-set-row' },
-          h('button', {
-            type: 'button', className: 'dsh-git-btn',
-            onClick: function () { apply(Object.assign({}, SETTINGS_DEFAULTS)) },
-          }, '本浏览器全部恢复默认')))
+          /* 「本浏览器」这一层其实是三样东西：上面这些外观与节奏（一份设置记录）、
+             面板尺寸、切换器的收藏与排序。既然按钮说的是「全部」，那就得是全部 ——
+             以前它只写回第一样，点完之后尺寸和收藏还在，而另外两个按钮各自只管一件。 */
+          setRow('',
+            setInline([
+              h('button', {
+                type: 'button', className: 'dsh-git-btn',
+                onClick: function () {
+                  apply(Object.assign({}, SETTINGS_DEFAULTS))
+                  publishPanelSize({ w: 0, h: 0 })
+                  savePanelSize()
+                  clearBranchMemory()
+                },
+              }, '本浏览器全部恢复默认'),
+              h('span', { className: 'dsh-git-set-hint' }, '外观与节奏、面板尺寸、切换器的收藏与排序 —— 一起回到初始状态'),
+            ])),
+        ]))
     }
-

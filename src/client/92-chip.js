@@ -45,6 +45,10 @@
       const repoVersion = useRepoApplied()
       const watched = sessionRepo(props.sessionId)
       const sessionId = props.sessionId
+      /* 这个工作区里有哪几个仓库（面板或 chip 自己读回来的那一份清单，见 10-state.js）：
+         工作区自己不是仓库、下面却有仓库时，chip 上那句「不是仓库」变成一个数字。 */
+      useRootsVersion()
+      const roots = sessionRoots(sessionId)
       const repo = info.repo.length > 0 ? info.repo : watched
       const record = treeRecord(repo)
       const known = record !== null
@@ -119,6 +123,15 @@
               reason: data != null ? text(data.reason) : '',
               worktree: null,
             }
+            /* 这个目录不是仓库：顺口问一句「那它下面有没有仓库」。一句话的代价是这个插件
+
+               里最便宜的一次读（Host 一个进程，不起 git），换来的是一颗能直接点开的 chip。 */
+            if (chipLabels[sessionId].reason === 'not-a-repo' && sessionRoots(sessionId) === null && rootsRouteGone() !== true) {
+              callHost('git/repos', { sessionId: sessionId }).then(function (list) {
+                if (alive !== true) return
+                rememberRoots(sessionId, list)
+              }, function (failure) { rootsRouteRefused(failure) })
+            }
           }
           setInfo(chipLabels[sessionId])
         }
@@ -189,25 +202,33 @@
       }, [watched, repoVersion, isOpen, sessionId, reloadAt, sessionDir])
 
       const isRepo = info.phase === 'repo'
+      /* 不是仓库，但工作区下面有仓库：写出来有几个（点开就是那张清单，挑一个打开）。 */
+      const rootCount = roots !== null && Array.isArray(roots.roots) ? roots.roots.length : 0
+      const idleWord = info.reason === 'not-a-repo' && rootCount > 0
+        ? String(rootCount) + ' 个仓库'
+        : chipWord(info.reason)
       /* 链接工作树：**前面那颗图标自己换**，不在后面再挂一颗。同一份改动在源仓库
          和工作树里是两个不同的工作区，读者要能一眼看出屏幕上这份是哪一个；而第二
          颗图标的代价不只是丑 —— 两个 flex 兄弟读起来像两个按钮，这个 chip 从头到
          尾只有一个按钮（同 `BranchIcon` 里 `plus` 那段：一个字形读起来是一个按钮）。 */
       const worktree = isRepo && info.worktree != null ? info.worktree : null
-      /* ── 「还在核对」这件事由**最前面那颗图标**说，不在后面加字 ──
+      /* ── 转圈只说「这一下很快」，核对的事交给**数字那一格** ──
 
-         还没量出来、或者这一份读数该完整重来一遍时（due —— 它含"那一次全树读
-         正在飞"），图标转圈；切分支时也转（同一个动作，读者不用分两种画法）。
-         于是屏幕上只剩下「分支名 + 数字」：转与不转，就是"还在核对"和"核对过了"
-         的区别。这比在后面长出一段「正在核对…」好 —— 后面那段字还会把分支名往
-         左边挤（见截图里那一条 chip）。
+         以前"还在核对"也由最前面那颗图标说，而它罩着的那一次是**全树读**：大仓库上
+         8–10 秒，加上每次 bump 重判一次，屏幕上就是一颗转很久的圈。现在环只剩一个
+         用途：切换分支（读者自己发起的动作，有始有终，见 70-branchpicker 的
+         `switching`）。
 
-         数字来自全局那一份读数，而不是这次快读 —— 快读根本不带工作区；没量出来
-         和没改动是两件事，所以没量出来时也不谎称「干净」，只是那颗图标在转。 */
-      const reading = isRepo === true && (known !== true || due === true)
-      const spinning = switching !== null || reading
+         "核对完了没有"由数字那一格说，它本来就有这个位置（下面那三条）：核对过 →
+         实心数字；核对过且干净 → 一个徽标都没有；有旧数字、正在重核 → 空心的旧
+         数字；没有可信数字 → 空心的 `…`。都不动，却和"核对过了"分得开。
 
-      /* 前面那一格：忙的时候是那个转圈的圆环，忙完换回该出现的那一颗 —— 在链接
+         这不是把状态藏起来：读屏拿到的是同一句话（下面 aria-label 里的「正在核对
+         改动」），看不见那半格的人一样知道。 */
+      const spinning = switching !== null
+      const counting = isRepo === true && (known !== true || due === true)
+
+      /* 前面那一格：切换分支时是那个转圈的圆环，切完换回该出现的那一颗 —— 在链接
          工作树里是工作树字形（VS Code 的 codicon），否则是分支图标，以及它在"这个
          目录还不是仓库"时才画的那一笔 plus。 */
       const children = [spinning
@@ -217,22 +238,33 @@
                 key: 'icon', size: 14, plus: !isRepo && info.phase === 'none',
               })
             : h(WorktreeIcon, { key: 'icon', size: 14 }))]
-      children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, isRepo ? info.label : chipWord(info.reason)))
-      if (isRepo && known === true && pending > 0) {
+      children.push(h('span', { className: 'dsh-git-chip-label', key: 'label' }, isRepo ? info.label : idleWord))
+      /* 这三条按"这份数字现在有多可信"排：
+         1. 核对过、有改动 —— 实心数字；
+         2. 有旧数字、正在重核 —— 同一个数字空心（`-stale`）；
+         3. 没有可信数字（还没量过，或者上次量出来是干净的而这次正在重核）—— 空心的 `…`。
+         第 3 条不能省成"什么都不画"：干净时的确认态本来就是一个徽标都没有，空格子
+         等于谎称"现在也干净"。这颗雷以前是那颗转圈圆环拆的（gp44 有断言守着）。 */
+      if (isRepo === true && known === true && pending > 0) {
         children.push(h('span', {
           className: 'dsh-git-badge' + (due === true ? ' dsh-git-badge-stale' : ''),
           key: 'badge',
         }, String(pending)))
+      } else if (isRepo === true && (known !== true || due === true)) {
+        children.push(h('span', {
+          className: 'dsh-git-badge dsh-git-badge-pending',
+          key: 'badge',
+        }, '…'))
       }
       return h('button', {
         type: 'button',
         className: 'dsh-git-chip'
           + (isRepo ? ' dsh-git-chip-repo' : ' dsh-git-chip-idle')
           + (isOpen ? ' dsh-git-chip-open' : ''),
-        /* 一句话进 aria-label：读屏听得到，页面上不弹框 —— 图标转圈这件事也得说出来，
+        /* 一句话进 aria-label：读屏听得到，页面上不弹框 —— 空心那一格说的也是这句，
            不然它只对看得见的人存在。 */
-        'aria-label': (isRepo ? info.label : chipWord(info.reason))
-          + (switching !== null ? '（正在切换分支）' : (reading === true ? '（正在核对改动）' : ''))
+        'aria-label': (isRepo ? info.label : idleWord)
+          + (switching !== null ? '（正在切换分支）' : (counting === true ? '（正在核对改动）' : ''))
           + ' —— 点击打开 Git 面板',
         ref: function (node) { chipNode = node },
         onClick: function () { clearHoverTimer(); setSwitchMode(null); setOpen(!isOpen) },

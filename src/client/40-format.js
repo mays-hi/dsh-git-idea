@@ -82,4 +82,22 @@
       if (label.indexOf('tag: ') === 0) return 'tag'
       return 'remote'
     }
+    
+    /* ── 与上游的差异：↓ 落后 / ↑ 领先，带上几个提交 ──
 
+      IDEA 的写法：**能做的事才标出来** —— 蓝色的下箭头是等着拉的，绿色的上箭头是等着推的，
+      数字跟在后面（「落后 3 个」才是读者真正的问题；IDEA 把它放在悬浮里，这里直接写出来）。
+      **与上游一致时一个记号都不写**，没有上游时也一样：屏幕上空着，就是「没有要拉、也没有
+      要推」—— 一个 `=` 之类的记号只会让人问它是什么意思。
+
+      两处画同一个记号（面板左栏的分支行、切分支卡片上的行），所以只说一次；两者的差别只有
+      外面那层行样式，用 `extra` 传进来。 */
+    function abMarks(meta, extra) {
+      const ahead = typeof meta.ahead === 'number' ? meta.ahead : 0
+      const behind = typeof meta.behind === 'number' ? meta.behind : 0
+      const cls = text(extra)
+      const out = []
+      if (behind > 0) out.push(h('span', { key: 'b', className: cls + 'dsh-git-ab dsh-git-ab-in', 'aria-label': '落后上游 ' + String(behind) + ' 个提交，需要拉取' }, '↓' + (behind > 99 ? '99+' : String(behind))))
+      if (ahead > 0) out.push(h('span', { key: 'a', className: cls + 'dsh-git-ab dsh-git-ab-out', 'aria-label': '领先上游 ' + String(ahead) + ' 个提交，需要推送' }, '↑' + (ahead > 99 ? '99+' : String(ahead))))
+      return out
+    }

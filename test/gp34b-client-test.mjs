@@ -244,8 +244,8 @@ let tree = await openSwitcher()
 ok('切换器出现', byClass(tree, 'dsh-git-switch').length === 1)
 ok('搜索框 placeholder 是「搜索分支」', byClass(tree, 'dsh-git-bs-search')[0].props.placeholder === '搜索分支')
 ok('搜索框前面有放大镜', byClass(tree, 'dsh-git-bs-mag').length === 1)
-ok('右侧有排序按钮，按钮上写着自己的模式', byClass(tree, 'dsh-git-bs-sort').length === 1
-  && textOf(sortBtn(tree)).length > 0)
+ok('右侧有排序按钮，模式只给读屏（按钮上只有一个图标）', byClass(tree, 'dsh-git-bs-sort').length === 1
+  && textOf(sortBtn(tree)).length === 0 && ariaOf(sortBtn(tree)).indexOf('当前按') === 0)
 
 console.log('')
 console.log('== 操作区（IDEA 的 Update/Commit/Push 那一栏，chip 化）==')
@@ -253,16 +253,18 @@ const strip = chips(tree)
 console.log('  操作 chip:', JSON.stringify(strip.map(textOf)))
 const stripText = strip.map(textOf).join('|')
 console.log('  strip 文本:', JSON.stringify(stripText))
-ok('chip 是「记号 + 短词」，不再是只有记号的按钮',
+/* 屏幕上只有记号（⇣ / ↓ / ↑ / + / ☆）：完整说法在 aria-label 里，一个字的描述都没有。 */
+ok('chip 皮肤上只有记号，没有短词',
   strip.length === 5 && stripText.indexOf('⇣') === 0
-  && ['获取', '拉取', '推送', '新建分支'].every((w) => stripText.indexOf(w) > 0))
+  && ['获取', '拉取', '推送', '新建分支', '收藏'].every((w) => stripText.indexOf(w) < 0))
 ok('收藏 chip 的记号还在（角标是数字，留着）', ['☆', '★'].indexOf(textOf(strip[4]).charAt(0)) >= 0)
-ok('有 获取/拉取/推送 三个 chip', ['获取', '拉取', '推送'].every((l) => chipWith(tree, l) !== undefined))
+const chipSaying = (t, w) => chips(t).find((c) => ariaOf(c).indexOf(w) >= 0)
+ok('有 获取/拉取/推送 三个 chip（按 aria-label 认）', ['获取', '拉取', '推送'].every((l) => chipSaying(tree, l) !== undefined))
 ok('「回到上一个分支」的 chip 已经去掉了', chipWith(tree, '回到') === undefined && chipWith(tree, '上一个分支') === undefined)
-ok('有「新建分支」chip', chipWith(tree, '新建分支') !== undefined)
+ok('有「新建分支」chip，记号是 +', chipSaying(tree, '新建分支') !== undefined && textOf(chipSaying(tree, '新建分支')) === '+')
 ok('chip 是可点的 button', strip.every((c) => c.type === 'button' && typeof c.props.onClick === 'function'))
-ok('chip 上没有一个原生提示框（话都写在屏幕上）',
-  strip.every((c) => c.props.title === undefined))
+ok('chip 上没有一个原生提示框，也没有一个字的描述',
+  strip.every((c) => c.props.title === undefined) && strip.every((c) => ariaOf(c).length > 0))
 ok('chip 搬进了搜索框那一行（不再有自己的第二排）', headActs(tree) !== undefined
   && byClass(headActs(tree), 'dsh-git-bs-chip').length === strip.length
   && byClass(tree, 'dsh-git-bs-acts-bar').length === 0)
@@ -276,21 +278,21 @@ const iconNameOf = (t) => {
 }
 const sortState = (t) => ({ icon: iconNameOf(t), word: textOf(sortBtn(t)), aria: ariaOf(sortBtn(t)) })
 const s0 = sortState(tree)
-console.log('  现在的图标:', JSON.stringify(s0.icon.slice(0, 24)), ' 词:', JSON.stringify(s0.word))
+console.log('  现在的图标:', JSON.stringify(s0.icon.slice(0, 24)), ' 读屏:', JSON.stringify(s0.aria))
 ok('排序按钮有一个图标', s0.icon.length > 0)
 sortBtn(tree).props.onClick()
 await wait(10)
 tree = await settle('pop')
 const s1 = sortState(tree)
-console.log('  切换后的图标:', JSON.stringify(s1.icon.slice(0, 24)), ' 词:', JSON.stringify(s1.word))
+console.log('  切换后的图标:', JSON.stringify(s1.icon.slice(0, 24)), ' 读屏:', JSON.stringify(s1.aria))
 ok('换模式就换图标', s1.icon !== s0.icon && s1.icon.length > 0)
 /* A→Z 的图标带那两笔 A，时钟的图标带两段圆弧 —— 两者必须互斥 */
 const aOf = (st) => st.icon.indexOf('M2.4 12.2') >= 0
 const clockOf = (st) => st.icon.indexOf('M8 2.8 A5.2') >= 0
 ok('一个是 A→Z，另一个是时钟，不会同时出现', aOf(s0) !== aOf(s1) && clockOf(s0) !== clockOf(s1))
-const nameModeOf = (st) => st.word.indexOf('名称') >= 0
+const nameModeOf = (st) => st.aria.indexOf('按名称排序') >= 0
 ok('按名称的模式配 A→Z 图标', nameModeOf(s0) === aOf(s0) && nameModeOf(s1) === aOf(s1))
-ok('按钮上写的是当前模式，完整说法给读屏', nameModeOf(s1) === true
+ok('模式只说给读屏（按钮上一个字都没有）', nameModeOf(s1) === true && s0.word.length === 0 && s1.word.length === 0
   && s0.aria.indexOf('当前按') === 0 && s1.aria.indexOf('当前按') === 0)
 sortBtn(tree).props.onClick()
 await wait(10)
@@ -352,8 +354,8 @@ const favBtn = (t) => {
 rowWith(tree, 'solo').props.onMouseEnter({ currentTarget: { offsetTop: 60 }, button: 0 })
 await wait(10)
 tree = await settle('pop')
-ok('收藏按钮此时可用，写的是「收藏」', favBtn(tree).props.disabled !== true
-  && textOf(favBtn(tree)).indexOf('收藏') >= 0)
+ok('收藏按钮此时可用，说的是「收藏 solo」', favBtn(tree).props.disabled !== true
+  && ariaOf(favBtn(tree)).indexOf('收藏') >= 0 && ariaOf(favBtn(tree)).indexOf('solo') >= 0)
 favBtn(tree).props.onClick({ stopPropagation() {} })
 await wait(10)
 tree = await settle('pop')
@@ -381,12 +383,12 @@ let box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'push' } })
 await wait(10)
 tree = await settle('pop')
-ok('输入 push 只剩推送 chip', actionChips(tree).length === 1 && textOf(actionChips(tree)[0]).indexOf('推送') >= 0)
+ok('输入 push 只剩推送 chip', actionChips(tree).length === 1 && ariaOf(actionChips(tree)[0]).indexOf('推送') >= 0)
 box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: '拉取' } })
 await wait(10)
 tree = await settle('pop')
-ok('输入「拉取」命中拉取 chip（中文短标签也能搜）', actionChips(tree).length === 1 && textOf(actionChips(tree)[0]).indexOf('拉取') >= 0)
+ok('输入「拉取」命中拉取 chip（中文短标签也能搜）', actionChips(tree).length === 1 && ariaOf(actionChips(tree)[0]).indexOf('拉取') >= 0)
 box = byClass(tree, 'dsh-git-bs-search')[0]
 box.props.onChange({ target: { value: 'feat' } })
 await wait(10)
@@ -477,7 +479,7 @@ host.call = realCall
 console.log('')
 console.log('== 新建分支（内联输入）==')
 let t3 = await settle('pop')
-const newAction = chips(t3).find((r) => textOf(r).indexOf('新建分支') >= 0)
+const newAction = chips(t3).find((r) => ariaOf(r).indexOf('新建分支') >= 0)
 newAction.props.onClick({ stopPropagation() {} })
 await wait(10)
 t3 = await settle('pop')
