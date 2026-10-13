@@ -1,3 +1,13 @@
 test/.last-run.json
 bridge.log
 node_modules/
+
+# 凭据：任何 token、私钥、本机配置都不得进仓库
+.env
+.env.*
+.npmrc
+.credentials*
+credentials.json
+*.pem
+*.key
+*.p12
